@@ -1,0 +1,61 @@
+$_root_dir + "/data/rule.md" -> rule_path
+$_root_dir + "/data/table.md" -> table_path
+$_root_dir + "/data/default_WHERE_clause.txt" -> default_clause_path
+
+@_read_file(file_path=$rule_path) -> rule
+@_read_file(file_path=$table_path) -> table
+@_read_file(file_path=$default_clause_path) -> default_clause
+
+/prompt/(model=qwen-plus)现在要从一些业务知识中找到对某个问题的解决必要的部分
+
+【业务规则】
+```
+$rule
+```
+
+【问题】
+```
+$query
+```
+
+【注意】
+    - 请完成思考，然后【完整】的输出【相关】的业务规则内容，不相关的业务规则不要给出
+
+请不要返回别的内容，直接返回结果，现在开始 -> key_rules
+
+ /explore/(tools=$tools, mode=$explore_mode) 现在要解决一个重要的问题
+
+【schema信息】
+```
+$table
+```
+
+【撰写 sql 的where clause要满足的要求】
+```
+$default_clause
+```
+!!务必牢记要【完整】的满足 SQL WHERE CLAUSE 的要求，不要出现遗漏!!
+
+【业务规则】
+```
+$key_rules.answer
+```
+
+【db】
+```
+$db_id
+```
+
+【问题】
+```
+$choice_question
+```
+
+【注意】
+    - 数据库是 oracle，请注意sql 生成格式，比如语句结果不需要分号
+    - 生成 sql 时再次确认 where clause 所有条件都被包括
+    - sql中，表名称前记得加上 schema，如“WATSONS.DWS_ORDER_ITEM_STAFF_ORDER_BY_DAY”
+
+现在请思考，后生成最终正确的的答案，成功再进行返回，否则继续调整
+返回结果需要使用```进行包裹，如：```A,B,C``` 或者 ```D```
+现在请开始 -> final_result

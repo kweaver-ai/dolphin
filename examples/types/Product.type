@@ -1,0 +1,21 @@
+{
+  "title": "Product",
+  "description": "产品信息，包含名称、价格和描述",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "产品名称"
+    },
+    "price": {
+      "type": "number",
+      "description": "产品价格",
+      "minimum": 0
+    },
+    "description": {
+      "type": "string",
+      "description": "产品描述"
+    }
+  },
+  "required": ["name", "price", "description"]
+} 

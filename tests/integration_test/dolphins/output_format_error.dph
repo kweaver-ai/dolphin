@@ -1,0 +1,4 @@
+# Output Format Error Handling Test
+# Tests error handling for invalid output format specification
+
+/prompt/(output="invalid_format") Generate some text content containing text 'invalid output format'. -> result 

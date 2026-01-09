@@ -1,0 +1,3 @@
+/prompt/(system_prompt="你是一个创作助手")创作一首关于春天的简短诗歌，包含“春”字 -> llm_result
+/explore/(tools=[poemWriterStream])再创作一首诗，包含“诗”字 -> explore_result
+/judge/(system_prompt="", tools=[])总结以上内容，包含“总结”二字: $explore_result.answer -> judge_result 

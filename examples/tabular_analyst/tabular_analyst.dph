@@ -1,0 +1,17 @@
+@DESC
+Extract information from data files and perform analysis
+@DESC
+
+/explore/(tools=[_python]) Please
+(1) Understand the structure of file [$query], carefully analyze data format and layout, understand schema, the file is accessible
+(2) Perform careful data analysis to gain insights from various dimensions, use python tool if calculation is needed
+(3) Form your own analysis and conclusions
+
+[IMPORTANT] Stateful Python execution is now supported!
+- Your variables (e.g. dataframes, calculation results) will persist reliably across multiple calls
+- Module imports will attempt to recover automatically, but if you encounter NameError (e.g. "pd is not defined"), simply re-import
+- You can perform analysis in steps, fully utilizing the advantages of state persistence
+- session_id is automatically retrieved from context, no manual specification needed
+- plan first and then execute! 
+
+Please start -> final_result

@@ -1,0 +1,138 @@
+# MkDocs 配置文件
+# Dolphin Language SDK 文档
+
+site_name: Dolphin Language SDK 文档
+site_description: Dolphin Language SDK - AI工作流编排框架
+site_url: http://localhost:30050
+repo_url: https://devops.aishu.cn/AISHUDevOps/DIP/_git/dolphin-language
+repo_name: DIP/dolphin-language
+
+# 主题配置
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色模式
+    - scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: 切换到浅色模式
+
+# 扩展
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+  - admonition
+  - def_list
+  - footnotes
+  - toc:
+      permalink: true
+      title: 在此页面上
+
+# 导航结构
+nav:
+  - 首页: index.md
+  - 快速开始:
+    - 安装: getting-started/installation.md
+    - 快速入门: getting-started/quickstart.md
+    - 基础概念: getting-started/basics.md
+  - 语言规范:
+    - DSL语法: language_rules.md
+    - 代码块类型: language/code_blocks.md
+  - 核心功能:
+    - 多智能体: core/agents.md
+    - 内存系统: core/memory.md
+    - 长期记忆: core/long_term_memory.md
+    - 功能标志: core/feature_flags.md
+    - 功能标志管理设计: function/feature_flags_management_design.md
+    - 变量格式指南: function/dolphin_language_sdk_variable_format_guide.md
+    - 输出格式使用: function/output_format_usage_guide.md
+  - 技能系统:
+    - 技能加载重构: skill_loading_refactor.md
+    - MCP集成: skill/mcp_integration_design.md
+    - 记忆技能套件: skill/memory_skillkit_upgrade_design.md
+    - 技能Hook指南: skill/skillkit_hook_guide.md
+    - 技能结果类图: skill/skill_results_class_diagram.md
+  - 上下文工程:
+    - 上下文工程指南: context_engineer/context_engineer_guide.md
+    - 上下文工程V2: context_engineer/context_engineer_v2.md
+    - 长期记忆设计: context_engineer/long_term_memory_design.md
+    - 智能体上下文手册: context_engineer/agentic_context_playbook_design.md
+  - 开发指南:
+    - 使用MkDocs: use_mkdocs.md
+  - 架构设计:
+    - 智能体架构指南: architecture/agent_architecture_guide.md
+    - 协程执行设计: architecture/coroutine_execution_design.md
+    - 协程系统: architecture/coroutine.md
+    - 运行时跟踪架构: architecture/runtime_tracking_architecture_guide.md
+    - 详细实现摘要: verbose_implementation_summary.md
+  - 实验框架:
+    - 实验优化设计: experiments/siminject_apo_prompt_optimizer_design.md
+    - 语义训练设计: experiments/dolphin_semantic_training_design.md
+    - 实验框架: experiments/experiments.md
+  - 更新日志:
+    - CHANGELOG.md
+
+# 插件
+plugins:
+  - search
+
+# 排除不作为站点页面的仓库入口文件
+exclude_docs: |
+  README.md
+
+# 额外配置
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/your-org/dolphin-language
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/your-org
+
+# 静态文件
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+  - javascripts/mermaid.min.js
+  - javascripts/mermaid-init.js
+
+# 监听文件
+watch:
+  - src/DolphinLanguageSDK/
+  - docs/
+
+# 开发服务器配置
+dev_addr: '0.0.0.0:30050'

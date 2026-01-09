@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+实验分析主入口脚本
+
+这是推荐的统一入口点，提供所有实验分析功能：
+
+使用方法:
+    # 总体分析（默认）
+    python analyze.py bird_baseline_20250804_105810
+    python analyze.py bird_baseline_20250804_105810 --general
+    
+    # 智能体执行分析
+    python analyze.py bird_baseline_20250804_105810 --analysis --run run_001 --case 001
+
+架构说明:
+    - analyze.py: 统一入口和命令行解析
+    - experiment_coordinator.py: 核心协调逻辑和模块管理
+    - general_reporter.py: 总体报告生成
+    - execution_analyzer.py: 智能体执行分析
+    - experiment_analyzer.py: 数据加载器（重用现有逻辑）
+"""
+
+import sys
+import os
+from pathlib import Path
+# Add analyst directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "analyst"))
+from experiment_coordinator import ExperimentCoordinator
+from simulation_inject import SimulationInjector
+
+
+def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="实验分析便捷入口脚本")
+    parser.add_argument("experiment_path", help="实验目录路径 (experiments/env下的目录)")
+    
+    # 分析模式选项
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--general", action="store_true",
+                           help="执行总体分析模式（生成综合报告）")
+    mode_group.add_argument("--analysis", action="store_true",
+                           help="执行智能体执行分析模式")
+    mode_group.add_argument("--cross-run-analysis", action="store_true",
+                           help="执行跨run分析模式，根据正确率阈值筛选cases")
+    mode_group.add_argument("--sim-inject", action="store_true",
+                           help="执行模拟注入模式，通过注入优化后的prompt来改进困难case的执行结果")
+
+    # 智能体执行分析参数
+    parser.add_argument("--run", help="指定run名称（用于--analysis模式）")
+    parser.add_argument("--case", help="指定case编号（在 --analysis 或 --cross-run-analysis 模式下均可用；支持 case_001、001 或 1）")
+    parser.add_argument("--summary", action="store_true", help="执行summary分析模式（用于--analysis --run模式）")
+    parser.add_argument("--failed-only", action="store_true", help="仅分析失败的cases（用于--analysis --run模式）")
+    parser.add_argument("--knows", help="业务知识文件或文件夹路径（用于--analysis模式）")
+
+    # 跨run分析参数
+    parser.add_argument("--max-accuracy", type=float,
+                       help="最高正确率阈值（百分比，如30表示30%%），筛选正确率低于此值的cases进行分析")
+    parser.add_argument("--report-csv", help="指定general report CSV文件路径，用于读取正确率数据")
+
+    # 模拟注入参数
+    parser.add_argument("--case_id", help="指定要进行模拟注入的case ID（可选，不指定则处理所有低准确率cases）")
+    parser.add_argument("--entrypoint", help="替换执行的entrypoint")
+    parser.add_argument("--inject-var", default="injects", help="注入变量名，默认为injects")
+    parser.add_argument("--sim-timeout", type=int, default=500,
+                        help="模拟注入阶段子进程超时（秒）。0 表示不限制，默认 500 秒")
+    parser.add_argument("--max-iterations", type=int, default=5,
+                        help="每个case的最大模拟迭代次数，默认5次")
+    parser.add_argument("--accuracy-threshold", type=float, default=10.0,
+                        help="批量处理时的正确率阈值（百分比），仅处理低于此值的cases，默认10%%")
+    parser.add_argument("--top-n", type=int, default=5,
+                        help="聚合注入时选择前N个最受欢迎的候选注入，默认5个")
+
+    args = parser.parse_args()
+    
+    experiment_input = args.experiment_path
+
+    # 构建完整路径
+    if os.path.isabs(experiment_input):
+        experiment_path = Path(experiment_input)
+    else:
+        # 相对路径，基于experiments/env目录
+        script_dir = Path(__file__).parent.parent
+        experiment_path = script_dir / "env" / experiment_input
+
+    if not experiment_path.exists():
+        print(f"错误: 实验路径不存在: {experiment_path}")
+
+        # 列出可用的实验
+        env_dir = Path(__file__).parent.parent / "env"
+        if env_dir.exists():
+            experiments = [d.name for d in env_dir.iterdir() if d.is_dir()]
+            if experiments:
+                print(f"\n可用的实验:")
+                for exp in sorted(experiments):
+                    print(f"  {exp}")
+        return 1
+
+    print(f"开始分析实验: {experiment_path.name}")
+    print(f"实验路径: {experiment_path}")
+    print("-" * 60)
+
+    # 创建协调器
+    coordinator = ExperimentCoordinator(experiment_path)
+
+    # 根据模式选择执行路径
+    if args.sim_inject:
+        # 模拟注入模式（智能优化） -> 使用独立的 SimulationInjector 实现
+        injector = SimulationInjector(
+            experiment_path=experiment_path,
+            data_loader=coordinator.data_loader,
+            cross_run_analysis_callback=coordinator.run_cross_run_analysis,
+        )
+        if args.case_id:
+            # 单个case处理
+            print("🚀 启动智能模拟注入模式 (基于InjectsOptimizer)")
+            success = injector.run_simulation_inject(
+                case_id=args.case_id,
+                entrypoint=args.entrypoint,
+                inject_var=args.inject_var,
+                knowledge_path=args.knows,
+                max_iterations=args.max_iterations,
+                timeout_seconds=args.sim_timeout,
+                top_n=args.top_n,
+            )
+        else:
+            # 批量处理低准确率的cases
+            success = injector.run_batch_simulation_inject(
+                accuracy_threshold=args.accuracy_threshold,
+                entrypoint=args.entrypoint,
+                inject_var=args.inject_var,
+                knowledge_path=args.knows,
+                max_iterations=args.max_iterations,
+                timeout_seconds=args.sim_timeout,
+                top_n=args.top_n,
+            )
+        return 0 if success else 1
+    elif args.cross_run_analysis:
+        # 跨run分析模式
+        # 当指定了具体的case时，不强制要求max_accuracy（默认使用100）
+        if not args.max_accuracy and not args.case:
+            print("错误: --cross-run-analysis模式需要指定 --max-accuracy 参数（除非指定了 --case）")
+            print("使用方法: ")
+            print("  分析所有低于阈值的cases: python analyze.py <experiment> --cross-run-analysis --max-accuracy <threshold>")
+            print("  分析特定case: python analyze.py <experiment> --cross-run-analysis --case <case_num>")
+            print("示例: python analyze.py watsons_baseline --cross-run-analysis --max-accuracy 30")
+            return 1
+
+        # 如果指定了case但没有max_accuracy，使用100作为默认值（包含所有case）
+        max_accuracy = args.max_accuracy if args.max_accuracy is not None else (100 if args.case else None)
+
+        success = coordinator.run_cross_run_analysis(
+            max_accuracy=max_accuracy,
+            report_csv=args.report_csv,
+            knowledge_path=args.knows,
+            enable_summary=args.summary,
+            case=args.case
+        )
+        return 0 if success else 1
+    elif args.analysis or (not args.general and not args.cross_run_analysis and (args.run or args.case or args.summary)):
+        # 检查summary模式的参数要求
+        if args.summary:
+            if not args.run:
+                print("错误: --summary模式需要指定 --run 参数")
+                print("使用方法: python analyze.py <experiment> --analysis --run <run_name> --summary")
+                return 1
+            # summary模式
+            success = coordinator.run_summary_analysis(args.run, knowledge_path=args.knows)
+            return 0 if success else 1
+        else:
+            # 智能体执行分析模式
+            if not args.run:
+                print("错误: --analysis模式需要指定 --run 参数")
+                print("使用方法:")
+                print("  分析单个case: python analyze.py <experiment> --analysis --run <run_name> --case <case_num>")
+                print("  分析所有失败cases: python analyze.py <experiment> --analysis --run <run_name>")
+                print("  仅分析失败cases: python analyze.py <experiment> --analysis --run <run_name> --failed-only")
+                return 1
+
+            if args.case:
+                # 分析单个case
+                success = coordinator.run_execution_analysis(args.run, args.case, knowledge_path=args.knows)
+                return 0 if success else 1
+            else:
+                # 批量分析cases（默认失败的或全部）
+                success = coordinator.run_batch_execution_analysis(args.run, failed_only=(args.failed_only or True), knowledge_path=args.knows)
+                return 0 if success else 1
+    else:
+        # 总体分析模式（默认）
+        success = coordinator.run_general_analysis()
+        return 0 if success else 1
+
+
+if __name__ == "__main__":
+    exit(main())

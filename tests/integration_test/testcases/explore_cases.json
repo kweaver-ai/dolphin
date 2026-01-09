@@ -1,0 +1,31 @@
+{
+  "testSuite": {
+    "name": "Dolphin Language Integration Tests",
+    "description": "End-to-end integration tests for Dolphin Language functionality",
+    "version": "1.0.0"
+  },
+  "testCases": [
+    {
+      "name": "explore_test_1",
+      "description": "测试使用 poemWriterStream 和 saveToLocal 工具创作秋天主题诗歌并保存到本地文件",
+      "timeout": 30,
+      "parameters": {
+        "query": "写一首关于秋天的诗，将诗保存到本地文件/tmp/poem.txt中。",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/explore_1.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "timeout", "连接失败"],
+        "tools": [
+          "poemWriterStream",
+          "saveToLocal"
+        ],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": true
+      }
+    }
+  ]
+} 

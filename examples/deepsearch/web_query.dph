@@ -1,0 +1,13 @@
+/explore/(model="qwen-plus", tools=[_search]) 
+Now we need to use search tools to find answers to the question
+
+The question is as follows
+```
+$query
+```
+
+[[! ATTENTION !]]
+Need to ensure the completeness of the question, may require multiple searches and reflections
+[[! ATTENTION !]]
+
+Now please begin -> first_result

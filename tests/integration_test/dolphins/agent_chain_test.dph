@@ -1,0 +1,3 @@
+@simple_agent_test(input_param="Hello from chain test") -> first_result
+@simple_agent_test(input_param=$first_result) -> second_result
+{"chain_step_1": $first_result, "chain_step_2": $second_result} -> final_result

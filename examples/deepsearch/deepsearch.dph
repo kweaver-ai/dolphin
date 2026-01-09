@@ -1,0 +1,23 @@
+'''
+Think boldly, verify carefully
+
+!NOTICE!
+(0) Carefully examine the question; a clear and thorough understanding of the topic is the foundation of everything
+(1) Knowledge from memory is very likely to be outdated or inaccurate, and must be verified
+(2) Prioritize conditions with the highest discrimination and distinctiveness, as this can quickly and greatly narrow down the search scope
+(3) Hypothetical conclusions may be incorrect; if reasoning cannot proceed, promptly correct and redirect
+''' -> system
+
+/explore/(model="qwen-plus", tools=[web_query, _cog_think], system_prompt=$system) 
+Now we need to formulate a plan to solve the problem and use tools to get answers. 
+The goal is to quickly find correct and rigorous solutions
+```
+$query
+```
+
+The approach is as follows
+```
+$thought
+```
+
+Now please begin -> first_result

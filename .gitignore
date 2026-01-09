@@ -1,0 +1,59 @@
+# Python
+.venv
+venv
+*.pyc
+__pycache__/
+*.egg-info/
+build/
+dist/
+*.log
+
+# IDE
+.vscode
+.idea
+/.idea/*.xml
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# Project specific
+vendor
+go.sum
+*.exe
+hooks
+hooks/*
+lfs
+lfs/*
+result_html
+src/DolphinLanguageSDK/tests
+src/DolphinLanguageSDK/tests/**
+*/global.yaml*
+data/*
+**/data/
+CLAUDE.md
+.claude
+.tmp
+
+# Sensitive files
+.env
+.coverage
+
+# Config directory - only ignore sensitive files, keep templates
+/config/global.yaml
+/config/*.local.yaml
+!/config/*.template.yaml
+
+# Node.js
+node_modules/
+
+# Experiment environment data
+experiments/env/
+.specify
+CLAUDE-riper5.md
+
+# Dev-browser skill
+examples/dev-browser/skills/dev-browser/profiles/
+examples/dev-browser/skills/dev-browser/tmp/

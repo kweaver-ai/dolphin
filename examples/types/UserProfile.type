@@ -1,0 +1,127 @@
+{
+  "title": "UserProfile",
+  "description": "用户档案信息，包含个人基本信息和技能",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "用户的真实姓名"
+    },
+    "age": {
+      "type": "integer",
+      "description": "用户的年龄",
+      "minimum": 0,
+      "maximum": 150
+    },
+    "email": {
+      "type": "string",
+      "description": "用户的电子邮箱地址",
+      "format": "email"
+    },
+    "phone": {
+      "type": "string",
+      "description": "用户的手机号码"
+    },
+    "profession": {
+      "type": "string",
+      "description": "用户的职业"
+    },
+    "skills": {
+      "type": "array",
+      "description": "用户掌握的技能列表",
+      "items": {
+        "type": "string"
+      }
+    },
+    "address": {
+      "type": "object",
+      "description": "用户的地址信息",
+      "properties": {
+        "street": {
+          "type": "string",
+          "description": "街道地址"
+        },
+        "city": {
+          "type": "string",
+          "description": "所在城市"
+        },
+        "province": {
+          "type": "string",
+          "description": "所在省份"
+        },
+        "zipcode": {
+          "type": "string",
+          "description": "邮政编码"
+        }
+      },
+      "required": ["city"]
+    },
+    "education": {
+      "type": "object",
+      "description": "教育背景",
+      "properties": {
+        "degree": {
+          "type": "string",
+          "description": "学历程度",
+          "enum": ["高中", "大专", "本科", "硕士", "博士"]
+        },
+        "school": {
+          "type": "string",
+          "description": "毕业院校"
+        },
+        "major": {
+          "type": "string",
+          "description": "专业"
+        },
+        "graduation_year": {
+          "type": "integer",
+          "description": "毕业年份"
+        }
+      }
+    },
+    "experience_years": {
+      "type": "integer",
+      "description": "工作经验年数",
+      "minimum": 0
+    },
+    "salary_expectation": {
+      "type": "object",
+      "description": "薪资期望",
+      "properties": {
+        "min": {
+          "type": "number",
+          "description": "最低期望薪资"
+        },
+        "max": {
+          "type": "number", 
+          "description": "最高期望薪资"
+        },
+        "currency": {
+          "type": "string",
+          "description": "货币单位",
+          "default": "CNY"
+        }
+      }
+    },
+    "languages": {
+      "type": "array",
+      "description": "掌握的语言",
+      "items": {
+        "type": "object",
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "语言名称"
+          },
+          "level": {
+            "type": "string",
+            "description": "掌握程度",
+            "enum": ["初级", "中级", "高级", "母语"]
+          }
+        },
+        "required": ["language", "level"]
+      }
+    }
+  },
+  "required": ["name", "age", "profession"]
+} 

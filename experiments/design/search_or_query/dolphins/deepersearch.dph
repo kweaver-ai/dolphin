@@ -1,0 +1,24 @@
+/prompt/(output="list_str", model="k2") 
+现在我们要 brainstorm 的精神为问题的解决设计两条完全不同的思路
+
+```
+$query
+```
+
+现在请开始 -> thoughts
+
+/for/ $thought in $thoughts:
+    @deepsearch(query=$query) >> results
+/end/
+
+/prompt/(model="qwen-plus")请根据 query 和不同思路的结果进行总结和判断，得出最终结论
+query
+```
+$query
+```
+
+部分结论
+```
+$results
+```
+ -> final_result

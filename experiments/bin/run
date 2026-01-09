@@ -1,0 +1,2320 @@
+#!/usr/bin/env python3
+"""
+Run script for Dolphin Language experiments.
+
+Usage:
+    ./experiments/bin/run --name experiment_name                    # Run full experiment
+    ./experiments/bin/run --name experiment_name --status          # Check experiment status
+    ./experiments/bin/run --name experiment_name --list-envs       # List all experiment executions
+    ./experiments/bin/run --name experiment_name --resume-from N   # Resume from run N
+    ./experiments/bin/run --name experiment_name --env-id ID       # Use specific experiment execution
+
+Examples:
+    # Start a new experiment
+    ./experiments/bin/run --name bird_baseline
+
+    # List all experiment executions
+    ./experiments/bin/run --name bird_baseline --list-envs
+
+    # Check status of the most recent experiment execution
+    ./experiments/bin/run --name bird_baseline --status
+
+    # Check status of a specific experiment execution
+    ./experiments/bin/run --name bird_baseline --env-id bird_baseline_20250828_052443 --status
+
+    # Resume from run 5 in the most recent experiment execution
+    ./experiments/bin/run --name bird_baseline --resume-from 5
+
+    # Resume from run 3 in a specific experiment execution
+    ./experiments/bin/run --name bird_baseline --env-id bird_baseline_20250828_052443 --resume-from 3
+
+The script automatically detects the most recent experiment environment when not specified.
+"""
+
+import os
+import sys
+import argparse
+import shutil
+from datetime import datetime
+from pathlib import Path
+import yaml
+import itertools
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from DolphinLanguageSDK.log import get_logger
+from DolphinLanguageSDK.constant import (
+    DOLPHIN_VARIABLES_OUTPUT_START,
+    DOLPHIN_VARIABLES_OUTPUT_END,
+)
+
+logger = get_logger("experiment_cli")
+
+LABEL_QUERY_FIELD = "Query"
+LABEL_GOLD_LABEL_FIELD = "GoldLabel"
+LABEL_TOPIC_FIELD = "Topic"
+LABEL_PREDICTED_FIELD = "Predicted"
+
+
+def expand_array_configs(configs):
+    """
+    Merge all config dicts and expand array configurations by cross-product.
+
+    Args:
+        configs: List of configuration dictionaries
+
+    Returns:
+        List of expanded configuration dictionaries
+    """
+    # Merge all configs into one big_config
+    big_config = {}
+    for config in configs:
+        for key, value in config.items():
+            if key in big_config:
+                raise ValueError(f"Duplicate key '{key}' in configs")
+            big_config[key] = value
+
+    # Now expand the merged config
+    array_keys = []
+    array_values = []
+    single_configs = {}
+
+    for key, value in big_config.items():
+        if isinstance(value, list):
+            array_keys.append(key)
+            array_values.append(value)
+        else:
+            single_configs[key] = value
+
+    if not array_keys:
+        return [single_configs]
+
+    # Generate all combinations
+    expanded = []
+    for combination in itertools.product(*array_values):
+        new_config = single_configs.copy()
+        for i, key in enumerate(array_keys):
+            new_config[key] = combination[i]
+        expanded.append(new_config)
+
+    return expanded
+
+
+def apply_field_mapping(benchmark_data, benchmark_config):
+    """
+    Apply field mapping from benchmark configuration to benchmark data.
+
+    Args:
+        benchmark_data: List of benchmark items
+        benchmark_config: Configuration from benchmark.yaml
+
+    Returns:
+        List of benchmark items with mapped field names
+    """
+    # Default field mappings
+    default_mapping = {
+        "query_field": LABEL_QUERY_FIELD,
+        "gold_label_field": LABEL_GOLD_LABEL_FIELD,
+        "topic_field": LABEL_TOPIC_FIELD,
+    }
+
+    # Get field mapping from config, use defaults if not specified
+    field_mapping = benchmark_config.get("field_mapping", {})
+    query_field = field_mapping.get("query_field", default_mapping["query_field"])
+    gold_label_field = field_mapping.get(
+        "gold_label_field", default_mapping["gold_label_field"]
+    )
+    topic_field = field_mapping.get("topic_field", default_mapping["topic_field"])
+
+    # Apply field mapping to benchmark data
+    mapped_data = []
+    for item in benchmark_data:
+        mapped_item = item.copy()
+
+        # Map query field to LABEL_QUERY_FIELD
+        if query_field != LABEL_QUERY_FIELD and query_field in item:
+            mapped_item[LABEL_QUERY_FIELD] = item[query_field]
+
+        # Map golden answer field(s) to LABEL_GOLD_LABEL_FIELD
+        if isinstance(gold_label_field, dict):
+            # Dict format with result and context
+            answer_data = {}
+
+            # Get the main result field
+            result_field = gold_label_field.get("result")
+            if result_field and result_field in item:
+                answer_data["result"] = item[result_field]
+            else:
+                print(
+                    f"Warning: Result field '{result_field}' not found in benchmark item"
+                )
+                answer_data["result"] = None
+
+            # Get context fields
+            context_fields = gold_label_field.get("context", {})
+            if context_fields:
+                answer_data["context"] = {}
+                for context_key, field_name in context_fields.items():
+                    if field_name in item:
+                        answer_data["context"][context_key] = item[field_name]
+                    else:
+                        print(
+                            f"Warning: Context field '{field_name}' not found in benchmark item"
+                        )
+                        answer_data["context"][context_key] = None
+
+            mapped_item[LABEL_GOLD_LABEL_FIELD] = answer_data
+
+        elif isinstance(gold_label_field, str):
+            # String format - existing simple logic
+            if gold_label_field != LABEL_GOLD_LABEL_FIELD and gold_label_field in item:
+                mapped_item[LABEL_GOLD_LABEL_FIELD] = item[gold_label_field]
+        else:
+            print(
+                f"Warning: Unsupported gold_label_field format: {type(gold_label_field)}"
+            )
+
+        # Map topic field to LABEL_TOPIC_FIELD
+        if topic_field != LABEL_TOPIC_FIELD and topic_field in item:
+            mapped_item[LABEL_TOPIC_FIELD] = item[topic_field]
+
+        mapped_data.append(mapped_item)
+
+    # Print mapping information if any mappings were applied
+    mappings_applied = []
+    if query_field != default_mapping["query_field"]:
+        mappings_applied.append(f"query: {query_field} -> {LABEL_QUERY_FIELD}")
+    if gold_label_field != default_mapping["gold_label_field"]:
+        mappings_applied.append(
+            f"golden_answer: {gold_label_field} -> {LABEL_GOLD_LABEL_FIELD}"
+        )
+    if topic_field != default_mapping["topic_field"]:
+        mappings_applied.append(f"topic: {topic_field} -> {LABEL_TOPIC_FIELD}")
+
+    if mappings_applied:
+        print(f"Applied field mappings: {', '.join(mappings_applied)}")
+
+    return mapped_data
+
+
+def load_benchmark(benchmark_name, root_dir, num_run_cases=None):
+    """
+    Load benchmark data and configuration from the new benchmark structure.
+
+    Args:
+        benchmark_name: Name of the benchmark (e.g., 'browse_comp')
+        root_dir: Root directory of the project
+        num_run_cases: Optional limit on number of benchmark cases to load
+
+    Returns:
+        Tuple of (benchmark_data, benchmark_config)
+    """
+    benchmark_dir = root_dir / "experiments" / "benchmark" / "data" / benchmark_name
+
+    if not benchmark_dir.exists():
+        print(
+            f"Error: Benchmark '{benchmark_name}' not found in experiments/benchmark/data/",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Load benchmark.json
+    benchmark_file = benchmark_dir / "benchmark.json"
+    if not benchmark_file.exists():
+        print(
+            f"Error: benchmark.json not found for benchmark '{benchmark_name}'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        with open(benchmark_file, "r", encoding="utf-8") as f:
+            benchmark_data = json.load(f)
+
+        if not isinstance(benchmark_data, list):
+            print(f"Error: Benchmark file should contain a JSON array", file=sys.stderr)
+            sys.exit(1)
+
+        # Limit the number of benchmark cases if specified
+        if num_run_cases is not None and num_run_cases > 0:
+            benchmark_data = benchmark_data[:num_run_cases]
+            print(
+                f"Limited benchmark data to {len(benchmark_data)} cases (num_run_cases: {num_run_cases})"
+            )
+
+    except Exception as e:
+        print(
+            f"Error loading benchmark file for '{benchmark_name}': {e}", file=sys.stderr
+        )
+        sys.exit(1)
+
+    # Load benchmark.yaml (optional)
+    benchmark_config = {}
+    benchmark_config_file = benchmark_dir / "benchmark.yaml"
+    if benchmark_config_file.exists():
+        try:
+            with open(benchmark_config_file, "r", encoding="utf-8") as f:
+                benchmark_config = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(
+                f"Warning: Failed to load benchmark config for '{benchmark_name}': {e}"
+            )
+
+    # Load init.py if it exists (import only, skip __main__)
+    init_file = benchmark_dir / "init.py"
+    if init_file.exists():
+        try:
+            print(f"Loading initialization script for benchmark '{benchmark_name}'...")
+            # Import the module without executing __main__
+            import importlib.util
+            import sys
+
+            spec = importlib.util.spec_from_file_location("benchmark_init", init_file)
+            if spec is not None and spec.loader is not None:
+                benchmark_init = importlib.util.module_from_spec(spec)
+
+                # Temporarily add benchmark directory to sys.path
+                old_path = sys.path[:]
+                sys.path.insert(0, str(benchmark_dir))
+
+                try:
+                    spec.loader.exec_module(benchmark_init)
+                    print(f"Initialization script loaded successfully.")
+                finally:
+                    # Restore original sys.path
+                    sys.path[:] = old_path
+            else:
+                print(
+                    f"Warning: Could not create module spec for initialization script"
+                )
+        except Exception as e:
+            print(f"Warning: Failed to load initialization script: {e}")
+
+    # Apply field mapping if configured
+    benchmark_data = apply_field_mapping(benchmark_data, benchmark_config)
+
+    return benchmark_data, benchmark_config
+
+
+def parse_variables_from_log(log_content):
+    """
+    Parse variables output from dolphin log content.
+
+    Args:
+        log_content: Log file content as string
+
+    Returns:
+        Dict of variables or None if no variables found
+    """
+    try:
+        # Find the variables output section
+        start_marker = DOLPHIN_VARIABLES_OUTPUT_START
+        end_marker = DOLPHIN_VARIABLES_OUTPUT_END
+
+        start_pos = log_content.find(start_marker)
+        if start_pos == -1:
+            return None
+
+        end_pos = log_content.find(end_marker, start_pos)
+        if end_pos == -1:
+            return None
+
+        # Extract JSON content between markers
+        json_start = start_pos + len(start_marker)
+        json_content = log_content[json_start:end_pos].strip()
+
+        # Parse JSON
+        variables = json.loads(json_content)
+        return variables
+    except Exception as e:
+        print(f"Warning: Failed to parse variables from log: {e}")
+        return None
+
+
+def get_nested_value(data, path):
+    """
+    Get nested value from data using dot notation path.
+
+    Args:
+        data: Dictionary or object to extract value from
+        path: Dot-separated path like 'final_result.answer'
+
+    Returns:
+        The nested value or None if path doesn't exist
+    """
+    if not data or not path:
+        return None
+
+    try:
+        keys = path.split(".")
+        current = data
+
+        for key in keys:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return None
+
+        return current
+    except Exception as e:
+        print(f"Warning: Failed to get nested value for path '{path}': {e}")
+        return None
+
+
+def load_benchmark_module(benchmark_dir):
+    """
+    Load benchmark init module and return the module object.
+
+    Args:
+        benchmark_dir: Benchmark directory path
+
+    Returns:
+        Tuple of (benchmark_init_module, old_path) or (None, None) if failed
+    """
+    try:
+        if benchmark_dir is None:
+            return None, None
+
+        benchmark_path = Path(benchmark_dir)
+        init_file = benchmark_path / "init.py"
+
+        if not init_file.exists():
+            return None, None
+
+        # Import the init module from benchmark directory
+        import importlib.util
+        import sys
+
+        spec = importlib.util.spec_from_file_location("benchmark_init", init_file)
+        if spec is None or spec.loader is None:
+            return None, None
+
+        benchmark_init = importlib.util.module_from_spec(spec)
+
+        # Temporarily add benchmark directory to sys.path
+        old_path = sys.path[:]
+        sys.path.insert(0, str(benchmark_path))
+
+        spec.loader.exec_module(benchmark_init)
+
+        return benchmark_init, old_path
+
+    except Exception as e:
+        print(f"Warning: Failed to load benchmark module: {e}")
+        return None, None
+
+
+def apply_benchmark_conversions(gold_label, predicted, query, benchmark_dir):
+    """
+    Apply custom conversion functions from benchmark init.py if they exist.
+
+    Args:
+        gold_label: Golden/expected answer
+        predicted: Predicted/actual answer from model
+        query: Original query/question
+        benchmark_dir: Benchmark directory path
+
+    Returns:
+        Tuple of (converted_gold_label, converted_predicted, converted_query, conversion_info)
+        conversion_info is a dict with information about which conversions were applied
+    """
+    conversion_info = {
+        "gold_label_converted": False,
+        "predicted_converted": False,
+        "query_converted": False,
+    }
+
+    benchmark_init, old_path = load_benchmark_module(benchmark_dir)
+    if benchmark_init is None:
+        return gold_label, predicted, query, conversion_info
+
+    converted_gold_label = gold_label
+    converted_predicted = predicted
+    converted_query = query
+
+    try:
+        # Apply _convert_gold_label if available
+        if hasattr(benchmark_init, "_convert_gold_label"):
+            convert_gold_func = getattr(benchmark_init, "_convert_gold_label")
+            if callable(convert_gold_func):
+                try:
+                    converted_gold_label = convert_gold_func(gold_label)
+                    conversion_info["gold_label_converted"] = True
+                except Exception as e:
+                    print(f"Warning: _convert_gold_label function failed: {e}")
+
+        # Apply _convert_query if available
+        if hasattr(benchmark_init, "_convert_query"):
+            convert_query_func = getattr(benchmark_init, "_convert_query")
+            if callable(convert_query_func):
+                try:
+                    converted_query = convert_query_func(query)
+                    conversion_info["query_converted"] = True
+                except Exception as e:
+                    print(f"Warning: _convert_query function failed: {e}")
+
+        # For predicted, we can use the same converter as query since they're both "answers"
+        # But we'll check if there's a specific _convert_predicted function first
+        if hasattr(benchmark_init, "_convert_predicted"):
+            convert_predicted_func = getattr(benchmark_init, "_convert_predicted")
+            if callable(convert_predicted_func):
+                try:
+                    converted_predicted = convert_predicted_func(predicted)
+                    conversion_info["predicted_converted"] = True
+                except Exception as e:
+                    print(f"Warning: _convert_predicted function failed: {e}")
+
+    finally:
+        # Restore original sys.path
+        if old_path is not None:
+            sys.path[:] = old_path
+
+    return converted_gold_label, converted_predicted, converted_query, conversion_info
+
+
+def compare_gold_label_answer(
+    gold_label, predicted, method, config_path=None, benchmark_dir=None, query=None
+):
+    """
+    Compare gold label answer with predicted answer using specified method.
+
+    Args:
+        gold_label: Golden/expected answer
+        predicted: Predicted/actual answer from model
+        method: Comparison method ('exact_match', 'contain', 'case_insensitive', 'model', 'custom')
+        config_path: Optional path to global config file (needed for 'model' method)
+        benchmark_dir: Optional benchmark directory path (needed for 'custom' method)
+        query: Original query/question (needed for 'custom' method with conversions)
+
+    Returns:
+        dict: {
+            'is_correct': bool or None,
+            'converted_gold_label': converted value or original,
+            'converted_predicted': converted value or original,
+            'converted_query': converted value or original,
+            'conversion_info': dict with conversion status
+        }
+    """
+    # Initialize return structure
+    result = {
+        "is_correct": None,
+        "converted_gold_label": gold_label,
+        "converted_predicted": predicted,
+        "converted_query": query,
+        "conversion_info": {
+            "gold_label_converted": False,
+            "predicted_converted": False,
+            "query_converted": False,
+        },
+    }
+
+    if gold_label is None or predicted is None:
+        result["is_correct"] = False
+        return result
+
+    # Apply conversions for custom method
+    if benchmark_dir:
+        converted_gold_label, converted_predicted, converted_query, conversion_info = (
+            apply_benchmark_conversions(gold_label, predicted, query, benchmark_dir)
+        )
+        result["converted_gold_label"] = converted_gold_label
+        result["converted_predicted"] = converted_predicted
+        result["converted_query"] = converted_query
+        result["conversion_info"] = conversion_info
+
+        # Use converted values for comparison
+        comparison_gold = converted_gold_label
+        comparison_predicted = converted_predicted
+    else:
+        # Use original values for non-custom methods
+        comparison_gold = gold_label
+        comparison_predicted = predicted
+
+    if method == "exact_match":
+        # Exact string match after normalization
+        result["is_correct"] = (
+            str(comparison_gold).strip() == str(comparison_predicted).strip()
+        )
+    elif method == "contain":
+        # Contain string match after normalization
+        result["is_correct"] = (
+            str(comparison_gold).strip().lower()
+            in str(comparison_predicted).strip().lower()
+        )
+    elif method == "case_insensitive":
+        # Case-insensitive string match after normalization
+        result["is_correct"] = (
+            str(comparison_gold).strip().lower()
+            == str(comparison_predicted).strip().lower()
+        )
+    elif method == "model":
+        # LLM-based comparison using semantic understanding
+        try:
+            # Import the LLM comparison module from the same directory
+            script_dir = Path(__file__).parent.parent
+            sys.path.insert(0, str(script_dir))
+
+            from llm_benchmark_compare import compare_answers_with_llm
+
+            llm_result = compare_answers_with_llm(
+                comparison_gold, comparison_predicted, config_path
+            )
+            if llm_result is None:
+                print(
+                    f"Warning: LLM-based comparison failed, falling back to exact_match"
+                )
+                result["is_correct"] = (
+                    str(comparison_gold).strip() == str(comparison_predicted).strip()
+                )
+            else:
+                result["is_correct"] = llm_result
+
+        except Exception as e:
+            print(
+                f"Warning: LLM-based comparison failed with error: {e}, falling back to exact_match"
+            )
+            result["is_correct"] = (
+                str(comparison_gold).strip() == str(comparison_predicted).strip()
+            )
+    elif method == "custom":
+        # Custom comparison using _comparator function from benchmark's init.py
+        try:
+            if benchmark_dir is None:
+                print(f"Warning: Custom comparison requires benchmark_dir parameter")
+                result["is_correct"] = None
+                return result
+
+            benchmark_init, old_path = load_benchmark_module(benchmark_dir)
+            if benchmark_init is None:
+                print(
+                    f"Warning: Custom comparison requires init.py file in benchmark directory: {benchmark_dir}"
+                )
+                result["is_correct"] = None
+                return result
+
+            try:
+                # Look for _comparator function
+                if not hasattr(benchmark_init, "_comparator"):
+                    print(
+                        f"Warning: Custom comparison requires _comparator(golden, answer) function in init.py"
+                    )
+                    result["is_correct"] = None
+                    return result
+
+                comparator_func = getattr(benchmark_init, "_comparator")
+                if not callable(comparator_func):
+                    print(f"Warning: _comparator must be a callable function")
+                    result["is_correct"] = None
+                    return result
+
+                # Call the custom comparator with converted values
+                comparison_result = comparator_func(
+                    comparison_gold, comparison_predicted
+                )
+
+                # Ensure result is boolean
+                if not isinstance(comparison_result, bool):
+                    print(
+                        f"Warning: _comparator function must return a boolean, got {type(comparison_result)}"
+                    )
+                    result["is_correct"] = None
+                    return result
+
+                result["is_correct"] = comparison_result
+
+            finally:
+                # Restore original sys.path
+                if old_path is not None:
+                    sys.path[:] = old_path
+
+        except Exception as e:
+            print(
+                f"Warning: Custom comparison failed with error: {e}, falling back to exact_match"
+            )
+            result["is_correct"] = (
+                str(comparison_gold).strip() == str(comparison_predicted).strip()
+            )
+    else:
+        print(f"Warning: Unsupported benchmark comparison method: {method}")
+        result["is_correct"] = None
+
+    return result
+
+
+def extract_all_stages_from_variables(extracted_variables):
+    """
+    Extract progress information from extracted variables.
+
+    Args:
+        extracted_variables: Dictionary containing extracted variables from dolphin run
+
+    Returns:
+        List of progress entries or None if no progress found
+    """
+    try:
+        if not extracted_variables:
+            return None
+
+        progress_data = extracted_variables.get("_all_stages")
+        if not progress_data:
+            return None
+
+        # Ensure progress_data is a list
+        if not isinstance(progress_data, list):
+            return None
+
+        # Convert progress data to serializable format
+        progress_entries = []
+        for stage in progress_data:
+            if isinstance(stage, dict):
+                progress_entries.append(stage)
+
+        return progress_entries if progress_entries else None
+
+    except Exception as e:
+        print(f"Warning: Failed to extract progress information: {e}")
+        return None
+
+
+def check_must_execute_skills(extracted_variables, must_execute):
+    """
+    Check if all must_execute skills were called at least once.
+
+    Args:
+        extracted_variables: Dictionary containing extracted variables from dolphin run
+        must_execute: List of skill names that must be executed
+
+    Returns:
+        Tuple of (is_valid, missing_skills) where is_valid is True if all must_execute skills were called
+    """
+    if not must_execute:
+        return True, []
+
+    if not extracted_variables:
+        return False, must_execute
+
+    # Get all stages
+    stages = extracted_variables.get("_all_stages", [])
+    if not stages:
+        return False, must_execute
+
+    # Extract all executed skill names
+    executed_skills = set()
+    for stage in stages:
+        if isinstance(stage, dict):
+            skill_info = stage.get("skill_info")
+            if skill_info and isinstance(skill_info, dict):
+                skill_name = skill_info.get("name")
+                if skill_name:
+                    executed_skills.add(skill_name)
+
+    # Check which must_execute skills are missing
+    missing_skills = []
+    for skill in must_execute:
+        if skill not in executed_skills:
+            missing_skills.append(skill)
+
+    is_valid = len(missing_skills) == 0
+    return is_valid, missing_skills
+
+
+def extract_dialog_from_history_files(history_temp_dir, case_index, benchmark_item):
+    """
+    Extract dialog history from Dolphin-generated dialog files and format as JSONL.
+
+    Args:
+        history_temp_dir: Directory where Dolphin saves dialog files
+        case_index: Case index (1-based)
+        benchmark_item: Benchmark item containing question and metadata
+
+    Returns:
+        List of dialog entries or None if extraction fails
+    """
+    try:
+        dialog_entries = []
+        dialog_found = False
+
+        # Search for dialog files in the history directory
+        if history_temp_dir.exists():
+            # Look for any .jsonl files in history directory
+            dialog_files = list(history_temp_dir.glob("*.jsonl"))
+
+            # Sort by modification time to get the most recent ones first
+            dialog_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+            for dialog_file in dialog_files:
+                try:
+                    with open(dialog_file, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    entry = json.loads(line)
+                                    # Ensure both user and assistant content are included
+                                    if "role" in entry and entry["role"] in (
+                                        "user",
+                                        "assistant",
+                                    ):
+                                        # Add case metadata
+                                        if "metadata" not in entry:
+                                            entry["metadata"] = {}
+                                        entry["metadata"]["topic"] = benchmark_item.get(
+                                            "Topic", ""
+                                        )
+                                        dialog_entries.append(entry)
+                                        dialog_found = True
+                                except json.JSONDecodeError as e:
+                                    print(f"Warning: Failed to parse dialog line: {e}")
+                                    continue
+                    # If we found dialog entries in this file, break to avoid duplicates
+                    if dialog_entries:
+                        break
+                except Exception as e:
+                    print(f"Warning: Failed to read dialog file {dialog_file}: {e}")
+                    continue
+
+        # If no complete dialog found, create basic dialog from benchmark item
+        if not dialog_found and benchmark_item and LABEL_QUERY_FIELD in benchmark_item:
+            dialog_entries.append(
+                {
+                    "role": "user",
+                    "content": benchmark_item[LABEL_QUERY_FIELD],
+                    "timestamp": datetime.now().isoformat(),
+                    "metadata": {
+                        "topic": benchmark_item.get("Topic", ""),
+                    },
+                }
+            )
+
+        return dialog_entries
+
+    except Exception as e:
+        print(f"Warning: Failed to extract dialog history: {e}")
+        return None
+
+
+def sample_configurations(
+    entrypoints,
+    configs,
+    num_samples,
+    sample_method,
+    benchmark_data=None,
+    variables=None,
+):
+    """
+    Sample experiment configurations based on the specified method.
+
+    Args:
+        entrypoints: List of entrypoint files
+        configs: List of configuration dictionaries
+        num_samples: Number of samples to generate
+        sample_method: Sampling method (currently only 'SEQ' supported)
+        benchmark_data: Optional list of benchmark items
+        variables: Optional dictionary of variables, where list values will be expanded
+
+    Returns:
+        List of tuples: [(entrypoint, config, benchmark_data_list, variables_dict), ...]
+        Note: benchmark_data_list contains ALL benchmark items for each run
+    """
+    # Expand configurations with arrays
+    expanded_configs = expand_array_configs(configs)
+
+    # Handle variables expansion
+    expanded_variables_list = [{}]  # Default empty dict if no variables
+    if variables:
+        # Split variables into array and non-array parts
+        array_vars = {}
+        fixed_vars = {}
+        for key, value in variables.items():
+            if isinstance(value, list):
+                array_vars[key] = value
+            else:
+                fixed_vars[key] = value
+
+        if array_vars:
+            # Generate all possible combinations of array variables
+            var_keys = list(array_vars.keys())
+            var_values = list(array_vars.values())
+            var_combinations = list(itertools.product(*var_values))
+
+            # Create dictionaries for each combination
+            expanded_variables_list = []
+            for combination in var_combinations:
+                var_dict = fixed_vars.copy()  # Start with fixed variables
+                for i, key in enumerate(var_keys):
+                    var_dict[key] = combination[i]
+                expanded_variables_list.append(var_dict)
+        else:
+            # No array variables, just use the fixed variables
+            expanded_variables_list = [fixed_vars]
+
+    # Generate all possible entrypoint+config+variables combinations
+    config_combinations = list(
+        itertools.product(entrypoints, expanded_configs, expanded_variables_list)
+    )
+    total_config_combinations = len(config_combinations)
+
+    # Limit num_samples to the maximum possible config combinations
+    actual_samples = min(num_samples, total_config_combinations)
+
+    if sample_method == "SEQ":
+        # Sequential sampling - take the first N config combinations
+        sampled_config_combinations = config_combinations[:actual_samples]
+    else:
+        print(
+            f"Error: Unsupported sample_method '{sample_method}'. Only 'SEQ' is supported.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Each run gets the same benchmark data (all benchmark items)
+    # This allows comparing different configs on the same test cases
+    sampled_combinations = []
+    for entrypoint, config, vars_dict in sampled_config_combinations:
+        sampled_combinations.append((entrypoint, config, benchmark_data, vars_dict))
+
+    print(f"Total possible config combinations: {total_config_combinations}")
+    print(f"Requested samples: {num_samples}")
+    print(f"Actual samples: {actual_samples}")
+    if benchmark_data:
+        print(f"Each run will test all {len(benchmark_data)} benchmark cases")
+    if variables:
+        print(f"Variables combinations: {len(expanded_variables_list)}")
+        if len(expanded_variables_list) > 1:
+            array_vars = {k: v for k, v in variables.items() if isinstance(v, list)}
+            print(f"Expanded array variables: {list(array_vars.keys())}")
+
+    return sampled_combinations
+
+
+def apply_config_to_global_yaml(config_path, config):
+    """
+    Apply experiment configuration to global.yaml file.
+
+    Args:
+        config_path: Path to global.yaml file
+        config: Configuration dictionary to apply
+    """
+    with open(config_path, "r") as f:
+        global_config = yaml.safe_load(f)
+
+    # Apply exp_config
+    for key, value in config.items():
+        keys = key.split(".")
+        sub_config = global_config
+        for k in keys[:-1]:
+            sub_config = sub_config.setdefault(k, {})
+        sub_config[keys[-1]] = value
+
+    with open(config_path, "w") as f:
+        yaml.dump(global_config, f)
+
+
+def run_single_benchmark_case(
+    root_dir,
+    run_env_dir,
+    entrypoint,
+    only_gen_report,
+    run_id,
+    case_idx,
+    benchmark_item,
+    variables,
+    output_variables,
+    dolphin_folder,
+    benchmark_config,
+    verbose,
+    build_command_func,
+    trajectory_dir,
+    profile_dir,
+    console_dir,
+):
+    """
+    Run a single benchmark case.
+
+    Args:
+        root_dir: Root directory of the project
+        run_env_dir: Environment directory for this specific run
+        entrypoint: Entrypoint file to run
+        run_id: ID for this run (for logging)
+        case_idx: Index of the benchmark case (1-based)
+        only_gen_report: Whether to only generate report for the experiment
+        benchmark_item: The benchmark item to test
+        variables: Dictionary of variables to pass to dolphin
+        output_variables: List of variable names to output
+        dolphin_folder: Optional folder parameter for dolphin
+        benchmark_config: Optional benchmark configuration from benchmark.yaml
+        verbose: Whether to use verbose mode
+        build_command_func: Function to build command parts
+        trajectory_dir: Directory for trajectory saving
+        profile_dir: Directory for profile saving
+        console_dir: Directory for console log saving
+
+    Returns:
+        tuple: (case_idx, exit_code, experiment_log_file, extracted_variables)
+    """
+    experiment_log_file = console_dir / f"case_{case_idx:03d}.log"
+    query = benchmark_item.get(LABEL_QUERY_FIELD, "") if benchmark_item else None
+
+    # Manage dolphin.log at the start of the case
+    if not only_gen_report:
+        manage_case_dolphin_log(root_dir, run_env_dir, case_idx, "start")
+
+    # Merge benchmark-specific args with regular variables
+    benchmark_args = benchmark_item.get("args", {}) if benchmark_item else {}
+
+    # Apply field_as_args mapping from benchmark config
+    if benchmark_config and "field_as_args" in benchmark_config:
+        field_as_args = benchmark_config["field_as_args"]
+        for source_field, target_arg in field_as_args.items():
+            if benchmark_item and source_field in benchmark_item:
+                benchmark_args[target_arg] = benchmark_item[source_field]
+
+    case_variables = variables.copy() if variables else {}
+    case_variables.update(benchmark_args)
+
+    cmd_parts = build_command_func(
+        [
+            "--trajectorypath",
+            f"{trajectory_dir}/case_{case_idx:03}.jsonl",
+            "--trace-path",
+            f"{profile_dir}/case_{case_idx:03d}.txt",
+            "--log-suffix",
+            f"case_{case_idx:03d}",
+        ],
+        query=query,
+        cmd_file_suffix=f"_case_{case_idx:03d}",
+        current_variables=case_variables,
+    )
+
+    # Use subprocess to avoid shell interpretation issues
+    import subprocess
+
+    # Run the command using subprocess for better control
+    original_cwd = os.getcwd()
+    os.chdir(run_env_dir)
+    try:
+        if not only_gen_report:
+            with open(experiment_log_file, "w") as log_f:
+                try:
+                    result = subprocess.run(
+                        cmd_parts,
+                        stdout=log_f,
+                        stderr=subprocess.STDOUT,
+                        cwd=run_env_dir,
+                        timeout=500,
+                    )
+                    exit_code = result.returncode
+                except Exception as e:
+                    exit_code = 1
+                    print(f"Warning: Failed to run command: {e}")
+
+            # Wait a moment for dialog files to be written completely
+            import time
+
+            time.sleep(0.5)
+        else:
+            exit_code = 0
+
+        # Read log file and extract variables
+        extracted_variables = None
+        if output_variables:
+            try:
+                with open(experiment_log_file, "r", encoding="utf-8") as f:
+                    log_content = f.read()
+                print(f"DEBUG: Reading variables from log file: {experiment_log_file}")
+                print(f"DEBUG: Log content length: {len(log_content)}")
+                print(
+                    f"DEBUG: DOLPHIN_VARIABLES_OUTPUT_START found: {DOLPHIN_VARIABLES_OUTPUT_START in log_content}"
+                )
+
+                # 如果 Dolphin 命令本身就因为 CLI 参数错误等原因失败，先给出更友好的提示
+                if exit_code != 0 and "error: ambiguous option:" in log_content:
+                    print(
+                        "ERROR: Dolphin CLI 报错：存在歧义参数（例如使用了 --mode），"
+                        "很可能是 spec.txt 里的 variables 使用了与 Dolphin CLI 选项冲突的名字。"
+                    )
+                    print(
+                        "       请检查本次运行生成的命令（experiments/env/.../cmds/case_XXX.sh）中 "
+                        "以 -- 开头的参数名，避免使用与 --model-name/--model_name 等选项前缀相同的变量名。"
+                    )
+
+                extracted_variables = parse_variables_from_log(log_content)
+                if extracted_variables is None:
+                    print(
+                        f"DEBUG: parse_variables_from_log returned None, checking for marker presence..."
+                    )
+                    if DOLPHIN_VARIABLES_OUTPUT_START in log_content:
+                        print("DEBUG: Marker found in content, but parsing failed")
+                        # Try to find the markers manually
+                        start_marker = DOLPHIN_VARIABLES_OUTPUT_START
+                        end_marker = DOLPHIN_VARIABLES_OUTPUT_END
+                        start_pos = log_content.find(start_marker)
+                        end_pos = log_content.find(end_marker, start_pos)
+                        if start_pos != -1 and end_pos != -1:
+                            json_start = start_pos + len(start_marker)
+                            json_content = log_content[json_start:end_pos].strip()
+                            print(
+                                f"DEBUG: Extracted JSON content length: {len(json_content)}"
+                            )
+                            print(
+                                f"DEBUG: JSON content preview: {json_content[:200]}..."
+                            )
+                            try:
+                                extracted_variables = json.loads(json_content)
+                                print("DEBUG: Manual JSON parsing succeeded")
+                            except Exception as json_e:
+                                print(f"DEBUG: Manual JSON parsing failed: {json_e}")
+                    else:
+                        print("DEBUG: Marker not found in content")
+            except Exception as e:
+                print(f"Warning: Failed to read log file for variable extraction: {e}")
+
+        # Add this block for handling None case
+        if extracted_variables is None:
+            extracted_variables = {"final_result": None}  # Default value
+            print(
+                f"Warning: Variables extraction failed for case {case_idx}, using default values"
+            )
+
+        # Profile files are now directly saved to the correct location, no need to move them
+
+        # Manage dolphin.log at the end of the case
+        if not only_gen_report:
+            manage_case_dolphin_log(root_dir, run_env_dir, case_idx, "end")
+
+        return case_idx, exit_code, experiment_log_file, extracted_variables
+
+    finally:
+        os.chdir(original_cwd)
+
+
+def manage_case_dolphin_log(root_dir, run_env_dir, case_idx, action):
+    """
+    Manage dolphin.log file for each benchmark case.
+
+    Args:
+        root_dir: Root directory of the project
+        run_env_dir: Environment directory for this specific run
+        case_idx: Index of the benchmark case
+        action: 'start' or 'end'
+    """
+    # Use case-specific log filename to match Dolphin SDK naming convention
+    dolphin_log_path = root_dir / "log" / f"dolphin_case_{case_idx:03d}.log"
+
+    if action == "start":
+        # Backup existing case-specific log file if it exists
+        if dolphin_log_path.exists():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = run_env_dir / "log" / f"dolphin_backup_{timestamp}.log"
+            try:
+                backup_path.parent.mkdir(exist_ok=True)
+                shutil.copy2(dolphin_log_path, backup_path)
+            except Exception as e:
+                pass
+
+        # Clear the case-specific log file
+        try:
+            with open(dolphin_log_path, "w") as f:
+                f.write(
+                    f"# Dolphin log cleared for case {case_idx} at {datetime.now().isoformat()}\n"
+                )
+        except Exception as e:
+            pass
+
+    elif action == "end":
+        # Move case-specific log file to run environment's log directory with consistent naming
+        if dolphin_log_path.exists():
+            # Create log directory in run_env_dir if it doesn't exist
+            run_log_dir = run_env_dir / "log"
+            run_log_dir.mkdir(exist_ok=True)
+
+            # Use consistent case_XXX.log naming in run environment
+            case_log_path = run_log_dir / f"case_{case_idx:03d}.log"
+            try:
+                shutil.move(dolphin_log_path, case_log_path)
+            except Exception as e:
+                pass
+
+
+def manage_profile_files(root_dir, run_env_dir, run_id, action):
+    """
+    Manage profile files for experiment runs when verbose mode is enabled.
+
+    Args:
+        root_dir: Root directory of the project
+        run_env_dir: Environment directory for this specific run
+        run_id: ID for this run
+        action: 'start' or 'end'
+    """
+    profile_dir = root_dir / "data" / "profile"
+
+    if action == "start":
+        # Store the timestamp when the run starts for filtering profile files
+        setattr(manage_profile_files, f"start_time_{run_id}", datetime.now())
+
+    elif action == "end":
+        # Profile files are now managed per case, no action needed here
+        # Clean up the stored start time
+        if hasattr(manage_profile_files, f"start_time_{run_id}"):
+            delattr(manage_profile_files, f"start_time_{run_id}")
+
+
+def run_single_experiment(
+    root_dir,
+    run_env_dir,
+    entrypoint,
+    only_gen_report,
+    run_id,
+    benchmark_data,
+    variables=None,
+    output_variables=None,
+    dolphin_folder=None,
+    benchmark_config=None,
+    verbose=False,
+    threads=2,
+):
+    """
+    Run a single experiment with the given entrypoint.
+
+    Args:
+        root_dir: Root directory of the project
+        run_env_dir: Environment directory for this specific run
+        entrypoint: Entrypoint file to run
+        only_gen_report: Whether to only generate report for the experiment
+        run_id: ID for this run (for logging)
+        benchmark_data: Optional list of benchmark items to test
+        variables: Dictionary of variables to pass to dolphin
+        output_variables: List of variable names to output
+        dolphin_folder: Optional folder parameter for dolphin
+        benchmark_config: Optional benchmark configuration from benchmark.yaml
+        verbose: Whether to use verbose mode
+        threads: Number of concurrent threads to use (default: 2)
+
+    Returns:
+        tuple: (exit_code, log_files, benchmark_data, all_extracted_variables)
+    """
+    # Profile files are now managed per case
+    if verbose and not only_gen_report:
+        manage_profile_files(root_dir, run_env_dir, run_id, "start")
+
+    # Create history directory for dialog saving
+    history_dir = run_env_dir / "history"
+    history_dir.mkdir(exist_ok=True)
+
+    # Create trajectory directory for trajectory saving
+    trajectory_dir = run_env_dir / "trajectory"
+    trajectory_dir.mkdir(exist_ok=True)
+
+    # Create profile directory for execution trace saving
+    profile_dir = run_env_dir / "profile"
+    profile_dir.mkdir(exist_ok=True)
+
+    # Create cmds directory for command recording
+    cmds_dir = run_env_dir / "cmds"
+    cmds_dir.mkdir(exist_ok=True)
+
+    # Initialize common components
+    dolphin_cmd = root_dir / "bin" / "dolphin"
+    dolphins_path = run_env_dir / "dolphins"
+    entrypoint_path = dolphins_path / entrypoint
+    log_files = []
+    all_extracted_variables = []
+    all_exit_codes = []
+
+    # Define common command parts
+    def build_command(
+        extra_args, query=None, cmd_file_suffix="", current_variables=None
+    ):
+        # Use subcommand mode to avoid legacy deprecation warnings
+        cmd_parts = [str(dolphin_cmd), "run"]
+
+        # Add config file path
+        config_path = run_env_dir / "config" / "global.yaml"
+        if config_path.exists():
+            cmd_parts.extend(["--config", str(config_path)])
+
+        if dolphin_folder:
+            cmd_parts.extend(["--folder", str(dolphin_folder)])
+        else:
+            cmd_parts.extend(["--folder", str(dolphins_path)])
+
+        if entrypoint.endswith(".dph"):
+            cmd_parts.extend(["--file", str(entrypoint_path)])
+        else:
+            cmd_parts.extend(["--agent", str(entrypoint)])
+
+        cmd_parts.extend(["--_root_dir", str(run_env_dir)])
+
+        cmd_parts.extend(extra_args)
+
+        # Use current_variables if provided, otherwise fall back to variables
+        source_vars = current_variables if current_variables is not None else variables
+        all_vars = source_vars.copy() if source_vars else {}
+        if query:
+            all_vars["query"] = query
+
+        if all_vars:
+            for key, value in all_vars.items():
+                if isinstance(value, (dict, list)):
+                    value_str = json.dumps(value)
+                elif isinstance(value, bool):
+                    # Preserve original boolean case from spec.txt (lowercase)
+                    value_str = "true" if value else "false"
+                else:
+                    value_str = str(value)
+                cmd_parts.extend([f"--{key}", value_str])
+
+        if output_variables:
+            cmd_parts.append("--output-variables")
+            cmd_parts.extend(output_variables)
+
+        if verbose:
+            cmd_parts.append("--verbose")
+
+        logger.info(f"command: {' '.join(cmd_parts)}")
+
+        # Save command to shell script file for reproducibility
+        cmd_filename = (
+            f"case{cmd_file_suffix[5:]}.sh"
+            if cmd_file_suffix.startswith("_case")
+            else f"case{cmd_file_suffix}.sh"
+        )
+        cmd_file_path = cmds_dir / cmd_filename
+        with open(cmd_file_path, "w", encoding="utf-8") as cmd_f:
+            cmd_f.write("#!/bin/bash\n")
+            cmd_f.write("# Auto-generated command for experiment reproducibility\n")
+            cmd_f.write(
+                f"# Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            )
+            cmd_f.write(f"# Run ID: {run_id}\n")
+            cmd_f.write(f"# Entrypoint: {entrypoint}\n")
+            if query:
+                cmd_f.write(
+                    f"# Query: {query[:100]}{'...' if len(query) > 100 else ''}\n"
+                )
+            cmd_f.write("\n")
+
+            # Write the command with proper escaping
+            escaped_cmd_parts = []
+            for part in cmd_parts:
+                if " " in part or '"' in part or "'" in part:
+                    # Escape quotes and wrap in single quotes
+                    escaped_part = part.replace("'", "'\"'\"'")
+                    escaped_cmd_parts.append(f"'{escaped_part}'")
+                else:
+                    escaped_cmd_parts.append(part)
+
+            cmd_f.write(" \\\n  ".join(escaped_cmd_parts))
+            cmd_f.write("\n")
+
+        # Make the script executable
+        import stat
+
+        cmd_file_path.chmod(cmd_file_path.stat().st_mode | stat.S_IEXEC)
+
+        return cmd_parts
+
+    console_dir = run_env_dir / "console"
+    console_dir.mkdir(exist_ok=True)
+
+    log_dir = run_env_dir / "log"
+    log_dir.mkdir(exist_ok=True)
+
+    # Thread-safe data structures for collecting results
+    results_lock = threading.Lock()
+    case_results = {}  # case_idx -> (exit_code, log_file, extracted_variables)
+
+    print(
+        f"  Running {len(benchmark_data)} benchmark cases with {threads} concurrent threads..."
+    )
+
+    # Run multiple benchmark cases concurrently
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        # Submit all benchmark cases to the thread pool
+        future_to_case = {}
+        for case_idx, benchmark_item in enumerate(benchmark_data, 1):
+            future = executor.submit(
+                run_single_benchmark_case,
+                root_dir,
+                run_env_dir,
+                entrypoint,
+                only_gen_report,
+                run_id,
+                case_idx,
+                benchmark_item,
+                variables,
+                output_variables,
+                dolphin_folder,
+                benchmark_config,
+                verbose,
+                build_command,
+                trajectory_dir,
+                profile_dir,
+                console_dir,
+            )
+            future_to_case[future] = case_idx
+
+        # Collect results as they complete
+        for future in as_completed(future_to_case):
+            case_idx = future_to_case[future]
+            try:
+                (
+                    returned_case_idx,
+                    exit_code,
+                    experiment_log_file,
+                    extracted_variables,
+                ) = future.result()
+
+                # Verify case_idx matches
+                assert (
+                    returned_case_idx == case_idx
+                ), f"Case index mismatch: expected {case_idx}, got {returned_case_idx}"
+
+                # Thread-safe collection of results
+                with results_lock:
+                    case_results[case_idx] = (
+                        exit_code,
+                        experiment_log_file,
+                        extracted_variables,
+                    )
+
+                # Print progress
+                benchmark_item = benchmark_data[
+                    case_idx - 1
+                ]  # Convert to 0-based index
+                print(
+                    f"  Case {case_idx}/{len(benchmark_data)}: {'✅' if exit_code == 0 else '❌'} ({benchmark_item.get('Topic', 'Unknown')})"
+                )
+
+            except Exception as exc:
+                print(f"  Case {case_idx} generated an exception: {exc}")
+                # Add error result
+                with results_lock:
+                    case_results[case_idx] = (1, None, {"final_result": None})
+
+    # Sort results by case index and extract data
+    sorted_case_indices = sorted(case_results.keys())
+    for case_idx in sorted_case_indices:
+        exit_code, experiment_log_file, extracted_variables = case_results[case_idx]
+        all_exit_codes.append(exit_code)
+        if experiment_log_file:
+            log_files.append(experiment_log_file)
+        all_extracted_variables.append(extracted_variables)
+
+        # Extract progress information from variables and save dialog
+        benchmark_item = benchmark_data[case_idx - 1]  # Convert to 0-based index
+        progress_entries = extract_all_stages_from_variables(extracted_variables)
+
+        # Add robustness: Ensure progress_entries is a list
+        if progress_entries is None:
+            progress_entries = [
+                {"status": "failed", "error": "progress extraction failed"}
+            ]
+            print(
+                f"Warning: Progress extraction failed for case {case_idx}, using default failed progress"
+            )
+
+        # Combine dialog and progress entries for saving
+        all_entries = []
+        if progress_entries:
+            all_entries.extend(progress_entries)
+
+        if all_entries:
+            dialog_file = history_dir / f"case_{case_idx:03}.jsonl"
+            with open(dialog_file, "w", encoding="utf-8") as dialog_f:
+                for entry in all_entries:
+                    dialog_f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        else:
+            print(
+                f"    Warning: No dialog or progress entries found for case {case_idx}"
+            )
+
+    assert len(all_extracted_variables) == len(benchmark_data)
+
+    # dolphin.log and profile files are now managed per case, no need to manage here
+
+    # Return overall success (all cases must succeed)
+    overall_exit_code = 0 if all(code == 0 for code in all_exit_codes) else 1
+    return (
+        overall_exit_code,
+        log_files,
+        benchmark_data if benchmark_data else None,
+        all_extracted_variables,
+    )
+
+
+def load_existing_experiment_results(base_env_dir, max_run_num):
+    """
+    Load results from existing completed runs.
+
+    Args:
+        base_env_dir: Base environment directory
+        max_run_num: Maximum run number to check
+
+    Returns:
+        List of existing run results
+    """
+    existing_results = []
+
+    for run_num in range(1, max_run_num + 1):
+        run_dir_name = f"run_{run_num:03d}"
+        run_env_dir = base_env_dir / run_dir_name
+        run_summary_file = run_env_dir / "run_summary.yaml"
+
+        if run_summary_file.exists():
+            try:
+                with open(run_summary_file, "r", encoding="utf-8") as f:
+                    run_result = yaml.safe_load(f)
+                    existing_results.append(run_result)
+                    print(f"  Loaded existing result from run {run_num:03d}")
+            except Exception as e:
+                print(
+                    f"Warning: Failed to load existing result from run {run_num:03d}: {e}"
+                )
+
+    return existing_results
+
+
+def get_directory_size(directory_path):
+    """
+    Get the total size of a directory in MB.
+
+    Args:
+        directory_path: Path to the directory
+
+    Returns:
+        String representation of the directory size
+    """
+    try:
+        total_size = sum(
+            f.stat().st_size for f in directory_path.rglob("*") if f.is_file()
+        )
+        size_mb = total_size / (1024 * 1024)
+        return f"{size_mb:.1f}MB"
+    except Exception:
+        return "Unknown"
+
+
+def list_experiment_environments(env_dir, experiment_name):
+    """
+    List all experiment environments.
+
+    Args:
+        env_dir: Experiments environment directory
+        experiment_name: Name of the experiment (for filtering)
+    """
+    if not env_dir.exists():
+        print(f"No experiment environments found.")
+        return
+
+    # Find all experiment directories
+    experiment_dirs = []
+    for item in env_dir.iterdir():
+        if item.is_dir() and item.name.startswith(f"{experiment_name}_"):
+            try:
+                timestamp_str = item.name.split("_", 1)[1]  # Get timestamp part
+                timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                experiment_dirs.append((timestamp, item))
+            except (ValueError, IndexError):
+                experiment_dirs.append((item.stat().st_mtime, item))
+
+    if not experiment_dirs:
+        print(f"No experiment environments found for '{experiment_name}'")
+        return
+
+    # Sort by timestamp (most recent first)
+    experiment_dirs.sort(key=lambda x: x[0], reverse=True)
+
+    print(f"Available experiment executions for '{experiment_name}':")
+    print("-" * 100)
+    print(f"{'Execution ID':<35} {'Created':<20} {'Status':<25} {'Size':<10}")
+    print("-" * 100)
+
+    for timestamp, exp_dir in experiment_dirs:
+        run_count = 0
+        completed_count = 0
+        failed_count = 0
+        partial_count = 0
+
+        # Count runs and their status
+        for item in exp_dir.iterdir():
+            if item.is_dir() and item.name.startswith("run_"):
+                run_count += 1
+                run_summary_file = item / "run_summary.yaml"
+                log_dir = item / "log"
+
+                if run_summary_file.exists():
+                    try:
+                        with open(run_summary_file, "r", encoding="utf-8") as f:
+                            summary = yaml.safe_load(f)
+                            exit_code = summary.get("exit_code", 1)
+                            if exit_code == 0:
+                                completed_count += 1
+                            else:
+                                failed_count += 1
+                    except Exception:
+                        failed_count += 1
+                elif log_dir.exists() and any(log_dir.iterdir()):
+                    partial_count += 1
+                else:
+                    partial_count += 1
+
+        # Format status
+        if run_count == 0:
+            status = "No runs"
+        else:
+            status_parts = []
+            if completed_count > 0:
+                status_parts.append(f"✅{completed_count}")
+            if failed_count > 0:
+                status_parts.append(f"❌{failed_count}")
+            if partial_count > 0:
+                status_parts.append(f"⏳{partial_count}")
+            status = "/".join(status_parts) + f" ({run_count} total)"
+
+        # Get directory size (approximate)
+        size_str = get_directory_size(exp_dir)
+
+        # Format timestamp for display
+        if isinstance(timestamp, datetime):
+            created_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            created_str = "Unknown"
+
+        print(f"{exp_dir.name:<35} {created_str:<20} {status:<25} {size_str:<10}")
+
+
+def show_experiment_status(base_env_dir, experiment_name):
+    """
+    Show the status of all runs in an experiment.
+
+    Args:
+        base_env_dir: Base environment directory
+        experiment_name: Name of the experiment
+    """
+    if not base_env_dir.exists():
+        print(f"No experiment environment found for '{experiment_name}'")
+        return
+
+    print(f"Experiment '{experiment_name}' status:")
+    print(f"Execution ID: {base_env_dir.name}")
+    print(f"Base directory: {base_env_dir}")
+    print("-" * 60)
+
+    # Find all run directories
+    run_dirs = []
+    for item in base_env_dir.iterdir():
+        if item.is_dir() and item.name.startswith("run_"):
+            try:
+                run_num = int(item.name.split("_")[1])
+                run_dirs.append((run_num, item))
+            except (ValueError, IndexError):
+                continue
+
+    if not run_dirs:
+        print("No runs found.")
+        return
+
+    # Sort by run number
+    run_dirs.sort(key=lambda x: x[0])
+
+    completed_runs = 0
+    partial_runs = 0
+    failed_runs = 0
+
+    print(f"{'Run':<5} {'Status':<15}")
+    print("-" * 60)
+
+    for run_num, run_dir in run_dirs:
+        run_summary_file = run_dir / "run_summary.yaml"
+        log_dir = run_dir / "log"
+
+        if run_summary_file.exists():
+            try:
+                with open(run_summary_file, "r", encoding="utf-8") as f:
+                    summary = yaml.safe_load(f)
+                    exit_code = summary.get("exit_code", "unknown")
+                    if exit_code == 0:
+                        status = "✅ COMPLETED"
+                        completed_runs += 1
+                    else:
+                        status = f"❌ FAILED ({exit_code})"
+                        failed_runs += 1
+            except Exception as e:
+                status = f"⚠️  ERROR reading summary: {e}"
+                failed_runs += 1
+        elif log_dir.exists() and any(log_dir.iterdir()):
+            status = "⏳ PARTIAL (has logs)"
+            partial_runs += 1
+        elif run_dir.exists():
+            status = "📁 CREATED (no logs)"
+            partial_runs += 1
+        else:
+            status = "❓ UNKNOWN"
+            failed_runs += 1
+
+        print(f"{run_num:03d}   {status}")
+
+    print("-" * 60)
+    print(
+        f"Summary: {completed_runs} completed, {partial_runs} partial, {failed_runs} failed"
+    )
+
+    if partial_runs > 0 or completed_runs < len(run_dirs):
+        last_run_num = run_dirs[-1][0] if run_dirs else 0
+        print(f"\nTo resume this experiment execution, use:")
+        print(
+            f"  python experiments/bin/run --name {experiment_name} --env-id {base_env_dir.name} --resume-from {last_run_num + 1}"
+        )
+
+        # Also show how to start a new experiment execution
+        print(f"\nTo start a new experiment execution, use:")
+        print(f"  python experiments/bin/run --name {experiment_name}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run an experiment in the Dolphin Language."
+    )
+    parser.add_argument("--name", required=True, help="Name of the experiment")
+    parser.add_argument("--verbose", action="store_true", help="Verbose mode")
+    parser.add_argument(
+        "--resume-from",
+        type=int,
+        help="Resume from a specific run number (e.g., 5 to resume from run_005)",
+    )
+    parser.add_argument(
+        "--env-id",
+        help="Specific experiment execution ID (timestamp folder name, e.g., bird_baseline_20250828_052443)",
+    )
+    parser.add_argument(
+        "--only-gen-report",
+        action="store_true",
+        help="Only generate report for the experiment",
+    )
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Show status of existing runs without executing anything",
+    )
+    parser.add_argument(
+        "--list-envs", action="store_true", help="List all experiment environments"
+    )
+
+    args = parser.parse_args()
+
+    # Get root directory
+    script_path = Path(__file__).resolve()
+    root_dir = script_path.parent.parent.parent
+
+    # Validate experiment exists (use design directory instead of playground)
+    experiment_name = args.name
+    design_dir = root_dir / "experiments" / "design" / experiment_name
+    if not design_dir.exists():
+        print(
+            f"Error: Experiment '{experiment_name}' does not exist in experiments/design/",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Find the most recent experiment environment directory
+    env_dir = root_dir / "experiments" / "env"
+    if not env_dir.exists():
+        if args.status:
+            print(f"No experiment environments found for '{experiment_name}'")
+            return
+        env_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find existing experiment directories for this experiment
+    experiment_env_dirs = []
+    for item in env_dir.iterdir():
+        if item.is_dir() and item.name.startswith(f"{experiment_name}_"):
+            experiment_env_dirs.append(item)
+
+    # Handle specific environment ID selection
+    if args.env_id:
+        # Validate env_id format
+        env_id_cleaned = args.env_id.strip()
+        if not env_id_cleaned:
+            print(f"Error: Empty environment ID provided.", file=sys.stderr)
+            sys.exit(1)
+
+        if not env_id_cleaned.startswith(f"{experiment_name}_"):
+            full_env_id = f"{experiment_name}_{env_id_cleaned}"
+        else:
+            full_env_id = env_id_cleaned
+
+        base_env_dir = env_dir / full_env_id
+        if not base_env_dir.exists():
+            print(
+                f"Error: Experiment execution '{full_env_id}' not found.",
+                file=sys.stderr,
+            )
+            print(
+                "Use --list-envs to see available experiment executions.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    elif experiment_env_dirs:
+        # Use the most recent experiment directory
+        base_env_dir = max(experiment_env_dirs, key=lambda x: x.stat().st_mtime)
+        if args.resume_from:
+            print(f"Using most recent experiment execution: {base_env_dir.name}")
+    else:
+        args.only_gen_report = False
+        print("no env id, set only_gen_report to False")
+
+        # Create new base env directory if none exists
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_env_dir = env_dir / f"{experiment_name}_{timestamp}"
+        if not args.status and not args.list_envs:  # Only create if not just checking
+            base_env_dir.mkdir(parents=True, exist_ok=True)
+
+    # Handle list environments
+    if args.list_envs:
+        list_experiment_environments(env_dir, experiment_name)
+        return
+
+    # Handle status check
+    if args.status:
+        show_experiment_status(base_env_dir, experiment_name)
+        return
+
+    # Create base env directory for this experiment run session (only if not resuming)
+    if not args.resume_from and not args.only_gen_report:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_env_dir_name = f"{experiment_name}_{timestamp}"
+        base_env_dir = root_dir / "experiments" / "env" / base_env_dir_name
+        base_env_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        # When resuming, base_env_dir should already be set to the existing experiment directory
+        if not base_env_dir.exists():
+            print(
+                f"Error: Cannot resume - experiment environment directory not found: {base_env_dir}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    # Load spec.txt from design directory
+    spec_file = design_dir / "spec.txt"
+
+    # Copy spec.txt to the experiment base directory (not to individual run directories)
+    shutil.copy2(spec_file, base_env_dir / "spec.txt")
+    try:
+        with open(spec_file, "r") as f:
+            spec_content = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error parsing spec.txt: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate required fields in spec.txt
+    required_fields = ["entrypoints", "configs", "num_samples", "sample_method"]
+    for field in required_fields:
+        if field not in spec_content:
+            print(f"Error: spec.txt must contain '{field}' field.", file=sys.stderr)
+            sys.exit(1)
+
+    entrypoints = spec_content["entrypoints"]
+    configs = spec_content["configs"]
+    num_samples = spec_content["num_samples"]
+    sample_method = spec_content["sample_method"]
+
+    # Optional variables field for passing to dolphin
+    variables = spec_content.get("variables", {})
+
+    # Optional output_variables field for extracting variables from results
+    output_variables = spec_content.get("output_variables", [])
+
+    # Optional answer_variable for comparison (supports dot notation like 'final_result.answer')
+    answer_variable = spec_content.get("answer_variable", None)
+
+    # Optional benchmark_comparator for specifying how to compare golden vs predicted answers
+    benchmark_comparator = spec_content.get("benchmark_comparator", "exact_match")
+
+    # Optional dolphin_folder for specifying --folder parameter
+    dolphin_folder = spec_content.get("dolphin_folder", None)
+
+    # Optional must_execute for specifying required skills
+    must_execute = spec_content.get("must_execute", [])
+    if must_execute and not isinstance(must_execute, list):
+        print(f"Warning: must_execute must be a list, using empty list")
+        must_execute = []
+
+    # Optional threads for specifying concurrency level
+    threads = spec_content.get("threads", 2)  # Default to 2 threads
+    if not isinstance(threads, int) or threads <= 0:
+        print(f"Warning: Invalid threads value '{threads}', using default value 2")
+        threads = 2
+
+    # Create full list of variables to output
+    # For answer_variable, we need to extract the root variable name
+    full_output_variables = set(output_variables)
+    if answer_variable:
+        # Extract root variable name for output (e.g., 'final_result' from 'final_result.answer')
+        root_var = answer_variable.split(".")[0]
+        full_output_variables.add(root_var)
+
+    # Always include _all_stages variable for progress tracking
+    full_output_variables.add("_all_stages")
+
+    if full_output_variables:
+        print(f"Will extract variables: {list(full_output_variables)}")
+
+    if must_execute:
+        print(f"Must execute skills: {must_execute}")
+
+    print(f"Using {threads} concurrent threads for benchmark execution")
+
+    # Load benchmark if specified
+    benchmark_data = None
+    benchmark_config = {}
+
+    benchmark_name = spec_content.get("benchmark", None)
+    assert benchmark_name is not None, "spec.txt must contain 'benchmark' field"
+
+    # Get num_run_cases from spec.txt if specified
+    num_run_cases = spec_content.get("num_run_cases", None)
+
+    # Load benchmark using new format
+    benchmark_data, benchmark_config = load_benchmark(
+        benchmark_name, root_dir, num_run_cases
+    )
+    print(
+        f"Loaded {len(benchmark_data)} benchmark items from benchmark '{benchmark_name}'"
+    )
+    if num_run_cases:
+        print(f"Limited to {num_run_cases} cases as specified in num_run_cases")
+
+    # Override spec.txt benchmark settings with benchmark.yaml if present
+    if benchmark_config.get("answer_variable"):
+        answer_variable = benchmark_config["answer_variable"]
+        print(f"Using answer_variable from benchmark.yaml: {answer_variable}")
+        # Update full_output_variables with the new answer_variable
+        root_var = answer_variable.split(".")[0]
+        full_output_variables.add(root_var)
+
+    if benchmark_config.get("benchmark_comparator"):
+        benchmark_comparator = benchmark_config["benchmark_comparator"]
+        print(f"Using benchmark_comparator from benchmark.yaml: {benchmark_comparator}")
+
+    # Print field_as_args configuration if present
+    if benchmark_config.get("field_as_args"):
+        field_as_args = benchmark_config["field_as_args"]
+        mappings = [f"{k} -> {v}" for k, v in field_as_args.items()]
+        print(f"Using field_as_args mappings: {', '.join(mappings)}")
+
+    if not entrypoints or not configs:
+        print("Error: entrypoints and configs cannot be empty.", file=sys.stderr)
+        sys.exit(1)
+
+    # Sample configurations
+    sampled_combinations = sample_configurations(
+        entrypoints, configs, num_samples, sample_method, benchmark_data, variables
+    )
+
+    print(f"\nRunning {len(sampled_combinations)} experiment configurations:")
+    print("=" * 60)
+
+    # Check for existing runs and handle resume functionality
+    start_run_index = 1
+    if args.resume_from:
+        if args.resume_from < 1 or args.resume_from > len(sampled_combinations):
+            print(
+                f"Error: resume-from value {args.resume_from} is out of range (1-{len(sampled_combinations)})",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        start_run_index = args.resume_from
+        print(f"Resuming from run {start_run_index:03d}")
+
+        # Check which runs are already completed
+        completed_runs = []
+        for run_num in range(1, start_run_index):
+            run_dir_name = f"run_{run_num:03d}"
+            run_env_dir = base_env_dir / run_dir_name
+            run_summary_file = run_env_dir / "run_summary.yaml"
+
+            if run_summary_file.exists():
+                completed_runs.append(run_num)
+                print(f"  Run {run_num:03d}: Already completed (summary file exists)")
+            elif run_env_dir.exists():
+                print(
+                    f"  Run {run_num:03d}: Partially executed (directory exists but no summary)"
+                )
+            else:
+                print(f"  Run {run_num:03d}: Not started")
+
+        print(f"Found {len(completed_runs)} completed runs before resume point")
+        print("-" * 60)
+
+    # Run experiments sequentially, each in its own isolated directory
+    results = []
+    for i, (entrypoint, config, benchmark_data_list, vars_dict) in enumerate(
+        sampled_combinations, 1
+    ):
+        # Skip runs before resume point
+        if i < start_run_index:
+            continue
+        print(f"\n[Run {i}/{len(sampled_combinations)}]")
+        print(f"Entrypoint: {entrypoint}")
+        print(f"Config: {config}")
+        if benchmark_data_list:
+            print(f"Testing {len(benchmark_data_list)} benchmark cases")
+
+        # Create isolated directory for this run
+        run_dir_name = f"run_{i:03d}"
+        run_env_dir = base_env_dir / run_dir_name
+        run_env_dir.mkdir(exist_ok=True)
+
+        # Copy experiment to this run's directory
+        # Remove copying spec.txt to individual run directories
+        shutil.copytree(
+            design_dir,
+            run_env_dir,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("spec.txt"),
+        )
+
+        # Apply configuration to global.yaml in this run's directory
+        config_path = run_env_dir / "config" / "global.yaml"
+        apply_config_to_global_yaml(config_path, config)
+
+        # Run the experiment
+        exit_code, log_files, returned_benchmark_data, all_extracted_variables = (
+            run_single_experiment(
+                root_dir=root_dir,
+                run_env_dir=run_env_dir,
+                entrypoint=entrypoint,
+                only_gen_report=args.only_gen_report,
+                run_id=i,
+                benchmark_data=benchmark_data_list,
+                variables=vars_dict,
+                output_variables=list(full_output_variables),
+                benchmark_config=benchmark_config,
+                dolphin_folder=dolphin_folder,
+                verbose=args.verbose,
+                threads=threads,
+            )
+        )
+
+        if exit_code == 0:
+            print(f"✅ Run {i} completed successfully")
+        else:
+            print(f"❌ Run {i} failed with exit code {exit_code}")
+
+        print(f"Run directory: {run_env_dir}")
+        print(f"Console logs: {len(log_files)} log files")
+        print(f"Dialog history saved to: {run_env_dir}/history/")
+
+        result_output_variables = [
+            {k: v for k, v in variables.items() if k in output_variables}
+            for variables in all_extracted_variables
+        ]
+        result_output_variables = [vars for vars in result_output_variables if vars]
+
+        if result_output_variables and any(
+            vars for vars in result_output_variables if vars
+        ):
+            # Show variables from first successful extraction
+            first_vars = next((vars for vars in all_extracted_variables if vars), {})
+            print(f"Extracted variables: {list(first_vars.keys())}")
+
+        result_entry = {
+            "run_id": i,
+            "run_directory": str(run_env_dir),
+            "entrypoint": entrypoint,
+            "config": config,
+            "variables": vars_dict,
+            "exit_code": exit_code,
+        }
+
+        # Add benchmark information if available
+        if returned_benchmark_data:
+            benchmarks_list = []
+            for item, vars in zip(returned_benchmark_data, all_extracted_variables):
+                benchmark_entry = {}
+                benchmark_entry[LABEL_TOPIC_FIELD] = str(
+                    item.get(LABEL_TOPIC_FIELD, "") or ""
+                )
+                benchmark_entry[LABEL_QUERY_FIELD] = str(
+                    item.get(LABEL_QUERY_FIELD, "") or ""
+                )
+                benchmark_entry[LABEL_GOLD_LABEL_FIELD] = str(
+                    item.get(LABEL_GOLD_LABEL_FIELD, "") or ""
+                )
+
+                # Check must_execute skills first
+                skills_valid, missing_skills = check_must_execute_skills(
+                    vars, must_execute
+                )
+
+                # Compare benchmark answer if possible
+                comparison_result = None
+                if answer_variable and vars and LABEL_GOLD_LABEL_FIELD in item:
+                    benchmark_value = get_nested_value(vars, answer_variable)
+                    golden_answer = item[LABEL_GOLD_LABEL_FIELD]
+                    query = item.get(LABEL_QUERY_FIELD, "")
+
+                    # Get benchmark directory for custom comparator
+                    benchmark_dir = None
+                    if "benchmark" in spec_content:
+                        benchmark_dir = str(
+                            root_dir
+                            / "experiments"
+                            / "benchmark"
+                            / "data"
+                            / spec_content["benchmark"]
+                        )
+
+                    # If must_execute skills are missing, mark as failed
+                    if not skills_valid:
+                        comparison_result = {
+                            "is_correct": False,
+                            "converted_gold_label": (
+                                str(golden_answer) if golden_answer is not None else ""
+                            ),
+                            "converted_predicted": (
+                                str(benchmark_value)
+                                if benchmark_value is not None
+                                else ""
+                            ),
+                            "converted_query": query,
+                            "conversion_info": {
+                                "gold_label_converted": False,
+                                "predicted_converted": False,
+                                "query_converted": False,
+                            },
+                            "missing_skills": missing_skills.copy(),  # 创建副本避免YAML引用问题
+                            "must_execute_failed": True,
+                        }
+                    else:
+                        comparison_result = compare_gold_label_answer(
+                            golden_answer,
+                            benchmark_value,
+                            benchmark_comparator,
+                            str(config_path),
+                            benchmark_dir,
+                            query,
+                        )
+
+                # Extract comparison results
+                if comparison_result and isinstance(comparison_result, dict):
+                    benchmark_entry["is_correct"] = comparison_result.get("is_correct")
+
+                    # Add converted values to benchmark entry - convert to string if not None, otherwise use empty string
+                    converted_gold = comparison_result.get("converted_gold_label")
+                    benchmark_entry["converted_gold_label"] = (
+                        str(converted_gold) if converted_gold is not None else ""
+                    )
+
+                    converted_predicted = comparison_result.get("converted_predicted")
+                    benchmark_entry["converted_predicted"] = (
+                        str(converted_predicted)
+                        if converted_predicted is not None
+                        else ""
+                    )
+
+                    converted_query = comparison_result.get("converted_query")
+                    benchmark_entry["converted_query"] = (
+                        str(converted_query) if converted_query is not None else ""
+                    )
+
+                    benchmark_entry["conversion_info"] = comparison_result.get(
+                        "conversion_info", {}
+                    )
+
+                    # Add must_execute validation results if present
+                    if "must_execute_failed" in comparison_result:
+                        benchmark_entry["must_execute_failed"] = comparison_result[
+                            "must_execute_failed"
+                        ]
+                        benchmark_entry["missing_skills"] = comparison_result.get(
+                            "missing_skills", []
+                        )
+                else:
+                    # Handle backward compatibility for non-dict results (should not happen with new code)
+                    benchmark_entry["is_correct"] = (
+                        comparison_result
+                        if isinstance(comparison_result, bool)
+                        else None
+                    )
+                    benchmark_entry["converted_gold_label"] = ""
+                    benchmark_entry["converted_predicted"] = ""
+                    benchmark_entry["converted_query"] = ""
+                    benchmark_entry["conversion_info"] = {
+                        "gold_label_converted": False,
+                        "predicted_converted": False,
+                        "query_converted": False,
+                    }
+
+                # Extract benchmark variable value using nested access
+                if answer_variable and vars:
+                    benchmark_value = get_nested_value(vars, answer_variable)
+
+                    # Convert to string to avoid YAML reference issues
+                    benchmark_entry["answer_variable"] = (
+                        str(benchmark_value) if benchmark_value is not None else ""
+                    )
+                else:
+                    benchmark_entry["answer_variable"] = ""
+
+                benchmarks_list.append(benchmark_entry)
+
+            result_entry["benchmarks"] = benchmarks_list
+
+            # Calculate accuracy for this specific run
+            if answer_variable:
+                total_cases = len(benchmarks_list)
+                correct_cases = sum(
+                    1 for b in benchmarks_list if b.get("is_correct") is True
+                )
+                failed_cases = sum(
+                    1 for b in benchmarks_list if b.get("is_correct") is False
+                )
+                unknown_cases = sum(
+                    1 for b in benchmarks_list if b.get("is_correct") is None
+                )
+                must_execute_failed_cases = sum(
+                    1 for b in benchmarks_list if b.get("must_execute_failed") is True
+                )
+
+                run_accuracy = correct_cases / total_cases if total_cases > 0 else 0.0
+
+                result_entry["run_accuracy"] = {
+                    "total_cases": total_cases,
+                    "correct_cases": correct_cases,
+                    "failed_cases": failed_cases,
+                    "unknown_cases": unknown_cases,
+                    "must_execute_failed_cases": must_execute_failed_cases,
+                    "accuracy": run_accuracy,
+                }
+
+                print(
+                    f"  Run {i} Accuracy: {correct_cases}/{total_cases} ({run_accuracy:.2%})"
+                )
+                if must_execute_failed_cases > 0:
+                    print(
+                        f"    Warning: {must_execute_failed_cases} cases failed due to missing must_execute skills"
+                    )
+
+        # Add extracted variables if available
+        if result_output_variables:
+            result_entry["output_variables"] = result_output_variables
+
+        # Save run-specific summary to its directory with benchmarks at the end
+        run_summary_file = run_env_dir / "run_summary.yaml"
+        # Move benchmarks to the end while keeping other fields in original order
+        ordered_result = {}
+        benchmarks_data = result_entry.pop("benchmarks", None)
+
+        # Keep all other fields in their original order
+        ordered_result.update(result_entry)
+
+        # Add benchmarks at the end if it exists
+        if benchmarks_data is not None:
+            ordered_result["benchmarks"] = benchmarks_data
+
+        # Add custom representer to preserve dict order
+        def represent_dict_order(self, data):
+            return self.represent_mapping("tag:yaml.org,2002:map", data.items())
+
+        yaml.add_representer(dict, represent_dict_order)
+
+        with open(run_summary_file, "w", encoding="utf-8") as f:
+            yaml.dump(ordered_result, f, allow_unicode=True, default_flow_style=False)
+        print(f"Run summary saved to: {run_summary_file}")
+
+        results.append(result_entry)
+    # Load existing results if resuming
+    if args.resume_from and args.resume_from > 1:
+        existing_results = load_existing_experiment_results(
+            base_env_dir, args.resume_from - 1
+        )
+        results = existing_results + results
+        print(f"Included {len(existing_results)} existing results from previous runs")
+
+    # Summary
+    print("\n" + "=" * 60)
+    print(f"Experiment '{experiment_name}' completed.")
+    print(f"Base environment: {base_env_dir}")
+
+    successful_runs = sum(1 for r in results if r["exit_code"] == 0)
+    failed_runs = len(results) - successful_runs
+
+    print(f"Results: {successful_runs} successful, {failed_runs} failed")
+
+    # Calculate and print overall accuracy if benchmarks were used
+    if benchmark_data and "answer_variable" in spec_content:
+        all_benchmark_results = []
+        for r in results:
+            if "benchmarks" in r:
+                all_benchmark_results.extend(r["benchmarks"])
+
+        if all_benchmark_results:
+            total_cases = len(all_benchmark_results)
+            correct_cases = sum(
+                1 for b in all_benchmark_results if b.get("is_correct") is True
+            )
+            failed_cases = sum(
+                1 for b in all_benchmark_results if b.get("is_correct") is False
+            )
+            unknown_cases = sum(
+                1 for b in all_benchmark_results if b.get("is_correct") is None
+            )
+            must_execute_failed_cases = sum(
+                1 for b in all_benchmark_results if b.get("must_execute_failed") is True
+            )
+            accuracy = correct_cases / total_cases if total_cases > 0 else 0.0
+
+            print(f"\nOverall Accuracy Report:")
+            print(f"  Benchmark Variable: {spec_content.get('answer_variable')}")
+            print(
+                f"  Comparison Method: {spec_content.get('benchmark_comparator', 'exact_match')}"
+            )
+            if must_execute:
+                print(f"  Must Execute Skills: {must_execute}")
+            print(f"  Total cases: {total_cases}")
+            print(f"  Correct: {correct_cases} ({accuracy:.2%})")
+            print(f"  Failed: {failed_cases}")
+            if must_execute_failed_cases > 0:
+                print(f"  Failed due to missing skills: {must_execute_failed_cases}")
+            if unknown_cases > 0:
+                print(f"  Unknown/Unsupported: {unknown_cases}")
+
+            # Show per-run comparison table
+            print(f"\nRun Comparison:")
+            print(
+                f"{'Run':<4} {'Entrypoint':<20} {'Config':<30} {'Accuracy':<10} {'Status':<8}"
+            )
+            print("-" * 75)
+            for result in results:
+                if "run_accuracy" in result:
+                    entrypoint_short = (
+                        result["entrypoint"][:19]
+                        if len(result["entrypoint"]) > 19
+                        else result["entrypoint"]
+                    )
+                    config_str = (
+                        str(result["config"])[:29]
+                        if len(str(result["config"])) > 29
+                        else str(result["config"])
+                    )
+                    accuracy_str = f"{result['run_accuracy']['accuracy']:.1%}"
+                    status = "✅ PASS" if result["exit_code"] == 0 else "❌ FAIL"
+                    print(
+                        f"{result['run_id']:<4} {entrypoint_short:<20} {config_str:<30} {accuracy_str:<10} {status:<8}"
+                    )
+
+    # Print summary for extracted variables
+    if "output_variables" in spec_content and spec_content["output_variables"]:
+        extracted_count = sum(
+            1 for r in results if "output_variables" in r and r["output_variables"]
+        )
+        print("\nOutput Variables Summary:")
+        print(f"  Requested: {spec_content['output_variables']}")
+        print(f"  Extracted in {extracted_count} of {len(results)} runs.")
+
+
+if __name__ == "__main__":
+    main()

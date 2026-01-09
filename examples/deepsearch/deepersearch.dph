@@ -1,0 +1,24 @@
+/prompt/(output="list_str", model="v3") 
+Now we need to design two completely different approaches to solve the problem in the spirit of brainstorming
+
+```
+$query
+```
+
+Now please begin -> thoughts
+
+/for/ $thought in $thoughts:
+    @deepsearch(query=$query) >> results
+/end/
+
+/prompt/(model="v3")Please summarize and analyze based on the query and results from different approaches, and draw a final conclusion
+query
+```
+$query
+```
+
+Partial conclusions
+```
+$results
+```
+ -> final_result

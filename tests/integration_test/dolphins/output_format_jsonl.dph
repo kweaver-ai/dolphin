@@ -1,0 +1,4 @@
+# JSONL Output Format Test
+# Tests the JSONL output format parsing and validation
+
+/prompt/(output="jsonl") Generate 3 user records in JSONL format, each on a separate line. Each record should have name, age, and email fields. -> users 

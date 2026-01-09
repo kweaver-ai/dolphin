@@ -1,0 +1,1 @@
+/judge/(system_prompt="", tools=[poemWriterStream, 'webSearch', "emailSender", "saveToLocal"])$query -> result

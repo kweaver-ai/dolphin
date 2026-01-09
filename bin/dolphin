@@ -1,0 +1,42 @@
+#!/usr/bin/env python
+"""
+Dolphin Language CLI Entry Point
+
+This script serves as the entry point for the Dolphin Language CLI.
+All implementation has been moved to src/dolphin/cli/ for
+better maintainability and testability.
+
+Usage:
+    dolphin run --agent my_agent --folder ./agents --query "hello"
+    dolphin debug --agent my_agent --folder ./agents
+    dolphin chat --agent my_agent --folder ./agents
+"""
+
+import os
+import sys
+
+# Ensure we're working from the project root directory
+# This allows relative paths to work correctly regardless of where the script is called from
+scriptDir = os.path.dirname(os.path.abspath(__file__))
+projectRoot = os.path.abspath(os.path.join(scriptDir, ".."))
+
+# Change to project root directory to make relative paths work correctly
+os.chdir(projectRoot)
+
+# Add project root and src directory to sys.path for relative imports
+srcPath = os.path.join(projectRoot, "src")
+if srcPath not in sys.path:
+    sys.path.insert(0, srcPath)
+
+if projectRoot not in sys.path:
+    sys.path.append(projectRoot)
+
+
+def main():
+    """Main entry point - delegates to CLI module"""
+    from dolphin.cli import main as cli_main
+    cli_main()
+
+
+if __name__ == "__main__":
+    main()

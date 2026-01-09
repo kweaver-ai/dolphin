@@ -1,0 +1,4 @@
+# List[str] Output Format Test
+# Tests the List[str] output format parsing and validation
+
+/prompt/(output="list_str") Generate a list of 5 popular programming languages. Return only a JSON array of strings. -> languages 

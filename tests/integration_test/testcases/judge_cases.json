@@ -1,0 +1,29 @@
+{
+  "testSuite": {
+    "name": "Dolphin Language Integration Tests",
+    "description": "End-to-end integration tests for Dolphin Language functionality",
+    "version": "1.0.0"
+  },
+  "testCases": [
+    {
+      "name": "judge_test_1",
+      "description": "测试使用 poemWriterStream 工具创作电子邮件主题诗歌的基本功能",
+      "timeout": 30,
+      "parameters": {
+        "query": "写一首关于电子邮件的诗",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/judge_1.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": [],
+        "tools": [
+          "poemWriterStream"
+        ],
+        "outputFormat": null,
+        "errorExpected": false
+      }
+    }  
+  ]
+} 

@@ -1,0 +1,23 @@
+@DESC
+Quickly gather information about a topic from the web and provide preliminary interpretation. Input requests should be expressed as sentences (not keywords)
+@DESC
+
+/prompt/(output="list_str") 
+    We want to research this topic [$query]. Please consider what aspects of information we need to understand to research this topic, then rewrite the query into at least 3 search terms
+    For example:
+    [How has Bayern performed recently] rewritten as ["Bayern Munich recent performance", "Bayern latest news and updates"]
+    [Suggestions for Eisoo's development strategy in the AI era] rewritten as ["Eisoo introduction", "How Eisoo develops in the AI era"]
+    Now please directly output the rewritten results: -> keywords
+    
+/for/ $keyword in $keywords:
+    @_search(query=$keyword) >> result
+/end/
+
+/prompt/Please provide a brief summary based on the query and result materials. The response must be compact and concise
+query: $query
+
+Materials
+```
+$result
+```
+ -> summary_list

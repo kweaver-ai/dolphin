@@ -1,0 +1,14 @@
+entrypoints: ["explore_based"]
+configs:
+  - default: ["v31", "qwen-coder"]
+  - context_engineer.default_strategy: ["level"]
+variables:
+  tools: ["[executeSQL]", "[executeSQL, _cog_gen_sql]"]
+  explore_block_v2 : [true, false]
+  prompt_skillcall : [false]
+num_samples: 8
+sample_method: SEQ
+benchmark: bird_dev
+num_run_cases: 150
+output_variables: []
+threads: 2

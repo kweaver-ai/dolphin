@@ -1,0 +1,242 @@
+{
+    "testSuite": {
+        "name": "Dolphin Language Variable Integration Tests",
+        "description": "Integration tests for GlobalVariablePool variable validation",
+        "version": "1.0.0",
+        "defaultConfig": {
+            "modelName": "Tome-L",
+            "api": "http://192.168.152.11:8303/v1/chat/completions",
+            "typeApi": "openai",
+            "apiKey": "",
+            "userId": "b32ad442-aadd-11ef-ac00-3e62f7949701",
+            "maxTokens": 1000,
+            "temperature": 0.0
+        }
+    },
+    "testCases": [
+        {
+            "name": "variable_content_test_1",
+            "description": "测试GlobalVariablePool中变量的内容检查功能",
+            "timeout": 30,
+            "parameters": {
+                "query": "请简单回复：我理解了你的问题",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_1.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                    {
+                        "variableName": "greeting",
+                        "expectedContent": "Hello World"
+                    },
+                    {
+                        "variableName": "finalMessage",
+                        "expectedContent": "from Dolphin Language"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "variable_append_test_1",
+            "description": "测试变量追加操作功能",
+            "timeout": 30,
+            "parameters": {
+                "query": "第一项内容",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_2.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                    {
+                        "variableName": "items",
+                        "expectedContent": "第二项内容"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "variable_judge_block_test_1",
+            "description": "测试JudgeBlock中的变量操作",
+            "timeout": 30,
+            "parameters": {
+                "query": "今天天气怎么样？",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_3.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                    {
+                        "variableName": "weather_response",
+                        "expectedContent": "天气"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "variable_explore_block_test_1",
+            "description": "测试ExploreBlock中的变量操作和工具调用",
+            "timeout": 60,
+            "parameters": {
+                "query": "请创作一首简短的诗，包含月光",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_4.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                                         {
+                         "variableName": "poem_result",
+                         "expectedContent": "月光"
+                     }
+                ]
+            }
+        },
+        {
+            "name": "variable_mixed_blocks_test_1",
+            "description": "测试多种Block类型的混合变量操作",
+            "timeout": 45,
+            "parameters": {
+                "query": "你好",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_5.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                    {
+                        "variableName": "greeting_list",
+                        "expectedContent": "你好"
+                    },
+                    {
+                        "variableName": "final_response",
+                        "expectedContent": "你好"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "variable_multi_block_test_1",
+            "description": "测试多种Block类型的综合变量操作 - prompt, explore, judge",
+            "timeout": 90,
+            "parameters": {
+                "query": "请创作一首关于春天的诗歌",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_6.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                    {
+                        "variableName": "llm_result",
+                        "expectedContent": "春"
+                    },
+                    {
+                        "variableName": "explore_result",
+                        "expectedContent": "诗"
+                    },
+                    {
+                        "variableName": "judge_result",
+                        "expectedContent": "总结"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "variable_array_index_test_1",
+            "description": "测试数组索引变量引用 - $array[index]",
+            "timeout": 45,
+            "parameters": {
+                "query": "测试数组索引变量引用",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_7.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                    {
+                        "variableName": "first_item",
+                        "expectedContent": "第一项"
+                    },
+                    {
+                        "variableName": "second_item",
+                        "expectedContent": "第二项"
+                    },
+                    {
+                        "variableName": "confirmation",
+                        "expectedContent": "第一项"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "variable_nested_object_test_1",
+            "description": "测试嵌套对象变量引用 - $obj.prop1.prop2",
+            "timeout": 45,
+            "parameters": {
+                "query": "测试嵌套对象变量引用",
+                "history": [],
+                "variables": {}
+            },
+            "dolphinLangPath": "dolphins/variable_test_8.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [],
+                "outputFormat": null,
+                "errorExpected": false,
+                "variableChecks": [
+                    {
+                        "variableName": "user_name",
+                        "expectedContent": "张三"
+                    },
+                    {
+                        "variableName": "user_city",
+                        "expectedContent": "北京"
+                    },
+                    {
+                        "variableName": "greeting_msg",
+                        "expectedContent": "张三"
+                    }
+                ]
+            }
+        }
+    ]
+}

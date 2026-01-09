@@ -1,0 +1,11 @@
+entrypoints: ["explore_based"]
+configs:
+  - default: ["qwen-coder", "k2"]
+  - context_engineer.default_strategy: ["truncation", "level"]
+variables:
+  tools: ["[executeSQL]", "[executeSQL, _cog_gen_sql]"]
+num_samples: 8
+sample_method: SEQ
+benchmark: bird_dev
+num_run_cases: 200
+output_variables: []

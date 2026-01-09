@@ -1,0 +1,70 @@
+# ============================================================================
+# Resource Skill Example - Configuration Template
+# ============================================================================
+#
+# This example demonstrates how to use ResourceSkillkit to load and follow
+# Claude Skill format guidance documents.
+#
+# Usage:
+#   1. Copy this file to global.yaml
+#   2. Replace all "********" with your actual values
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Default Model Configuration
+# ----------------------------------------------------------------------------
+default: "v3"
+
+# ----------------------------------------------------------------------------
+# Cloud Service Configuration
+# ----------------------------------------------------------------------------
+clouds:
+  default: "openai"
+
+  openai:
+    api: "https://api.openai.com/v1/chat/completions"
+    api_key: "********"  # Replace with your API Key
+    userid: "default-user"
+
+# ----------------------------------------------------------------------------
+# LLM Instance Configuration
+# ----------------------------------------------------------------------------
+llms:
+  v3:
+    cloud: "openai"
+    model_name: "gpt-4o"
+    type_api: "openai"
+    temperature: 0.0
+    top_p: 0.95
+    max_tokens: 8192
+
+# ----------------------------------------------------------------------------
+# Context Engineer Configuration
+# ----------------------------------------------------------------------------
+context_engineer:
+  default_strategy: "level"
+  tokenizer_backend: "auto"
+  constraints:
+    max_input_tokens: 64000
+    reserve_output_tokens: 8192
+    preserve_system: true
+
+# ----------------------------------------------------------------------------
+# Skill Loading Configuration
+# ----------------------------------------------------------------------------
+skill:
+  enabled_skills:
+    - "resource_skillkit"   # Enable ResourceSkillkit for Claude Skill support
+    - "vm_skillkit"         # Enable Python execution
+    - "cognitive_skillkit"  # Enable thinking tools
+
+# ----------------------------------------------------------------------------
+# Resource Skills Configuration
+# ----------------------------------------------------------------------------
+# The ResourceSkillkit will automatically scan these directories for skills
+resource_skills:
+  enabled: true
+  directories:
+    - "./skills"              # Project-level skills
+    - "~/.dolphin/skills"     # User-level skills

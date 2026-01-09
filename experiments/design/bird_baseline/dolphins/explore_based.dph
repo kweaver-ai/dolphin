@@ -1,0 +1,33 @@
+/explore/(tools=$tools) 现在要解决的问题是
+```
+$query
+```
+
+思路为
+```
+$evidence
+```
+
+schema为
+```
+$schema
+```
+
+db是
+```
+$db_id
+```
+
+现在请思考，后生成最终正确的的 sqlite 语句，并通过executeSQL工具的验证，成功再进行返回，否则继续调整
+
+[[NOTICE]] 
+(1)请注意建表语句中字段格式的正确性
+(2)最后结果输出的是SQL语句，不是数值结果！！
+[[NOTICE]] 
+
+输出最后通过验证的SQL语句，务必使用这样的格式
+```sql
+-- 在这里写 SQL 代码
+``` -> sql
+
+@executeSQL(datasource=$db_id, sql=$sql.answer) -> final_result

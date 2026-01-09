@@ -1,0 +1,121 @@
+# ============================================================================
+# Dolphin Language SDK - Global Configuration Template
+# ============================================================================
+# 
+# Usage:
+#   1. Copy this file to global.yaml
+#   2. Replace all "********" with your actual values
+#   3. Default config path is ./config/global.yaml
+#
+# Note:
+#   - Do NOT commit global.yaml with real secrets to version control
+#   - global.yaml is already ignored in .gitignore
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Default Model Configuration
+# ----------------------------------------------------------------------------
+# default: Name of the default LLM configuration to use
+# fast: Name of the LLM configuration for fast tasks (optional)
+default: "v3"
+fast: "v3-mini"
+
+# ----------------------------------------------------------------------------
+# Cloud Service Configuration
+# ----------------------------------------------------------------------------
+# Configure multiple cloud services, referenced by 'cloud' field in llms section
+clouds:
+  default: "openai"
+  
+  # OpenAI-compatible API (OpenAI, Azure OpenAI, Alibaba DashScope, etc.)
+  openai:
+    api: "https://api.openai.com/v1/chat/completions"
+    api_key: "********"  # Replace with your API Key
+    userid: "default-user"
+    headers:
+      x-user-id: "default-user"
+  
+  # Example: Alibaba DashScope
+  # dashscope:
+  #   api: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+  #   api_key: "********"
+  #   userid: "default-user"
+
+# ----------------------------------------------------------------------------
+# LLM Instance Configuration
+# ----------------------------------------------------------------------------
+# Configure multiple LLM instances, each can reference different cloud configs
+llms:
+  # Primary model configuration
+  v3:
+    cloud: "openai"                          # Reference to clouds config
+    model_name: "gpt-4o"                     # Model name
+    type_api: "openai"                       # API type: openai | aishu_model_factory
+    temperature: 0.0                         # Temperature (0.0 - 2.0)
+    top_p: 0.95                              # Top-P sampling parameter
+    max_tokens: 8192                         # Maximum output tokens
+  
+  # Fast lightweight model configuration
+  v3-mini:
+    cloud: "openai"
+    model_name: "gpt-4o-mini"
+    type_api: "openai"
+    temperature: 0.0
+    top_p: 0.95
+    max_tokens: 4096
+  
+  # Example: Direct configuration (without cloud reference)
+  # custom-model:
+  #   api: "https://your-api-endpoint/v1/chat/completions"
+  #   api_key: "********"
+  #   model_name: "your-model-name"
+  #   type_api: "openai"
+  #   temperature: 0.0
+  #   max_tokens: 8192
+  #   userid: "your-user-id"
+  #   headers:
+  #     x-custom-header: "value"
+
+# ----------------------------------------------------------------------------
+# VM Remote Execution Configuration (Optional)
+# ----------------------------------------------------------------------------
+# Used for remote code execution scenarios
+# vm:
+#   connection_type: "ssh"                   # Connection type: ssh | docker
+#   host: "your-server.example.com"          # Server address
+#   port: 22                                 # SSH port
+#   username: "your-username"                # Username
+#   encrypted_password: "********"           # Encrypted password
+#   ssh_key_path: "~/.ssh/id_rsa"           # SSH key path (optional, alternative to password)
+#   timeout: 10                              # Connection timeout (seconds)
+#   retry_count: 3                           # Retry count
+
+# ----------------------------------------------------------------------------
+# Context Engineer Configuration
+# ----------------------------------------------------------------------------
+context_engineer:
+  # config_path: "config/context_config.yaml"  # External config file path (optional)
+  default_strategy: "level"                  # Compression strategy: level | selective | none
+  tokenizer_backend: "auto"                  # Tokenizer: auto | tiktoken | simple
+  constraints:
+    max_input_tokens: 64000                  # Maximum input tokens
+    reserve_output_tokens: 8192              # Reserved output tokens
+    preserve_system: true                    # Whether to preserve system messages
+  strategy_configs: {}                       # Strategy-specific configurations
+
+# ----------------------------------------------------------------------------
+# Skill Loading Configuration
+# ----------------------------------------------------------------------------
+skill:
+  # enabled_skills: null                     # null means load all skills
+  # enabled_skills: []                       # Empty list means load no skills
+  enabled_skills:                          # Specify skills to load
+    - "cognitive_skillkit"
+    - "search_skillkit"
+    - "system_functions._date"
+  #   - "sql"
+  #   - "search"
+  #   - "memory"
+  #   - "mcp"                                # Load all MCP services
+  #   - "mcp.playwright"                     # Load specific MCP service

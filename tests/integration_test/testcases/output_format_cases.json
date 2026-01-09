@@ -1,0 +1,138 @@
+{
+  "testSuite": {
+    "name": "Output Format Integration Tests",
+    "description": "Integration tests for output format functionality (JSON, JSONL, ObjectType)",
+    "version": "1.0.0"
+  },
+  "testCases": [
+    {
+      "name": "test_json_output_format",
+      "description": "Test JSON output format parsing and validation",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "Generate a simple user profile",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/output_format_json.dph",
+      "expectedResult": {
+        "contentKeywords": ["John Doe", "johndoe@example.com"],
+        "excludeKeywords": ["error", "failed"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "result",
+            "expectedContent": "John Doe"
+          },
+          {
+            "variableName": "result",
+            "expectedContent": "answer"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_jsonl_output_format",
+      "description": "Test JSONL output format parsing and validation",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "Generate multiple user records",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/output_format_jsonl.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["error", "failed"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "users", 
+            "expectedContent": "name"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_object_type_output_format",
+      "description": "Test ObjectType output format with schema validation",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "Create a product record",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/output_format_object.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": [],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "product",
+            "expectedContent": "description"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_list_str_output_format",
+      "description": "Test List[str] output format parsing and validation",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "Generate a list of programming languages",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/output_format_list_str.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["error", "failed"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "languages",
+            "expectedContent": "JavaScript"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_output_format_error_handling",
+      "description": "Test error handling for invalid output format",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "Test invalid format",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/output_format_error.dph",
+      "expectedResult": {
+        "contentKeywords": ["invalid output format"],
+        "excludeKeywords": [],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "result",
+            "expectedContent": "invalid output format"
+          }
+        ]
+      }
+    }
+  ]
+} 

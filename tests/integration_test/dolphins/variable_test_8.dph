@@ -1,0 +1,4 @@
+{"user": {"name": "张三", "profile": {"age": 25, "city": "北京"}}} -> user_data
+$user_data.user.name -> user_name
+$user_data.user.profile.city -> user_city
+/prompt/(system_prompt="你是一个AI助手")用户姓名是$user_name，来自$user_city，请问候他 -> greeting_msg 

@@ -1,0 +1,4 @@
+# JSON Output Format Test
+# Tests the JSON output format parsing and validation
+
+/prompt/(output="json") Generate a JSON object with user profile containing name, age, and email fields, for Mr. John Doe with email johndoe@example.com. Return a valid JSON object only. -> result 

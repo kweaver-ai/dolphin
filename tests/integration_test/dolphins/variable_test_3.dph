@@ -1,0 +1,1 @@
+/judge/(system_prompt="你是一个天气助手", tools=[])$query -> weather_response 

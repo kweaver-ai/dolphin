@@ -1,0 +1,32 @@
+/prompt/(tools=[executeSQL]) 现在要解决的问题是
+```
+$query
+```
+
+思路为
+```
+$evidence
+```
+
+schema为
+```
+$schema
+```
+
+db是
+```
+$db_id
+```
+
+现在请生成最终的 sqlite 语句
+[[NOTICE]] 请注意建表语句中字段格式的正确性
+不要输出别的内容，请开始 -> sql
+
+/judge/executeSQL
+
+datasource:$db_id
+
+sql
+```
+$sql
+``` -> final_result

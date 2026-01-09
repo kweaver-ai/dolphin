@@ -1,0 +1,34 @@
+{
+  "testSuite": {
+    "name": "Dolphin Language Integration Tests",
+    "description": "End-to-end integration tests for Dolphin Language functionality",
+    "version": "1.0.0"
+  },
+  "testCases": [
+    {
+      "name": "prompt_test_1",
+      "description": "测试语言模型对句子情感倾向的判断能力，识别讽刺语调",
+      "timeout": 30,
+      "parameters": {
+        "query": "这句话是赞扬、批评还是讽刺：你这日子可真轻松啊，呵呵。请直接回复：",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/prompt_1.dph",
+      "expectedResult": {
+        "contentKeywords": ["讽刺"],
+        "excludeKeywords": [],
+        "tools": [
+        ],
+        "outputFormat": null,
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "result",
+            "expectedContent": "讽刺"
+          }
+        ]
+      }
+    }
+  ]
+} 

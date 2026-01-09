@@ -1,0 +1,35 @@
+model:
+  context_limit: 64000          # 模型上下文窗口（输入+输出总量）
+  output_target: 4096           # 预留给输出的 token 数
+
+# ============================================
+buckets:
+  # 稳定系统提示
+  _system:
+    weight: 2.0
+    message_role: system
+    compress: none               # 系统提示不压缩，保持稳定以利用 prefix cache
+
+  # 当前用户输入
+  _query:
+    weight: 1.0
+    message_role: user
+    min_tokens: 1000
+    max_tokens: 20000  
+
+  # 统一对话历史（所有 explore/llm 历史自动聚合到此）
+  conversation_history:
+    weight: 2.5
+    message_role: user
+    
+  # 临时推理/工具响应（保留较短）
+  _scratchpad:
+    weight: 1.0
+    message_role: user
+
+policies:
+  default:
+    # 桶顺序：system -> conversation_history -> query -> scratchpad
+    bucket_order: ["_system", "conversation_history", "_query", "_scratchpad"]
+    # 删除优先级：优先删除 scratchpad，其次是旧的对话历史
+    drop_order: ["_scratchpad", "conversation_history"]

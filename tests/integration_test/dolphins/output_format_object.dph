@@ -1,0 +1,4 @@
+# ObjectType Output Format Test
+# Tests the ObjectType output format with schema validation
+
+/prompt/(output="obj/Product") Create a product record with name, price, and description. Use the Product type. -> product 

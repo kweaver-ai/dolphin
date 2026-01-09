@@ -1,0 +1,2 @@
+/prompt/ 你好，我收到了参数：$input_param，请简单回复一个处理结果 -> response
+{"status": "success", "input_received": $input_param, "response": $response} -> result

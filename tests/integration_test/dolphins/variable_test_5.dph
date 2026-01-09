@@ -1,0 +1,3 @@
+$query >> greeting_list
+"世界" >> greeting_list
+/prompt/(system_prompt="你是一个AI助手")请基于用户的问候 $greeting_list 回复一个友好的回应 -> final_response 

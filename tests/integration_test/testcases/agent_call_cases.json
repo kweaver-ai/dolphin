@@ -1,0 +1,63 @@
+{
+  "testSuite": {
+    "name": "Agent Call Integration Tests",
+    "description": "Tests for calling agents as tools within DPH files",
+    "version": "1.0.0"
+  },
+  "testCases": [
+    {
+      "name": "test_simple_agent_call",
+      "description": "测试简单agent调用",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "Agent call test",
+        "history": [],
+        "variables": {
+          "input_param": "test_value_123"
+        }
+      },
+      "dolphinLangPath": "dolphins/simple_agent_test.dph",
+      "expectedResult": {
+        "contentKeywords": ["success", "test_value_123"],
+        "excludeKeywords": [],
+        "tools": [],
+        "outputFormat": "dict",
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "result",
+            "expectedContent": "success"
+          }
+        ],
+        "outputKey": "result"
+      }
+    },
+    {
+      "name": "test_agent_chain_call",
+      "description": "测试链式agent调用",
+      "enabled": true,
+      "timeout": 60,
+      "parameters": {
+        "query": "Agent chain test",
+        "history": [],
+        "variables": {}
+      },
+      "dolphinLangPath": "dolphins/agent_chain_test.dph",
+      "expectedResult": {
+        "contentKeywords": ["chain_step_1", "chain_step_2"],
+        "excludeKeywords": [],
+        "tools": [],
+        "outputFormat": "dict",
+        "errorExpected": false,
+        "variableChecks": [
+          {
+            "variableName": "final_result",
+            "expectedContent": "Hello from chain test"
+          }
+        ],
+        "outputKey": "final_result"
+      }
+    }
+  ]
+} 

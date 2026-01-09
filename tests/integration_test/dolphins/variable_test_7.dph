@@ -1,0 +1,4 @@
+["第一项", "第二项", "第三项"] -> test_array
+$test_array[0] -> first_item
+$test_array[1] -> second_item
+/prompt/(system_prompt="你是一个AI助手")用户输入了：$first_item 和 $second_item，请确认收到 -> confirmation 
