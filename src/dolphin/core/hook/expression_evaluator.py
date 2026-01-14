@@ -30,14 +30,36 @@ BUILTIN_FUNCTIONS: Dict[str, Callable] = {
     'bool': bool,
 }
 
+# Safe division wrappers to handle ZeroDivisionError
+def _safe_truediv(a, b):
+    """Safe true division that returns inf on division by zero."""
+    if b == 0:
+        return float('inf') if a >= 0 else float('-inf')
+    return operator.truediv(a, b)
+
+
+def _safe_floordiv(a, b):
+    """Safe floor division that returns inf on division by zero."""
+    if b == 0:
+        return float('inf') if a >= 0 else float('-inf')
+    return operator.floordiv(a, b)
+
+
+def _safe_mod(a, b):
+    """Safe modulo that returns 0 on division by zero."""
+    if b == 0:
+        return 0
+    return operator.mod(a, b)
+
+
 # Supported binary operators
 BINARY_OPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-    ast.FloorDiv: operator.floordiv,
-    ast.Mod: operator.mod,
+    ast.Div: _safe_truediv,
+    ast.FloorDiv: _safe_floordiv,
+    ast.Mod: _safe_mod,
     ast.Pow: operator.pow,
 }
 
