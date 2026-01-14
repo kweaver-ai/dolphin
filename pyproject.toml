@@ -3,8 +3,8 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dolphin-language"
-dynamic = ["version"]
+name = "dolphin"
+version = "0.3.3"
 description = "Dolphin Language - An intelligent agent framework"
 authors = [
     {name = "AnyData", email = "contact@anydata.com"}
@@ -38,7 +38,7 @@ dependencies = [
 
 # 可选依赖（按需安装）
 [project.optional-dependencies]
-# pip install dolphin-language[lib] - 安装标准库功能
+# pip install dolphin[lib] - 安装标准库功能
 lib = [
     "mcp>=1.0.0,<2.0.0",
     "sqlalchemy>=2.0.0,<3.0.0",
@@ -49,21 +49,21 @@ lib = [
     "pandas",
 ]
 
-# pip install dolphin-language[cli] - 安装命令行工具
+# pip install dolphin[cli] - 安装命令行工具
 cli = [
     "rich>=14.0.0,<15.0.0",
     "prompt_toolkit>=3.0.0,<4.0.0",
 ]
 
-# pip install dolphin-language[full] - 安装全部功能
+# pip install dolphin[full] - 安装全部功能
 full = [
-    "dolphin-language[lib]",
-    "dolphin-language[cli]",
+    "dolphin[lib]",
+    "dolphin[cli]",
 ]
 
-# pip install dolphin-language[dev] - 开发依赖
+# pip install dolphin[dev] - 开发依赖
 dev = [
-    "dolphin-language[full]",
+    "dolphin[full]",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
@@ -106,9 +106,6 @@ resource_skillkit = "DolphinLanguageSDK.skill.installed.resource_skillkit:Resour
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["dolphin*", "DolphinLanguageSDK*"]
-
-[tool.setuptools.dynamic]
-version = {file = "VERSION"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
