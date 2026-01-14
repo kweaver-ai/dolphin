@@ -20,6 +20,20 @@ class TestBasicCodeBlock(unittest.TestCase):
         """测试前的设置"""
         self.block = BasicCodeBlock(context=Context())
 
+    def test_load_dynamic_tools_should_not_depend_on_deprecated_namespace(self):
+        """
+        回归用例：
+        _load_dynamic_tools 内部存在对 `DolphinLanguageSDK.skill.*` 的硬编码导入，
+        但本仓库的 DolphinLanguageSDK 仅为兼容层（无 skill 子包），会触发 ModuleNotFoundError。
+
+        该用例用于显式覆盖该分支：修复导入路径前应失败，修复后应通过。
+        """
+        block = BasicCodeBlock(context=Context())
+        try:
+            block._load_dynamic_tools({"_dynamic_tools": []})
+        except Exception as e:
+            self.fail(f"_load_dynamic_tools 不应依赖 DolphinLanguageSDK.skill.*，但触发异常: {e}")
+
     def test_find_matching_paren(self):
         """测试匹配括号功能"""
         # 测试简单括号匹配

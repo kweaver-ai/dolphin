@@ -282,6 +282,57 @@ class SingleMessage:
             "image_count": self.get_image_count()
         }
 
+    def str_preview(self, max_chars: int = 20) -> str:
+        """Generate a compact preview of this message for debugging.
+        
+        Shows role and content preview (head...tail if long, full content if short).
+        
+        Args:
+            max_chars: Maximum characters to show from each end of content.
+                      If content length <= max_chars * 2, show full content.
+        
+        Returns:
+            A compact string like '[USER: Hello, how a...your help | 156c]'
+        """
+        # Get text content
+        if isinstance(self.content, list):
+            # Multimodal: extract text content
+            text_parts = [
+                block.get("text", "") 
+                for block in self.content 
+                if block.get("type") == "text"
+            ]
+            text = " ".join(text_parts)
+            image_count = self.get_image_count()
+            suffix = f"+{image_count}img" if image_count > 0 else ""
+        else:
+            text = self.content
+            suffix = ""
+        
+        # Clean up whitespace for display
+        text = text.replace("\n", "↵").replace("\t", "→")
+        text_len = len(text)
+        
+        # Generate content preview
+        if text_len <= max_chars * 2:
+            # Short content: show full
+            content_preview = text
+        else:
+            # Long content: show head...tail
+            head = text[:max_chars]
+            tail = text[-max_chars:]
+            content_preview = f"{head}...{tail}"
+        
+        # Role abbreviation
+        role_abbr = {
+            MessageRole.SYSTEM: "SYS",
+            MessageRole.USER: "USR",
+            MessageRole.ASSISTANT: "AST", 
+            MessageRole.TOOL: "TOL",
+        }.get(self.role, self.role.value[:3].upper())
+        
+        return f"[{role_abbr}: {content_preview}{suffix} | {text_len}c]"
+
     def __str__(self):
         # For multimodal, show a summary instead of full content
         if isinstance(self.content, list):
@@ -581,6 +632,24 @@ class Messages:
     def str_last(self) -> str:
         """Get the last message as string"""
         return str(self.messages[-1]).replace("\n", "\\n")
+
+    def str_summary(self, max_chars: int = 20) -> str:
+        """Generate a compact summary of all messages for debugging.
+        
+        Shows a one-line preview of each message with role and content preview.
+        
+        Args:
+            max_chars: Maximum characters to show from each end of content.
+        
+        Returns:
+            A compact string like:
+            '[SYS: You are a he...assistant | 120c] -> [USR: 请帮我分析...这段代码 | 45c] -> [AST: 好的，我来...完成了。 | 892c]'
+        """
+        if not self.messages:
+            return "[Empty]"
+        
+        previews = [msg.str_preview(max_chars) for msg in self.messages]
+        return " -> ".join(previews)
 
     def have_system_message(self) -> bool:
         """Check if the message list has a system message"""

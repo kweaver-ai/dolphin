@@ -1,6 +1,7 @@
 from enum import Enum
 import json
 import os
+import re
 from typing import Optional, Dict, Any, List
 
 from dolphin.core.context_engineer.config.settings import ContextConfig
@@ -9,6 +10,45 @@ import yaml
 from dolphin.core.common.enums import Messages
 from dolphin.core.config.ontology_config import OntologyConfig
 from dolphin.core.utils.cache_kv import GlobalCacheKVCenter
+
+
+def _resolve_env_var(value: str) -> str:
+    """Resolve environment variable references in string values.
+    
+    Supports format: ${VAR_NAME}
+    If the environment variable is not found, raises ValueError (fail fast).
+    
+    Args:
+        value: String value that may contain environment variable references
+        
+    Returns:
+        Resolved string with environment variables substituted
+        
+    Raises:
+        ValueError: If referenced environment variable is not found
+    """
+    if not isinstance(value, str):
+        return value
+    
+    # If value doesn't contain ${}, return as-is
+    if '${' not in value:
+        return value
+    
+    # Pattern to match ${VAR_NAME} format
+    pattern = r'\$\{([^}]+)\}'
+    
+    def replace_env_var(match):
+        var_name = match.group(1)
+        env_value = os.getenv(var_name)
+        if env_value is None:
+            raise ValueError(
+                f"Environment variable '{var_name}' not found. "
+                f"Please set it before running the application."
+            )
+        return env_value
+    
+    result = re.sub(pattern, replace_env_var, value)
+    return result
 
 
 class TypeAPI(Enum):
@@ -40,27 +80,36 @@ class CloudConfig:
 
     @staticmethod
     def from_dict(config_dict) -> "CloudConfig":
-        api = config_dict.get("api")
-        api_key = config_dict.get("api_key", None)
+        api = _resolve_env_var(config_dict.get("api")) if config_dict.get("api") else None
+        api_key = _resolve_env_var(config_dict.get("api_key")) if config_dict.get("api_key") else None
         user_id = None
 
         if "userid" in config_dict:
-            user_id = config_dict.get("userid")
+            user_id = _resolve_env_var(config_dict.get("userid"))
             headers = {"x-user-id": user_id}
         else:
-            user_id = config_dict.get("headers", {}).get(
-                "x-user-id", "default-x-user-id"
+            user_id = _resolve_env_var(
+                config_dict.get("headers", {}).get(
+                    "x-user-id", "default-x-user-id"
+                )
             )
             headers = {"x-user-id": user_id}
 
         if "security_token" in config_dict:
-            headers["security-token"] = config_dict.get("security_token")
+            headers["security-token"] = _resolve_env_var(config_dict.get("security_token"))
 
         # Merge the headers field in the configuration file
         if "headers" in config_dict:
-            headers.update(config_dict["headers"])
+            # Resolve environment variables in headers values
+            resolved_headers = {
+                k: _resolve_env_var(v) if isinstance(v, str) else v
+                for k, v in config_dict["headers"].items()
+            }
+            headers.update(resolved_headers)
 
-        headers["appid"] = api_key
+        headers["Authorization"] = f"Bearer {api_key}"
+        print(headers)
+        headers["Content-Type"] = "application/json"
         return CloudConfig(api=api, api_key=api_key, user_id=user_id, headers=headers)
 
     def to_dict(self) -> dict:
@@ -149,10 +198,15 @@ class LLMConfig:
         type_api = TypeAPI.from_str(
             config_dict.get("type_api", TypeAPI.AISHU_MODEL_FACTORY.value)
         )
-        api = config_dict.get("api")
-        userid = config_dict.get("userid")
-        headers = config_dict.get("headers", {})
-        security_token = config_dict.get("security_token")
+        api = _resolve_env_var(config_dict.get("api")) if config_dict.get("api") else None
+        userid = _resolve_env_var(config_dict.get("userid")) if config_dict.get("userid") else None
+        # Resolve environment variables in headers values
+        headers_raw = config_dict.get("headers", {})
+        headers = {
+            k: _resolve_env_var(v) if isinstance(v, str) else v
+            for k, v in headers_raw.items()
+        } if headers_raw else {}
+        security_token = _resolve_env_var(config_dict.get("security_token")) if config_dict.get("security_token") else None
         id_value = config_dict.get("id")
         return LLMConfig(
             name=llm_name,

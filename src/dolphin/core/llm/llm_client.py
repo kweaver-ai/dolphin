@@ -20,6 +20,7 @@ from dolphin.core.common.constants import (
     MIN_LENGTH_TO_DETECT_DUPLICATE_OUTPUT,
 )
 from dolphin.core.logging.logger import console
+from dolphin.core.llm.message_sanitizer import sanitize_and_log
 
 """1. Calculate token usage and update the global variable pool; if the usage variable does not exist in the global variable pool, add it first.
 2. Uniformly call models supported by the anydata model factory:
@@ -149,6 +150,12 @@ class LLMClient:
                 **kwargs,
             )
 
+            # Sanitize messages for OpenAI compatibility
+            sanitized_messages = sanitize_and_log(
+                compression_result.compressed_messages.get_messages_as_dict(),
+                self.context.warn,
+            )
+
             # Build request payload
             payload = {
                 "model": model_config.model_name,
@@ -157,7 +164,7 @@ class LLMClient:
                 ),
                 "top_p": model_config.top_p,
                 "top_k": model_config.top_k,
-                "messages": compression_result.compressed_messages,
+                "messages": sanitized_messages,
                 "max_tokens": model_config.max_tokens,
                 "stream": True,
             }

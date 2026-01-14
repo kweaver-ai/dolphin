@@ -268,7 +268,7 @@ class ExploreBlockV2(BasicCodeBlock):
         """Perform one exploration to avoid recursive calls"""
 
         self.context.debug(
-            f"explore[{self.output_var}] messages[{self.context.get_messages().str_last()}] length[{self.context.get_messages().length()}]"
+            f"explore[{self.output_var}] messages[{self.context.get_messages().str_summary()}] length[{self.context.get_messages().length()}]"
         )
 
         # Check if there is a tool call for interrupt recovery

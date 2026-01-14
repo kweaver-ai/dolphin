@@ -537,7 +537,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
     async def _explore_once(self, no_cache: bool = False):
         """Perform one exploration"""
         self.context.debug(
-            f"explore[{self.output_var}] messages[{self.context.get_messages().str_last()}] "
+            f"explore[{self.output_var}] messages[{self.context.get_messages().str_summary()}] "
             f"length[{self.context.get_messages().length()}]"
         )
 
@@ -825,6 +825,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         # Ensure tool response message will definitely be added
         tool_response_added = False
         answer_content = ""
+        metadata = None
 
         try:
             intervention_vars = {
@@ -870,6 +871,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             self.strategy.append_tool_response_message(
                 self.context, tool_call.id, answer_content, metadata
             )
+            tool_response_added = True
 
         except ToolInterrupt as e:
             self._handle_tool_interrupt(e, tool_call.name)
