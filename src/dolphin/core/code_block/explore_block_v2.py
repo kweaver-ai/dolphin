@@ -268,7 +268,7 @@ class ExploreBlockV2(BasicCodeBlock):
         """Perform one exploration to avoid recursive calls"""
 
         self.context.debug(
-            f"explore[{self.output_var}] messages[{self.context.get_messages().str_last()}] length[{self.context.get_messages().length()}]"
+            f"explore[{self.output_var}] messages[{self.context.get_messages().str_summary()}] length[{self.context.get_messages().length()}]"
         )
 
         # Check if there is a tool call for interrupt recovery
@@ -563,6 +563,9 @@ class ExploreBlockV2(BasicCodeBlock):
             raise e
         except Exception as e:
             self._handle_tool_execution_error(e, stream_item.tool_name)
+            # Add tool response message even if error occurs (maintain context integrity)
+            error_content = f"Tool execution error: {str(e)}"
+            self._append_tool_message(tool_call_id, error_content, None)
 
     async def _handle_duplicate_tool_call(self, tool_call, stream_item):
         """Handling Duplicate Tool Calls"""

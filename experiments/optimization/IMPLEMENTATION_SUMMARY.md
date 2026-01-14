@@ -2,7 +2,7 @@
 
 ## 概述
 
-成功实现了统一的进化式优化框架，符合设计文档 `docs/experiments/siminject_apo_prompt_optimizer_design.md` 中的所有核心要求。
+成功实现了统一的进化式优化框架，符合设计文档 `docs/design/experiments/siminject_apo_prompt_optimizer_design.md` 中的所有核心要求。
 
 ## 已实现功能
 

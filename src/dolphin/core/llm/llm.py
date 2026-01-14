@@ -14,6 +14,7 @@ from dolphin.core.common.constants import (
 )
 from dolphin.core.context.context import Context
 from dolphin.core.logging.logger import get_logger
+from dolphin.core.llm.message_sanitizer import sanitize_and_log
 
 logger = get_logger("llm")
 
@@ -65,7 +66,7 @@ class LLM:
     def log_request(self, messages: Messages, continous_content: Optional[str] = None):
         self.context.debug(
             "LLM chat messages[{}] length[{}] continous_content[{}]".format(
-                messages.str_last(),
+                messages.str_summary(),
                 messages.length(),
                 continous_content.replace("\n", "\\n") if continous_content else "",
             )
@@ -94,6 +95,11 @@ class LLMModelFactory(LLM):
                 yield cache_value
                 return
         try:
+            # Sanitize messages for OpenAI compatibility
+            sanitized_messages = sanitize_and_log(
+                messages.get_messages_as_dict(), logger.warning
+            )
+
             # Build request payload
             payload = {
                 "model": llm_instance_config.model_name,
@@ -104,7 +110,7 @@ class LLMModelFactory(LLM):
                 ),
                 "top_p": llm_instance_config.top_p,
                 "top_k": llm_instance_config.top_k,
-                "messages": messages.get_messages_as_dict(),
+                "messages": sanitized_messages,
                 "max_tokens": llm_instance_config.max_tokens,
                 "stream": True,
             }
@@ -293,10 +299,15 @@ class LLMOpenai(LLM):
                 yield cache_value
                 return
 
+        # Sanitize messages for OpenAI compatibility
+        sanitized_messages = sanitize_and_log(
+            messages.get_messages_as_dict(), logger.warning
+        )
+
         # Prepare API call parameters
         api_params = {
             "model": llm_instance_config.model_name,
-            "messages": messages.get_messages_as_dict(),
+            "messages": sanitized_messages,
             "stream": True,
             "max_tokens": llm_instance_config.max_tokens,
             "temperature": temperature,

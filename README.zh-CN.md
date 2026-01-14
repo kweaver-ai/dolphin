@@ -47,7 +47,7 @@ python=3.10+
 推荐使用自动安装脚本，一键完成所有安装步骤：
 
 ```bash
-git clone https://devops.aishu.cn/AISHUDevOps/AnyDATA/_git/dolphin-language
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 python install.py
 ```
@@ -237,7 +237,7 @@ mcp_servers:
 - **🗄️ 数据库访问**：多种数据库连接
 - **🛠️ 自定义工具**：任何符合 MCP 协议的服务
 
-详细文档：[docs/skill/mcp_integration_design.md](docs/skill/mcp_integration_design.md)
+详细文档：[docs/design/skill/mcp_integration_design.md](docs/design/skill/mcp_integration_design.md)
 
 ## 🧠 智能特性
 
@@ -279,11 +279,11 @@ dolphin-language/
 
 - [CLI 使用指南](bin/README.zh-CN.md) - 命令行工具完整文档
 - [辅助工具](tools/README.zh-CN.md) - 辅助工具使用说明
-- [语言规则](docs/language_rules.md) - Dolphin Language 语法和规范
-- [变量格式指南](docs/function/dolphin_language_sdk_variable_format_guide.md) - 变量使用指南
-- [上下文工程指南](docs/context_engineer/context_engineer_guide.md) - 上下文管理最佳实践
-- [运行时跟踪架构](docs/architecture/runtime_tracking_architecture_guide.md) - 监控和调试指南
-- [长期记忆设计](docs/context_engineer/long_term_memory_design.md) - 记忆系统设计文档
+- [语言规则](docs/usage/concepts/language_rules.md) - Dolphin Language 语法和规范
+- [变量格式指南](docs/usage/guides/Dolphin_Language_SDK_Variable_Format_Guide.md) - 变量使用指南
+- [上下文工程指南](docs/design/context/context_engineer_guide.md) - 上下文管理最佳实践
+- [运行时跟踪架构](docs/design/architecture/Runtime_Tracking_Architecture_Guide.md) - 监控和调试指南
+- [长期记忆设计](docs/design/context/long_term_memory_design.md) - 记忆系统设计文档
 
 ## 💡 示例和使用场景
 
@@ -362,7 +362,7 @@ python -m pytest tests/unittest/
 
 ```bash
 # 克隆项目
-git clone https://devops.aishu.cn/AISHUDevOps/AnyDATA/_git/dolphin-language
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 
 # 设置开发环境

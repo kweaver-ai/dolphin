@@ -149,7 +149,7 @@ cd site
 git init
 git add -A
 git commit -m 'Deploy docs'
-git push -f git@github.com:your-org/dolphin-language.git main:gh-pages
+git push -f git@github.com:kweaver-ai/dolphin.git main:gh-pages
 ```
 
 ### 其他平台

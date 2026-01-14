@@ -40,9 +40,9 @@ Dolphin Language SDK 是一个强大的中文AI工作流编排框架，专为构
 
 ## 社区与支持
 
-- **GitHub**: https://github.com/your-org/dolphin-language
-- **问题反馈**: [GitHub Issues](https://github.com/your-org/dolphin-language/issues)
-- **讨论区**: [GitHub Discussions](https://github.com/your-org/dolphin-language/discussions)
+- **GitHub**: https://github.com/kweaver-ai/dolphin
+- **问题反馈**: [GitHub Issues](https://github.com/kweaver-ai/dolphin/issues)
+- **讨论区**: [GitHub Discussions](https://github.com/kweaver-ai/dolphin/discussions)
 
 ## 许可证
 

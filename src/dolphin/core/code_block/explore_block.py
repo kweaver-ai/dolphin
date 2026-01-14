@@ -8,16 +8,28 @@ Control which mode to use via the mode parameter:
 - mode="prompt": use PromptStrategy
 - mode="tool_call" (default): use ToolCallStrategy
 
-Design document: docs/architecture/explore_block_merge.md
+Design document: docs/design/architecture/explore_block_merge.md
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import traceback
-from typing import Any, AsyncGenerator, Dict, Optional
+from datetime import datetime
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dolphin.core.code_block.basic_code_block import BasicCodeBlock
+
+# Hook imports
+from dolphin.core.hook import (
+    HookConfig,
+    OnStopContext,
+    HookResult,
+    HookDispatcher,
+    HookValidationError,
+    parse_hook_config,
+)
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.lib.skillkits.system_skillkit import SystemFunctions
 
@@ -97,6 +109,12 @@ class ExploreBlock(BasicCodeBlock):
         self.no_tool_call_count = 0  # Count consecutive rounds without tool calls
         self.pending_content = None  # Store content without tool_call for merging
 
+        # Hook-based verify attributes
+        self.on_stop: Optional[HookConfig] = None
+        self.current_attempt: int = 0
+        self.hook_history: List[Dict[str, Any]] = []
+        self._last_hook_result: Optional[HookResult] = None
+
     def _create_strategy(self) -> ExploreStrategy:
         """Create the corresponding strategy instance according to mode."""
         if self.mode == "prompt":
@@ -107,7 +125,7 @@ class ExploreBlock(BasicCodeBlock):
     def parse_block_content(self, content: str, category=None, replace_variables=True):
         """Override the parent class method to update mode and strategy after parsing DPH syntax.
 
-                According to the design document docs/architecture/explore_block_merge.md:
+                According to the design document docs/design/architecture/explore_block_merge.md:
                 - /explore/(mode="tool_call", ...) should use ToolCallStrategy
                 - /explore/(mode="prompt", ...) should use PromptStrategy
                 - Default mode is "tool_call"
@@ -141,6 +159,9 @@ class ExploreBlock(BasicCodeBlock):
         async for _ in super().execute(content, category, replace_variables):
             pass
 
+        # Parse on_stop hook configuration from params
+        self._parse_hook_config()
+
         assert self.recorder, "recorder is None"
 
         # Compatible with older versions, output the entire progress content
@@ -167,37 +188,305 @@ class ExploreBlock(BasicCodeBlock):
         # Build initial message
         self._make_init_messages()
 
-        # Variable assignment marker
-        has_add = False if self.assign_type == ">>" else None
-
-        # Perform exploration using loops
-        while True:
-            # Checkpoint: Check user interrupt before each exploration cycle
-            self.context.check_user_interrupt()
-
-            async for ret in self._explore_once(no_cache=True):
-                if self.assign_type == ">>":
-                    if has_add:
-                        self.context.update_var_output(
-                            self.output_var, ret, SourceType.EXPLORE
-                        )
-                    else:
-                        self.context.append_var_output(
-                            self.output_var, ret, SourceType.EXPLORE
-                        )
-                        has_add = True
-                elif self.assign_type == "->":
-                    self.context.set_var_output(
-                        self.output_var, ret, SourceType.EXPLORE
-                    )
-                yield ret
-
-            # Check whether to continue to the next exploration
-            if not self._should_continue_explore():
-                break
+        async for ret in self._execute_main():
+            yield ret
 
         # Update history and cleanup buckets after execution
         self._update_history_and_cleanup()
+
+    def _parse_hook_config(self) -> None:
+        """Parse on_stop hook configuration from params."""
+        on_stop_value = self.params.get("on_stop", None)
+        if on_stop_value is not None:
+            try:
+                self.on_stop = parse_hook_config(on_stop_value)
+                logger.debug(f"Parsed on_stop config: {self.on_stop}")
+            except HookValidationError as e:
+                logger.error(f"Invalid on_stop configuration: {e}")
+                raise
+
+    async def _execute_main(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Unified execution entry point (standard execution + on_stop retry verification)."""
+        if not self.on_stop:
+            async for ret in self._stream_exploration_with_assignment():
+                yield ret
+            return
+
+        max_attempts = self.on_stop.max_retries + 1
+        last_output: Optional[Dict[str, Any]] = None
+        last_hook_result: Optional[HookResult] = None
+
+        for attempt_idx in range(max_attempts):
+            self.current_attempt = attempt_idx + 1
+
+            if attempt_idx > 0:
+                self._reset_for_retry()
+
+            logger.info(
+                f"Hook verify attempt {self.current_attempt}/{max_attempts}"
+            )
+
+            async for ret in self._stream_exploration_with_assignment():
+                last_output = ret
+                yield ret
+
+            last_hook_result = await self._trigger_on_stop_hook(last_output or {})
+            self._last_hook_result = last_hook_result
+            self._record_hook_attempt(self.current_attempt, last_output or {}, last_hook_result)
+
+            if last_hook_result.passed:
+                logger.info(
+                    f"Hook verify passed with score: {last_hook_result.score}"
+                )
+                yield self._build_hook_enriched_result(
+                    last_output or {},
+                    last_hook_result,
+                    verified=True,
+                )
+                return
+
+            if (not last_hook_result.retry) or (attempt_idx >= max_attempts - 1):
+                logger.info(
+                    f"Hook verify stopped: retry={last_hook_result.retry}, "
+                    f"attempt={attempt_idx+1}/{max_attempts}"
+                )
+                break
+
+            if last_hook_result.feedback:
+                self._inject_feedback(
+                    last_hook_result.feedback,
+                    last_hook_result.score,
+                    attempt_idx + 1,
+                )
+                logger.debug(
+                    "Injected feedback for retry: "
+                    f"{last_hook_result.feedback[:100]}..."
+                )
+
+        assert last_hook_result is not None
+        logger.info(
+            f"Hook verify failed after {self.current_attempt} attempts, "
+            f"final score: {last_hook_result.score}"
+        )
+        yield self._build_hook_enriched_result(
+            last_output or {},
+            last_hook_result,
+            verified=False,
+        )
+
+    def _reset_for_retry(self) -> None:
+        """Reset exploration state before retry (preserving message history)."""
+        self.should_stop_exploration = False
+        self.times = 0
+        self.no_tool_call_count = 0
+        self.strategy.reset_deduplicator()
+
+    async def _stream_exploration_with_assignment(
+        self,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Execute exploration with streaming yield, maintaining assign_type output logic."""
+        has_add = False if self.assign_type == ">>" else None
+
+        while True:
+            self.context.check_user_interrupt()
+
+            async for ret in self._explore_once(no_cache=True):
+                has_add = self._write_output_var(ret, has_add)
+                yield ret
+
+            if not self._should_continue_explore():
+                break
+
+    def _write_output_var(
+        self,
+        ret: Dict[str, Any],
+        has_add: Optional[bool],
+    ) -> Optional[bool]:
+        """Write to output_var based on assign_type and return updated has_add flag."""
+        if self.assign_type == ">>":
+            if has_add:
+                self.context.update_var_output(
+                    self.output_var, ret, SourceType.EXPLORE
+                )
+            else:
+                self.context.append_var_output(
+                    self.output_var, ret, SourceType.EXPLORE
+                )
+                has_add = True
+        elif self.assign_type == "->":
+            self.context.set_var_output(self.output_var, ret, SourceType.EXPLORE)
+        return has_add
+
+    async def _trigger_on_stop_hook(self, output: Dict[str, Any]) -> HookResult:
+        """Trigger the on_stop hook and return result.
+
+        This method builds the OnStopContext from the exploration output and
+        dispatches it to the configured hook handler (expression or agent).
+
+        Note: Agent-based verification (@verifier) is not yet supported in v1.
+        Currently only expression-based handlers are functional. When agent
+        support is added, the runtime parameter will be properly initialized.
+
+        Args:
+            output: The exploration output containing answer, think, etc.
+
+        Returns:
+            HookResult from hook execution, or a degraded result on timeout/error.
+        """
+        # Build hook context from output
+        context = OnStopContext(
+            attempt=self.current_attempt,
+            stage="explore",
+            answer=self._extract_answer(output),
+            think=self._extract_think(output),
+            steps=self.times,
+            tool_calls=self._collect_tool_calls(),
+        )
+
+        # Dispatch hook with timeout protection
+        dispatcher = HookDispatcher(
+            config=self.on_stop,
+            context=context,
+            variable_pool=self.context.variable_pool,
+            # TODO: Pass runtime when agent-based verification is implemented.
+            # Agent verification requires runtime to load and execute .dph files.
+            runtime=None,
+        )
+
+        # Apply timeout protection to prevent hook execution from blocking indefinitely
+        timeout_seconds = getattr(self.on_stop, 'timeout', None) or 60
+
+        try:
+            return await asyncio.wait_for(
+                dispatcher.dispatch(),
+                timeout=timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Hook dispatch timeout after {timeout_seconds}s, "
+                f"returning degraded result"
+            )
+            return HookResult(
+                score=0.0,
+                passed=False,
+                feedback=None,
+                retry=False,
+                breakdown=None,
+                error=f"Hook execution timeout after {timeout_seconds}s",
+                error_type="timeout",
+                execution_status="timeout",
+            )
+
+    def _extract_answer(self, output: Optional[Dict[str, Any]]) -> str:
+        """Extract answer from output dict."""
+        if not output:
+            return ""
+        if isinstance(output, dict):
+            return output.get("answer", "") or output.get("block_answer", "")
+        if isinstance(output, list) and len(output) > 0:
+            last = output[-1]
+            if isinstance(last, dict):
+                return last.get("answer", "") or last.get("block_answer", "")
+        return str(output) if output else ""
+
+    def _extract_think(self, output: Optional[Dict[str, Any]]) -> str:
+        """Extract thinking process from output dict."""
+        if not output:
+            return ""
+        if isinstance(output, dict):
+            return output.get("think", "")
+        if isinstance(output, list) and len(output) > 0:
+            last = output[-1]
+            if isinstance(last, dict):
+                return last.get("think", "")
+        return ""
+
+    def _collect_tool_calls(self) -> List[Dict[str, Any]]:
+        """Collect tool calls made during exploration."""
+        return self.strategy.get_tool_call_history()
+
+    def _record_hook_attempt(
+        self,
+        attempt: int,
+        output: Dict[str, Any],
+        hook_result: HookResult
+    ) -> None:
+        """Record hook attempt to history for trajectory tracking."""
+        record = {
+            "attempt": attempt,
+            "timestamp": datetime.now().isoformat(),
+            "score": hook_result.score,
+            "passed": hook_result.passed,
+            "feedback": hook_result.feedback,
+            "retry": hook_result.retry,
+        }
+        if hook_result.breakdown:
+            record["breakdown"] = hook_result.breakdown
+        if hook_result.error:
+            record["error"] = hook_result.error
+            record["error_type"] = hook_result.error_type
+
+        self.hook_history.append(record)
+
+    def _inject_feedback(self, feedback: str, score: float, attempt: int) -> None:
+        """Inject feedback as user message to scratchpad.
+
+        Args:
+            feedback: Feedback message from hook
+            score: Current score
+            attempt: Current attempt number
+        """
+        formatted = f"""[Verification Failed - Please Improve]
+Score: {score:.2f} / Target: {self.on_stop.threshold:.2f}
+Attempt: {attempt}
+
+Feedback:
+{feedback}
+
+Please reconsider your approach and improve your answer based on the feedback above.
+"""
+        # Add feedback as user message to scratchpad
+        feedback_messages = Messages()
+        feedback_messages.add_message(formatted, MessageRole.USER)
+        self.context.add_bucket(
+            BuildInBucket.SCRATCHPAD.value,
+            feedback_messages,
+        )
+
+    def _build_hook_enriched_result(
+        self,
+        output: Dict[str, Any],
+        hook_result: HookResult,
+        verified: bool
+    ) -> Dict[str, Any]:
+        """Build result enriched with hook information.
+
+        Args:
+            output: Original exploration output
+            hook_result: Last hook result
+            verified: Whether verification passed
+
+        Returns:
+            Enriched result dict
+        """
+        result = output.copy() if isinstance(output, dict) else {"answer": output}
+
+        # Add hook-related fields
+        result["score"] = hook_result.score
+        result["passed"] = verified
+        result["attempts"] = self.current_attempt
+        result["hook_history"] = self.hook_history.copy()
+
+        if hook_result.feedback:
+            result["feedback"] = hook_result.feedback
+
+        if hook_result.error:
+            result["verification_error"] = hook_result.error
+            result["verification_status"] = hook_result.execution_status
+        else:
+            result["verification_status"] = "success"
+
+        return result
 
     def _make_init_messages(self):
         """Build initialization message"""
@@ -248,7 +537,7 @@ class ExploreBlock(BasicCodeBlock):
     async def _explore_once(self, no_cache: bool = False):
         """Perform one exploration"""
         self.context.debug(
-            f"explore[{self.output_var}] messages[{self.context.get_messages().str_last()}] "
+            f"explore[{self.output_var}] messages[{self.context.get_messages().str_summary()}] "
             f"length[{self.context.get_messages().length()}]"
         )
 
@@ -536,6 +825,7 @@ class ExploreBlock(BasicCodeBlock):
         # Ensure tool response message will definitely be added
         tool_response_added = False
         answer_content = ""
+        metadata = None
 
         try:
             intervention_vars = {
@@ -581,6 +871,7 @@ class ExploreBlock(BasicCodeBlock):
             self.strategy.append_tool_response_message(
                 self.context, tool_call.id, answer_content, metadata
             )
+            tool_response_added = True
 
         except ToolInterrupt as e:
             self._handle_tool_interrupt(e, tool_call.name)

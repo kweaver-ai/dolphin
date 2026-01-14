@@ -14,7 +14,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-org/dolphin-language.git
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 
 # 2. 设置开发环境
@@ -28,7 +28,7 @@ make test
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-org/dolphin-language.git
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 
 # 2. 安装依赖
