@@ -237,7 +237,7 @@ mcp_servers:
 - **🗄️ Database Access**: Multiple database connections
 - **🛠️ Custom Tools**: Any MCP protocol-compliant service
 
-Detailed documentation: [docs/skill/mcp_integration_design.md](docs/skill/mcp_integration_design.md)
+Detailed documentation: [docs/design/skill/mcp_integration_design.md](docs/design/skill/mcp_integration_design.md)
 
 ## 🧠 Intelligent Features
 
@@ -279,11 +279,11 @@ dolphin-language/
 
 - [CLI Guide](bin/README.md) - Complete CLI documentation
 - [Utility Tools](tools/README.md) - Utility tools usage guide
-- [Language Rules](docs/language_rules.md) - Dolphin Language syntax and specifications
-- [Variable Format Guide](docs/function/dolphin_language_sdk_variable_format_guide.md) - Variable usage guide
-- [Context Engineering Guide](docs/context_engineer/context_engineer_guide.md) - Context management best practices
-- [Runtime Tracking Architecture](docs/architecture/runtime_tracking_architecture_guide.md) - Monitoring and debugging guide
-- [Long-term Memory Design](docs/context_engineer/long_term_memory_design.md) - Memory system design document
+- [Language Rules](docs/usage/concepts/language_rules.md) - Dolphin Language syntax and specifications
+- [Variable Format Guide](docs/usage/guides/Dolphin_Language_SDK_Variable_Format_Guide.md) - Variable usage guide
+- [Context Engineering Guide](docs/design/context/context_engineer_guide.md) - Context management best practices
+- [Runtime Tracking Architecture](docs/design/architecture/Runtime_Tracking_Architecture_Guide.md) - Monitoring and debugging guide
+- [Long-term Memory Design](docs/design/context/long_term_memory_design.md) - Memory system design document
 
 ## 💡 Examples and Use Cases
 

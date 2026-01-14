@@ -55,7 +55,7 @@
   - 支持技能包的动态加载和热插拔
   - 提供统一的技能注册和生命周期管理
   - 增强技能系统的可扩展性和模块化程度
-  - 详细设计文档：`docs/skill_loading_refactor.md`
+  - 详细设计文档：`docs/usage/guides/skill_loading_refactor.md`
 
 - **LLM客户端增强**: 大幅提升LLM调用的日志记录和错误处理能力 (`src/DolphinLanguageSDK/llm/llm_client.py`)
   - 添加详细的请求参数日志，包括模型、温度、最大token数等信息
@@ -134,7 +134,7 @@
   - **ExecutionStateRegistry**: 执行状态注册表，追踪和管理协程生命周期
   - **ResumeHandle**: 恢复句柄，提供协程恢复能力
   - 支持工具中断（Tool Interrupt）和协程恢复能力
-  - 详细设计文档：`docs/architecture/coroutine_execution_design.md` (1109 行)
+  - 详细设计文档：`docs/design/architecture/coroutine_execution_design.md` (1109 行)
 
 - **BaseAgent 协程支持**: 增强 BaseAgent 以支持协程式执行
   - 新增 `run_mode` 参数到 `BaseAgent::arun()` 方法，支持 'normal' 和 'coroutine' 运行模式
@@ -152,7 +152,7 @@
   - **Flag Definitions**: 预定义的功能标志，如 `ENABLE_CONTEXT_ENGINEER_V2`、`ENABLE_MUST_EXECUTE` 等
   - 支持从环境变量、配置文件等多种方式加载标志状态
   - 完整的测试覆盖：`tests/unittest/test_flags.py` (319 行)
-  - 详细设计文档：`docs/function/feature_flags_management_design.md` (1115 行)
+  - 详细设计文档：`docs/usage/configuration/feature_flags_management_design.md` (1115 行)
 
 - **CLI 集成**: `./bin/dolphin` 命令行工具支持功能标志参数
   - 可通过命令行参数启用/禁用特定功能
@@ -165,7 +165,7 @@
   - 提供记忆索引和语义检索能力
   - 支持记忆的持久化和恢复
   - 完整的测试覆盖：`tests/unittest/skillkit/test_memory_skillkit.py` (656 行)
-  - 详细设计文档：`docs/skill/memory_skillkit_upgrade_design.md` (474 行)
+  - 详细设计文档：`docs/design/skill/memory_skillkit_upgrade_design.md` (474 行)
 
 - **沙盒内存管理**: 新增 `src/DolphinLanguageSDK/mem/sandbox.py` (47 行)
   - 提供隔离的内存沙盒环境
@@ -200,7 +200,7 @@
   - **控制器组件**: `BudgetController` (118 行) - 预算控制（迭代/时间/Token）
   - **组件注册表**: `registry.py` (152 行) - 统一组件注册和工厂
   - **详细文档**:
-    - `docs/experiments/siminject_apo_prompt_optimizer_design.md` (1064 行)
+    - `docs/design/experiments/siminject_apo_prompt_optimizer_design.md` (1064 行)
     - `experiments/optimization/README.md` (320 行)
     - `IMPLEMENTATION_SUMMARY.md` (304 行)
     - `OPTIMIZATION_METHODS.md` (452 行)

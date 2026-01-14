@@ -698,7 +698,7 @@ class TestExploreBlockModeFromDPHSyntax(unittest.TestCase):
     """
     测试 DPH 语法中 mode 参数的解析
 
-    根据设计文档 docs/architecture/explore_block_merge.md:
+    根据设计文档 docs/design/architecture/explore_block_merge.md:
     - /explore/(mode="tool_call", ...) 应使用 ToolCallStrategy
     - /explore/(mode="prompt", ...) 应使用 PromptStrategy
     - 默认模式为 "tool_call"

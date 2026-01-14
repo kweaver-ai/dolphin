@@ -4,7 +4,7 @@ This module defines the ExploreStrategy abstract interface and provides two conc
 - PromptStrategy: Prompt mode, invoking tools in the prompt using the =># format
 - ToolCallStrategy: Tool Call mode, utilizing the LLM's native tool_call capability
 
-Design document: docs/architecture/explore_block_merge.md
+Design document: docs/design/architecture/explore_block_merge.md
 """
 
 import json

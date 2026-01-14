@@ -462,7 +462,7 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
     """
     测试禁用 EXPLORE_BLOCK_V2 时，ExploreBlock 能正确解析 mode=tool_call 参数
 
-    这个测试验证设计文档 docs/architecture/explore_block_merge.md 中的要求：
+    这个测试验证设计文档 docs/design/architecture/explore_block_merge.md 中的要求：
     - /explore/(mode="tool_call") 应使用 ToolCallStrategy
     - tools 参数应该被传递给 LLM
 

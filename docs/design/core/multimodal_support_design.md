@@ -91,7 +91,7 @@
 
 ## 4. 模块详细设计 (Module Design)
 
-> **📁 路径更新说明**：根据模块重构（参见 `docs/architecture/module_restructure_design.md`），原 `DolphinLanguageSDK` 已迁移至 `dolphin.core`/`dolphin.lib`/`dolphin.sdk` 结构。
+> **📁 路径更新说明**：根据模块重构（参见 `docs/design/architecture/module_restructure_design.md`），原 `DolphinLanguageSDK` 已迁移至 `dolphin.core`/`dolphin.lib`/`dolphin.sdk` 结构。
 
 ### 4.1 dolphin.core.common
 

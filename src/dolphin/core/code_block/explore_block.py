@@ -8,7 +8,7 @@ Control which mode to use via the mode parameter:
 - mode="prompt": use PromptStrategy
 - mode="tool_call" (default): use ToolCallStrategy
 
-Design document: docs/architecture/explore_block_merge.md
+Design document: docs/design/architecture/explore_block_merge.md
 """
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ class ExploreBlock(BasicCodeBlock):
     def parse_block_content(self, content: str, category=None, replace_variables=True):
         """Override the parent class method to update mode and strategy after parsing DPH syntax.
 
-                According to the design document docs/architecture/explore_block_merge.md:
+                According to the design document docs/design/architecture/explore_block_merge.md:
                 - /explore/(mode="tool_call", ...) should use ToolCallStrategy
                 - /explore/(mode="prompt", ...) should use PromptStrategy
                 - Default mode is "tool_call"

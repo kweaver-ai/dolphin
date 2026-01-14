@@ -1171,7 +1171,7 @@ You have access to an Artifact system for creating and managing structured outpu
 ## 8. 参考资料
 
 - [Claude Artifacts 设计](https://www.anthropic.com/news/artifacts)
-- Dolphin Language SDK Agent 架构: `docs/architecture/agent_architecture_guide.md`
+- Dolphin Language SDK Agent 架构: `docs/design/architecture/agent_architecture_guide.md`
 - SkillkitHook 实现: `src/DolphinLanguageSDK/skill_results/skillkit_hook.py`
 
 ---

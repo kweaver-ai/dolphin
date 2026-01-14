@@ -108,7 +108,6 @@ class CloudConfig:
             headers.update(resolved_headers)
 
         headers["Authorization"] = f"Bearer {api_key}"
-        print(headers)
         headers["Content-Type"] = "application/json"
         return CloudConfig(api=api, api_key=api_key, user_id=user_id, headers=headers)
 

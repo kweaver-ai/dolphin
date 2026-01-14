@@ -62,43 +62,55 @@ markdown_extensions:
 nav:
   - 首页: index.md
   - 快速开始:
-    - 安装: getting-started/installation.md
-    - 快速入门: getting-started/quickstart.md
-    - 基础概念: getting-started/basics.md
+    - 安装: usage/quick_start/installation.md
+    - 快速入门: usage/quick_start/quickstart.md
+    - 基础概念: usage/quick_start/basics.md
+    - 快速开始指南: usage/quick_start/quick_start_guide.md
   - 语言规范:
-    - DSL语法: language_rules.md
-    - 代码块类型: language/code_blocks.md
-  - 核心功能:
-    - 多智能体: core/agents.md
-    - 内存系统: core/memory.md
-    - 长期记忆: core/long_term_memory.md
-    - 功能标志: core/feature_flags.md
-    - 功能标志管理设计: function/feature_flags_management_design.md
-    - 变量格式指南: function/dolphin_language_sdk_variable_format_guide.md
-    - 输出格式使用: function/output_format_usage_guide.md
-  - 技能系统:
-    - 技能加载重构: skill_loading_refactor.md
-    - MCP集成: skill/mcp_integration_design.md
-    - 记忆技能套件: skill/memory_skillkit_upgrade_design.md
-    - 技能Hook指南: skill/skillkit_hook_guide.md
-    - 技能结果类图: skill/skill_results_class_diagram.md
-  - 上下文工程:
-    - 上下文工程指南: context_engineer/context_engineer_guide.md
-    - 上下文工程V2: context_engineer/context_engineer_v2.md
-    - 长期记忆设计: context_engineer/long_term_memory_design.md
-    - 智能体上下文手册: context_engineer/agentic_context_playbook_design.md
-  - 开发指南:
-    - 使用MkDocs: use_mkdocs.md
-  - 架构设计:
-    - 智能体架构指南: architecture/agent_architecture_guide.md
-    - 协程执行设计: architecture/coroutine_execution_design.md
-    - 协程系统: architecture/coroutine.md
-    - 运行时跟踪架构: architecture/runtime_tracking_architecture_guide.md
-    - 详细实现摘要: verbose_implementation_summary.md
-  - 实验框架:
-    - 实验优化设计: experiments/siminject_apo_prompt_optimizer_design.md
-    - 语义训练设计: experiments/dolphin_semantic_training_design.md
-    - 实验框架: experiments/experiments.md
+    - DSL语法: usage/concepts/language_rules.md
+    - 代码块类型: usage/concepts/code_blocks.md
+  - 核心概念:
+    - 多智能体: design/core/agents.md
+    - 内存系统: usage/concepts/memory.md
+    - 长期记忆: usage/concepts/long_term_memory.md
+  - 使用指南:
+    - 技能加载重构: usage/guides/skill_loading_refactor.md
+    - 技能Hook指南: usage/guides/skillkit_hook_guide.md
+    - 变量格式指南: usage/guides/Dolphin_Language_SDK_Variable_Format_Guide.md
+    - 输出格式使用: usage/guides/output_format_usage_guide.md
+    - 使用MkDocs: usage/guides/use_mkdocs.md
+  - 配置参考:
+    - 功能标志管理: usage/configuration/feature_flags_management_design.md
+    - 实验框架配置: usage/configuration/experiments.md
+  - 设计文档:
+    - 架构设计:
+      - 智能体架构指南: design/architecture/agent_architecture_guide.md
+      - 协程执行设计: design/architecture/coroutine_execution_design.md
+      - 协程系统: design/architecture/coroutine.md
+      - 运行时跟踪架构: design/architecture/Runtime_Tracking_Architecture_Guide.md
+      - 模块重构设计: design/architecture/module_restructure_design.md
+      - Artifacts设计: design/architecture/Artifacts_Design.md
+      - 详细实现摘要: design/architecture/verbose_implementation_summary.md
+    - 核心功能设计:
+      - 功能标志: design/core/feature_flags.md
+      - 验证系统提案: design/core/verify-proposal.md
+      - 多模态支持设计: design/core/multimodal_support_design.md
+    - 上下文工程设计:
+      - 上下文工程指南: design/context/context_engineer_guide.md
+      - 上下文工程V2: design/context/context_engineer_v2.md
+      - 长期记忆设计: design/context/long_term_memory_design.md
+      - 智能体上下文手册: design/context/agentic_context_playbook_design.md
+    - 技能系统设计:
+      - MCP集成: design/skill/mcp_integration_design.md
+      - 记忆技能套件: design/skill/memory_skillkit_upgrade_design.md
+      - 资源技能支持: design/skill/resource-skill-support-design.md
+      - 技能上下文策略: design/skill/skill_context_strategy_design.md
+      - 技能结果类图: design/skill/skill_results_class_diagram.md
+    - CLI设计:
+      - 用户中断设计: design/cli/user_interrupt_design.md
+    - 实验框架设计:
+      - 实验优化设计: design/experiments/siminject_apo_prompt_optimizer_design.md
+      - 语义训练设计: design/experiments/dolphin_semantic_training_design.md
   - 更新日志:
     - CHANGELOG.md
 
