@@ -4,8 +4,8 @@
 site_name: Dolphin Language SDK 文档
 site_description: Dolphin Language SDK - AI工作流编排框架
 site_url: http://localhost:30050
-repo_url: https://devops.aishu.cn/AISHUDevOps/DIP/_git/dolphin-language
-repo_name: DIP/dolphin-language
+repo_url: https://github.com/kweaver-ai/dolphin
+repo_name: kweaver-ai/dolphin
 
 # 主题配置
 theme:
@@ -128,9 +128,8 @@ extra:
     provider: mike
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/your-org/dolphin-language
-    - icon: fontawesome/brands/twitter
-      link: https://twitter.com/your-org
+      link: https://github.com/kweaver-ai/dolphin
+
 
 # 静态文件
 extra_css:

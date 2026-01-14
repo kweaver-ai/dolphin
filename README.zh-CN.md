@@ -47,7 +47,7 @@ python=3.10+
 推荐使用自动安装脚本，一键完成所有安装步骤：
 
 ```bash
-git clone https://devops.aishu.cn/AISHUDevOps/AnyDATA/_git/dolphin-language
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 python install.py
 ```
@@ -362,7 +362,7 @@ python -m pytest tests/unittest/
 
 ```bash
 # 克隆项目
-git clone https://devops.aishu.cn/AISHUDevOps/AnyDATA/_git/dolphin-language
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 
 # 设置开发环境

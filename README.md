@@ -47,7 +47,7 @@ python=3.10+
 Recommended: Use the automatic installation script for one-click setup:
 
 ```bash
-git clone https://devops.aishu.cn/AISHUDevOps/AnyDATA/_git/dolphin-language
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 python install.py
 ```
@@ -362,7 +362,7 @@ python -m pytest tests/unittest/
 
 ```bash
 # Clone project
-git clone https://devops.aishu.cn/AISHUDevOps/AnyDATA/_git/dolphin-language
+git clone https://github.com/kweaver-ai/dolphin.git
 cd dolphin-language
 
 # Setup development environment

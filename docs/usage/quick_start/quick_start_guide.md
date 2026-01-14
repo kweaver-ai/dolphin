@@ -143,7 +143,7 @@ dolphin profile --agent my_agent --folder ./agents \
 
 ## 获取帮助
 
-- 💬 GitHub Issues: https://github.com/your-org/dolphin-language/issues
+- 💬 GitHub Issues: https://github.com/kweaver-ai/dolphin/issues
 - 📚 CLI 文档：`bin/README.md`
 - 🔍 查看版本: `dolphin --version`
 
