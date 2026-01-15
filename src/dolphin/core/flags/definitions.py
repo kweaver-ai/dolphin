@@ -44,6 +44,6 @@ DEFAULT_VALUES = {
     DEBUG_MODE: False,
     # Disable LLM cache
     DISABLE_LLM_CACHE: False,
-    # Multiple tool calls (disabled by default for backward compatibility)
+    # Multiple tool calls (enabled by default)
     ENABLE_PARALLEL_TOOL_CALLS: True,
 }

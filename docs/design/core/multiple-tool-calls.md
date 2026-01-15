@@ -31,7 +31,9 @@
 
 1. **仅针对 ExploreBlock**：本设计仅修改 `ExploreBlock`，不考虑 `ExploreBlockV2` 的同步修改
 2. **串行执行**：采用串行执行策略，按 index 顺序逐个执行 tool calls
-3. **Feature Flag 控制**：通过 `ENABLE_PARALLEL_TOOL_CALLS` flag 控制功能启用/禁用（注：flag 名称保留以兼容 OpenAI 术语）
+3. **Feature Flag 控制**：通过 `ENABLE_PARALLEL_TOOL_CALLS` flag 控制功能启用/禁用
+   - **默认值**: True（启用），默认支持多工具调用
+   - **注**: flag 名称保留以兼容 OpenAI 术语
 4. **向后兼容**：保留现有单 tool call 的数据结构和接口，确保兼容性
 5. **完整测试覆盖**：包含单元测试和集成测试，验证多 tool call 场景的正确性
 
@@ -179,12 +181,23 @@ async def chat(self, ...):
 ```python
 @dataclass
 class ToolCallInfo:
-    """单个 tool call 的信息"""
+    """单个 tool call 的信息
+    
+    Attributes:
+        id: 唯一标识符（LLM 提供或生成）
+        name: 工具/函数名称
+        arguments: 解析后的参数字典（解析失败时为 None）
+        index: 在多工具调用响应中的位置索引
+        raw_arguments: 原始未解析的参数字符串（用于调试）
+        is_complete: 工具调用参数是否已完全接收并成功解析
+                    如果流未完成或 JSON 解析失败则为 False
+    """
     id: str
     name: str
     arguments: Optional[Dict[str, Any]] = None
     index: int = 0
     raw_arguments: str = ""
+    is_complete: bool = False
 ```
 
 #### 3.2.2 StreamItem 修改
@@ -233,7 +246,18 @@ class StreamItem:
             )]
         return []
 
-    def parse_from_chunk(self, chunk: dict, session_counter: int = 0):
+    def parse_from_chunk(self, chunk: dict, session_counter: Optional[int] = None):
+        """Parse streaming chunk from LLM response.
+        
+        Args:
+            chunk: The LLM response chunk containing content, tool calls, etc.
+            session_counter: Optional session-level tool call batch counter for
+                           generating fallback tool_call_ids. If None, a short UUID
+                           will be used to ensure uniqueness across sessions.
+        """
+        # Generate a unique batch ID if no session_counter provided
+        batch_id = str(session_counter) if session_counter is not None else uuid.uuid4().hex[:8]
+        
         self.answer = chunk.get("content", "")
         self.think = chunk.get("reasoning_content", "")
         self.token_usage = chunk.get("usage", {})
@@ -255,32 +279,42 @@ class StreamItem:
                 if data.get("name"):
                     args_str = "".join(data.get("arguments", []))
                     parsed_args = None
-                    is_valid = False
+                    is_complete = False
                     
                     if args_str:
                         try:
                             parsed_args = json.loads(args_str)
-                            is_valid = True
+                            if isinstance(parsed_args, str):
+                                # Double JSON encoding detected - log for debugging
+                                logger.debug(
+                                    f"Double JSON encoding detected for tool call '{data.get('name')}', "
+                                    f"performing second parse. Original: {args_str[:200]}..."
+                                    if len(args_str) > 200 else
+                                    f"Double JSON encoding detected for tool call '{data.get('name')}', "
+                                    f"performing second parse. Original: {args_str}"
+                                )
+                                parsed_args = json.loads(parsed_args)
+                            is_complete = True  # Successfully parsed
                         except json.JSONDecodeError:
-                            # 仅在流式结束时才视为解析失败，过程中暂时忽略
+                            # Arguments not yet complete, keep as None
+                            # is_complete remains False
                             pass
                     
                     # 生成或使用 tool_call_id
                     # 优先使用 LLM 提供的 id；若无，则使用稳定的 fallback 规则
                     tool_call_id = data.get("id")
                     if not tool_call_id:
-                        # Fallback: 使用 session_counter 和 index 生成稳定 ID
-                        # 格式：call_{session_counter}_{index}
-                        tool_call_id = f"call_{session_counter}_{normalized_index}"
+                        # Fallback: 使用 batch_id 和 index 生成稳定 ID
+                        # 格式：call_{batch_id}_{index}
+                        tool_call_id = f"call_{batch_id}_{normalized_index}"
                     
-                    # 即使参数未解析（is_valid=False），也先加入列表，
-                    # 供后续 get_tool_calls() 配合 finish_reason 最终判定
                     self.tool_calls.append(ToolCallInfo(
                         id=tool_call_id,
                         name=data["name"],
                         arguments=parsed_args,
                         index=normalized_index,
                         raw_arguments=args_str,
+                        is_complete=is_complete,  # 新增：设置完成状态
                     ))
         
         # 兼容旧字段
@@ -291,6 +325,16 @@ class StreamItem:
             if func_args_str:
                 try:
                     self.tool_args = json.loads(func_args_str)
+                    if isinstance(self.tool_args, str):
+                        # Double JSON encoding detected - log for debugging
+                        logger.debug(
+                            f"Double JSON encoding detected for legacy tool call '{chunk['func_name']}', "
+                            f"performing second parse. Original: {func_args_str[:200]}..."
+                            if len(func_args_str) > 200 else
+                            f"Double JSON encoding detected for legacy tool call '{chunk['func_name']}', "
+                            f"performing second parse. Original: {func_args_str}"
+                        )
+                        self.tool_args = json.loads(self.tool_args)
                 except json.JSONDecodeError:
                     pass
 ```
@@ -363,21 +407,14 @@ class ExploreStrategy(ABC):
         This method is required for multi-tool-calls: each tool result must be
         associated with the exact tool_call_id from the assistant tool_calls.
         
-        注意：实现必须兼容现有 Messages API
-        - 以 Messages.add_tool_response_message() 的当前签名为准
-        - metadata 参数为可选扩展，如果 API 不支持则不传递
+        注意：Messages.add_tool_response_message() 已原生支持 metadata 参数
         """
-        import inspect
-        
         messages = Messages()
-        # 检查 add_tool_response_message 是否接受 metadata 参数
-        sig = inspect.signature(messages.add_tool_response_message)
-        if 'metadata' in sig.parameters and metadata is not None:
-            messages.add_tool_response_message(content, tool_call_id=tool_call_id, metadata=metadata)
-        else:
-            # 兼容模式：不传递 metadata
-            messages.add_tool_response_message(content, tool_call_id=tool_call_id)
-        
+        messages.add_tool_response_message(
+            content=content, 
+            tool_call_id=tool_call_id, 
+            metadata=metadata or {}
+        )
         context.add_bucket(BuildInBucket.SCRATCHPAD.value, messages)
 ```
 
@@ -394,9 +431,9 @@ class ToolCallStrategy(ExploreStrategy):
     ) -> List[ToolCall]:
         """检测多个 tool calls
         
-        注意：只有满足以下条件之一才会返回 tool call：
-        1. arguments 已成功解析（非 None）
-        2. 流已结束（finish_reason 非空）且 arguments 解析失败时跳过该 tool call
+        注意：只有满足以下条件才会返回 tool call：
+        1. is_complete=True 且 arguments 已成功解析（非 None）
+        2. 流已结束（finish_reason 非空）且未完成时跳过该 tool call
         
         这避免了"半包参数也执行"的问题。
         """
@@ -406,19 +443,25 @@ class ToolCallStrategy(ExploreStrategy):
         
         result = []
         for info in tool_call_infos:
-            # 只有 arguments 成功解析才执行
-            if info.arguments is not None:
+            # 只有完整且参数成功解析才执行
+            # is_complete 字段在 parse_from_chunk 时设置
+            if info.is_complete and info.arguments is not None:
                 result.append(ToolCall(
                     id=info.id,
                     name=info.name,
                     arguments=info.arguments,
                     raw_text=None
                 ))
-            elif stream_item.finish_reason is not None:
+            elif stream_item.finish_reason is not None and not info.is_complete:
                 # 流已结束但参数解析失败，记录警告并跳过
                 context.warn(
                     f"Tool call {info.name} (id={info.id}) skipped: "
-                    f"Invalid JSON arguments '{info.raw_arguments}'"
+                    f"Stream ended but JSON arguments incomplete or invalid. "
+                    f"Raw arguments: '{info.raw_arguments[:200]}...'"
+                    if len(info.raw_arguments) > 200 else
+                    f"Tool call {info.name} (id={info.id}) skipped: "
+                    f"Stream ended but JSON arguments incomplete or invalid. "
+                    f"Raw arguments: '{info.raw_arguments}'"
                 )
         
         return result
@@ -631,7 +674,7 @@ Tool Call 2 ──▶ Execute ──┘
 - 保留 `StreamItem.tool_name` 和 `tool_args` 字段
 - 保留 `detect_tool_call()` 方法
 - 保留 `append_tool_call_message()` 方法
-- 通过 flag 控制新功能，默认关闭
+- 通过 flag 控制新功能，**默认为 True（启用）**
 
 ### 6.2 渐进式迁移
 
@@ -701,13 +744,19 @@ class ExploreBlock:
 StreamItem 修改：
 
 ```python
-def parse_from_chunk(self, chunk: dict, session_counter: int = 0):
+def parse_from_chunk(self, chunk: dict, session_counter: Optional[int] = None):
+    """Parse streaming chunk from LLM response.
+    
+    Args:
+        session_counter: Optional session-level counter. If None, uses UUID.
+    """
+    batch_id = str(session_counter) if session_counter is not None else uuid.uuid4().hex[:8]
     # ... 现有解析代码 ...
     
     tool_call_id = data.get("id")
     if not tool_call_id:
         # 使用稳定的 fallback 规则
-        tool_call_id = f"call_{session_counter}_{normalized_index}"
+        tool_call_id = f"call_{batch_id}_{normalized_index}"
 ```
 
 ---
@@ -1536,9 +1585,9 @@ src/dolphin/core/
 
 因此，初期采用串行执行，待功能稳定后再考虑并行优化。
 
-### Q2: 如何回退到旧版本行为？
+### Q2: 如何禁用多工具调用功能？
 
-**A**: 确保 feature flag 处于关闭状态：
+**A**: 通过设置 feature flag 为关闭状态：
 ```python
 # 在环境变量或配置中
 DOLPHIN_ENABLE_PARALLEL_TOOL_CALLS=false
@@ -1584,18 +1633,27 @@ flags.disable(flags.ENABLE_PARALLEL_TOOL_CALLS)
 - **可复现性**：相同的 LLM 响应序列生成相同的 id 序列
 - **稳定性**：与工具名、参数无关，只依赖调用顺序
 
-### Q8: 如果现有 Messages API 不支持 metadata 怎么办？
+### Q8: Messages API 是否支持 metadata 参数？
 
-**A**: `append_tool_response_message()` 实现了动态兼容：
+**A**: 是的，`Messages.add_tool_response_message()` 已原生支持 `metadata` 参数：
 ```python
-import inspect
-sig = inspect.signature(messages.add_tool_response_message)
-if 'metadata' in sig.parameters and metadata is not None:
-    # 支持 metadata，传递
-    messages.add_tool_response_message(content, tool_call_id=tool_call_id, metadata=metadata)
-else:
-    # 不支持 metadata，兼容降级
-    messages.add_tool_response_message(content, tool_call_id=tool_call_id)
+def add_tool_response_message(
+    self,
+    content: str,
+    tool_call_id: str,
+    user_id: str = "",
+    metadata: Dict[str, Any] = {},
+):
+```
+
+可以直接使用 metadata 来标记错误响应或其他元信息：
+```python
+strategy.append_tool_response_message(
+    context,
+    tool_call_id="call_1",
+    content="Error: Connection timeout",
+    metadata={"error": True}
+)
 ```
 
 这样可以：
@@ -1609,6 +1667,8 @@ else:
 
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
+| v1.4 | 2026-01-15 | **配置调整**：<br>1. 将 `ENABLE_PARALLEL_TOOL_CALLS` 默认值改为 True（启用），默认支持多工具调用功能 |
+| v1.3 | 2026-01-15 | **实现优化**：<br>1. 修正 feature flag 默认值为 False，确保向后兼容<br>2. 新增 `ToolCallInfo.is_complete` 字段，明确标记工具调用完成状态<br>3. 优化 `detect_tool_calls()` 使用 `is_complete` 判断，避免执行未完成的工具调用<br>4. 简化 `append_tool_response_message()`，直接使用原生 metadata 支持<br>5. 新增双重 JSON 编码检测和调试日志<br>6. 更新 `parse_from_chunk()` 支持 Optional[int] session_counter 参数 |
 | v1.2 | 2026-01-14 | **文档优化**：<br>1. 修复 `detect_tool_calls()` 未利用 `finish_reason` 的问题：增加参数解析状态检查，避免"半包参数也执行"<br>2. 删除重复的伪代码示例，统一引用 6.3.3 节的权威实现 |
 | v1.1 | 2026-01-14 | **设计优化**：<br>1. 修复向后兼容性问题：`has_tool_call()` 在 flag 关闭时仅检查旧字段<br>2. 改进 `tool_call_id` 生成规则：使用会话计数器确保唯一性和可复现性<br>3. 增强 API 兼容性：`append_tool_response_message()` 动态检测 metadata 支持<br>4. 新增专门测试用例：向后兼容性、id 稳定性、API 兼容性 |
 | v1.0 | 2026-01-14 | 初始设计文档 |
