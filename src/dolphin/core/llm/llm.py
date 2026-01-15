@@ -173,6 +173,14 @@ class LLM:
     def get_cache(self, llm: str, cache_key: Messages):
         return self.context.get_config().get_llm_cache(llm, cache_key)
 
+    def set_cache_by_dict(self, llm: str, cache_key: list, cache_value: Any):
+        """Set cache using dict list as key (for sanitized messages)."""
+        self.context.get_config().set_llm_cache_by_dict(llm, cache_key, cache_value)
+
+    def get_cache_by_dict(self, llm: str, cache_key: list):
+        """Get cache using dict list as key (for sanitized messages)."""
+        return self.context.get_config().get_llm_cache_by_dict(llm, cache_key)
+
     def log_request(self, messages: Messages, continous_content: Optional[str] = None):
         self.context.debug(
             "LLM chat messages[{}] length[{}] continous_content[{}]".format(
@@ -199,16 +207,20 @@ class LLMModelFactory(LLM):
         self.log_request(messages, continous_content)
 
         self.set_messages(messages, continous_content)
+
+        # Sanitize messages BEFORE cache check to ensure consistent cache keys
+        sanitized_messages = sanitize_and_log(
+            messages.get_messages_as_dict(), logger.warning
+        )
+
         if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
-            cache_value = self.get_cache(llm_instance_config.model_name, messages)
-            if cache_value:
+            # Use sanitized messages for cache key to ensure consistency
+            cache_value = self.get_cache_by_dict(llm_instance_config.model_name, sanitized_messages)
+            if cache_value is not None:
                 yield cache_value
                 return
         try:
-            # Sanitize messages for OpenAI compatibility
-            sanitized_messages = sanitize_and_log(
-                messages.get_messages_as_dict(), logger.warning
-            )
+            # Reuse sanitized messages from cache key generation (no need to sanitize again)
 
             # Build request payload
             payload = {
@@ -346,7 +358,12 @@ class LLMModelFactory(LLM):
                             )
 
                     if result:
-                        self.set_cache(llm_instance_config.model_name, messages, result)
+                        # Use sanitized messages for cache key to ensure consistency
+                        self.set_cache_by_dict(
+                            llm_instance_config.model_name,
+                            sanitized_messages,
+                            result
+                        )
 
                     if "choices" in line_json:
                         await self.update_usage(line_json)
@@ -395,16 +412,19 @@ class LLMOpenai(LLM):
 
         self.set_messages(messages, continous_content)
 
-        if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
-            cache_value = self.get_cache(llm_instance_config.model_name, messages)
-            if cache_value:
-                yield cache_value
-                return
-
-        # Sanitize messages for OpenAI compatibility
+        # Sanitize messages BEFORE cache check to ensure consistent cache keys
         sanitized_messages = sanitize_and_log(
             messages.get_messages_as_dict(), logger.warning
         )
+
+        if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
+            # Use sanitized messages for cache key to ensure consistency
+            cache_value = self.get_cache_by_dict(llm_instance_config.model_name, sanitized_messages)
+            if cache_value is not None:
+                yield cache_value
+                return
+
+        # Reuse sanitized messages from cache key generation (no need to sanitize again)
 
         # Prepare API call parameters
         api_params = {
@@ -467,4 +487,9 @@ class LLMOpenai(LLM):
             yield result
 
         if result:
-            self.set_cache(llm_instance_config.model_name, messages, result)
+            # Use sanitized messages for cache key to ensure consistency
+            self.set_cache_by_dict(
+                llm_instance_config.model_name,
+                sanitized_messages,
+                result
+            )

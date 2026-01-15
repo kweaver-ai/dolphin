@@ -286,6 +286,48 @@ class TestExpressionEdgeCases(unittest.TestCase):
         )
         self.assertEqual(evaluator.evaluate_sync(), 0.0)
 
+    def test_division_by_zero_raises_error(self):
+        """Test division by zero raises ExpressionError."""
+        # Test basic division by zero
+        evaluator = ExpressionEvaluator(
+            expr="10 / 0",
+            context={}
+        )
+        with self.assertRaises(ExpressionError) as cm:
+            evaluator.evaluate_sync()
+        self.assertIn("Division by zero", str(cm.exception))
+
+    def test_division_by_zero_in_comparison_raises_error(self):
+        """Test division by zero in comparison raises ExpressionError."""
+        # This was the original bug: "10/0 >= 0.5" would evaluate to True
+        evaluator = ExpressionEvaluator(
+            expr="10 / 0 >= 0.5",
+            context={}
+        )
+        with self.assertRaises(ExpressionError) as cm:
+            evaluator.evaluate_sync()
+        self.assertIn("Division by zero", str(cm.exception))
+
+    def test_floor_division_by_zero_raises_error(self):
+        """Test floor division by zero raises ExpressionError."""
+        evaluator = ExpressionEvaluator(
+            expr="10 // 0",
+            context={}
+        )
+        with self.assertRaises(ExpressionError) as cm:
+            evaluator.evaluate_sync()
+        self.assertIn("Division by zero", str(cm.exception))
+
+    def test_modulo_by_zero_raises_error(self):
+        """Test modulo by zero raises ExpressionError."""
+        evaluator = ExpressionEvaluator(
+            expr="10 % 0",
+            context={}
+        )
+        with self.assertRaises(ExpressionError) as cm:
+            evaluator.evaluate_sync()
+        self.assertIn("Modulo by zero", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

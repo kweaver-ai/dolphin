@@ -359,7 +359,8 @@ class ExploreBlock(BasicCodeBlock):
         )
 
         # Apply timeout protection to prevent hook execution from blocking indefinitely
-        timeout_seconds = getattr(self.on_stop, 'timeout', None) or 60
+        # Use agent_timeout from HookConfig (default: 60s). Keep backward-compatible fallback.
+        timeout_seconds = getattr(self.on_stop, "agent_timeout", 60)
 
         try:
             return await asyncio.wait_for(
