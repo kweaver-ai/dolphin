@@ -110,10 +110,7 @@ class LLMModelFactory(LLM):
                 yield cache_value
                 return
         try:
-            # Sanitize messages for OpenAI compatibility
-            sanitized_messages = sanitize_and_log(
-                messages.get_messages_as_dict(), logger.warning
-            )
+            # Reuse sanitized messages from cache key generation (no need to sanitize again)
 
             # Build request payload
             payload = {
@@ -325,10 +322,7 @@ class LLMOpenai(LLM):
                 yield cache_value
                 return
 
-        # Sanitize messages for OpenAI compatibility
-        sanitized_messages = sanitize_and_log(
-            messages.get_messages_as_dict(), logger.warning
-        )
+        # Reuse sanitized messages from cache key generation (no need to sanitize again)
 
         # Prepare API call parameters
         api_params = {

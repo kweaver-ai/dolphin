@@ -32,23 +32,23 @@ BUILTIN_FUNCTIONS: Dict[str, Callable] = {
 
 # Safe division wrappers to handle ZeroDivisionError
 def _safe_truediv(a, b):
-    """Safe true division that returns inf on division by zero."""
+    """Safe true division that raises error on division by zero."""
     if b == 0:
-        return float('inf') if a >= 0 else float('-inf')
+        raise ExpressionError(f"Division by zero: {a} / 0")
     return operator.truediv(a, b)
 
 
 def _safe_floordiv(a, b):
-    """Safe floor division that returns inf on division by zero."""
+    """Safe floor division that raises error on division by zero."""
     if b == 0:
-        return float('inf') if a >= 0 else float('-inf')
+        raise ExpressionError(f"Division by zero: {a} // 0")
     return operator.floordiv(a, b)
 
 
 def _safe_mod(a, b):
-    """Safe modulo that returns 0 on division by zero."""
+    """Safe modulo that raises error on division by zero."""
     if b == 0:
-        return 0
+        raise ExpressionError(f"Modulo by zero: {a} % 0")
     return operator.mod(a, b)
 
 
