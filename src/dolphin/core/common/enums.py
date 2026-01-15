@@ -1005,11 +1005,15 @@ class StreamItem:
             return self.tool_calls
         # Fallback to legacy field for backward compatibility
         if self.tool_name:
+            # Set is_complete=True when tool_args has been successfully parsed
+            # This ensures detect_tool_calls() can properly detect legacy tool calls
             return [ToolCallInfo(
                 id=f"{TOOL_CALL_ID_PREFIX}{self.tool_name}_0",
                 name=self.tool_name,
                 arguments=self.tool_args,
-                index=0
+                index=0,
+                raw_arguments=json.dumps(self.tool_args) if self.tool_args else "",
+                is_complete=self.tool_args is not None,  # Mark complete if args parsed
             )]
         return []
 
