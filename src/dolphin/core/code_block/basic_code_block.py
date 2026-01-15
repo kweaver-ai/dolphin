@@ -1698,7 +1698,7 @@ class BasicCodeBlock:
         Returns:
             int: Number of successfully loaded tools
         """
-        from DolphinLanguageSDK.skill.skillset import Skillset
+        from dolphin.core.skill.skillset import Skillset
         import json
 
         # Parse result if it's a string
@@ -1759,7 +1759,7 @@ class BasicCodeBlock:
 
                 elif "api_call_strategy" in tool_def:
                     # 类型 2: API 工具 - 自动创建 DynamicAPISkillFunction
-                    from DolphinLanguageSDK.skill.skill_function import (
+                    from dolphin.core.skill.skill_function import (
                         DynamicAPISkillFunction,
                     )
 
@@ -1776,11 +1776,11 @@ class BasicCodeBlock:
                         f"fixed_params={fixed_params}, headers={headers}"
                     )
                     
-                    # 将 api_call_strategy 字符串转换为正确的策略配置格式
+                    # Bind tool execution policy into the app strategy slot so the tool implementation can branch if needed.
                     if api_call_strategy:
                         result_process_strategies = [
-                            {"strategy": "default", "category": "app"},
-                            {"strategy": "default", "category": "llm"}
+                            {"strategy": str(api_call_strategy), "category": "app"},
+                            {"strategy": "default", "category": "llm"},
                         ]
                     else:
                         result_process_strategies = None

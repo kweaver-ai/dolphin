@@ -578,11 +578,15 @@ class DynamicAPISkillFunction(SkillFunction):
         Yields:
             API call result
         """
-        if self.result_process_strategies != "kn_action_recall":
-            yield {
-                "error": "The system supports only the following policy: kn_action_recall."
-            }
         try:
+            # Execution policy is carried by the app strategy (see BasicCodeBlock._load_dynamic_tools).
+            # Keep backward compatibility: do not hard-fail on unexpected strategy values.
+            app_strategy = None
+            try:
+                app_strategy = self.get_first_valid_app_strategy()
+            except Exception:
+                app_strategy = None
+
             # Extract parameters
             tool_input = kwargs.get("tool_input", {})
             if not isinstance(tool_input, dict):
@@ -602,6 +606,9 @@ class DynamicAPISkillFunction(SkillFunction):
                 # Process body parameters - merge into final_params
                 body_params = self.fixed_params.get("body")
                 if isinstance(body_params, dict):
+                    final_params["body"] = final_params.get("body", {})
+                    if not isinstance(final_params["body"], dict):
+                        final_params["body"] = {}
                     for param_name, fixed_value in body_params.items():
                         if fixed_value is not None:
                             final_params["body"][param_name] = fixed_value
@@ -657,3 +664,23 @@ class DynamicAPISkillFunction(SkillFunction):
 
             traceback.print_exc()
             yield {"error": error_msg, "traceback": traceback.format_exc()}
+
+    def get_openai_tool_schema(self) -> Dict[str, Any]:
+        """Gets the OpenAI tool schema for this dynamic function.
+
+        Override parent method to auto-fill missing parameter descriptions
+        instead of raising an error. This is necessary because dynamic tools
+        from external APIs may not always provide complete descriptions.
+
+        Returns:
+            Dict[str, Any]: The OpenAI tool schema for this function.
+        """
+        # Auto-fill missing descriptions for dynamic tools
+        schema = self.openai_tool_schema
+        if "function" in schema and "parameters" in schema["function"]:
+            parameters = schema["function"]["parameters"]
+            if "properties" in parameters:
+                for param_name, param_dict in parameters["properties"].items():
+                    if isinstance(param_dict, dict) and "description" not in param_dict:
+                        param_dict["description"] = f"Parameter: {param_name}"
+        return schema

@@ -443,7 +443,7 @@ generator = registry.create_generator('my_custom', param1='value1')
 ## 参考文档
 
 - **优化框架**: `experiments/optimization/README.md`
-- **设计文档**: `docs/experiments/siminject_apo_prompt_optimizer_design.md`
+- **设计文档**: `docs/design/experiments/siminject_apo_prompt_optimizer_design.md`
 - **Watsons 优化指南**: `experiments/WATSONS_OPTIMIZATION_GUIDE.md`
 
 ---

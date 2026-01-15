@@ -8,6 +8,7 @@ ExploreBlock 的单元测试
 """
 
 import unittest
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from dolphin.core.code_block.explore_block import ExploreBlock
@@ -117,6 +118,56 @@ class TestExploreBlockMode(unittest.TestCase):
         """测试 tools_format 参数"""
         block = ExploreBlock(context=self.context, tools_format="full")
         self.assertEqual(block.tools_format, "full")
+
+
+class TestExploreBlockToolResponseOnce(unittest.TestCase):
+    """回归测试：ExploreBlock 成功工具调用不应重复追加 tool response"""
+
+    def setUp(self):
+        self.context_manager = ContextManager()
+        self.global_config = GlobalConfig()
+        self.context = Context(
+            config=self.global_config, context_manager=self.context_manager
+        )
+        self.context._calc_all_skills()
+
+    def test_execute_tool_call_appends_tool_response_once_on_success(self):
+        block = ExploreBlock(context=self.context)
+
+        # 伪造 recorder，避免 _execute_tool_call 里访问为空
+        block.recorder = MagicMock()
+        block.recorder.get_progress_answers.return_value = {}
+        block.recorder.get_answer.return_value = "ok"
+
+        # 伪造 skill_run（必须是 async generator）
+        async def mock_skill_run(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield None
+
+        block.skill_run = mock_skill_run
+
+        # 避免依赖 skillkit_hook / raw_output，直接返回固定 tool 输出
+        block._process_skill_result_with_hook = MagicMock(return_value=("hello", {}))
+
+        # 截获追加行为，验证只追加一次
+        block.strategy.get_deduplicator = MagicMock(return_value=MagicMock())
+        block.strategy.append_tool_response_message = MagicMock()
+
+        stream_item = StreamItem()
+        stream_item.answer = "call tool"
+        tool_call = ToolCall(id="call_test_1", name="_date", arguments={})
+
+        async def run():
+            async for _ in block._execute_tool_call(stream_item, tool_call):
+                pass
+
+        asyncio.run(run())
+
+        self.assertEqual(
+            block.strategy.append_tool_response_message.call_count,
+            1,
+            "成功路径下不应重复追加 tool response message",
+        )
 
 
 class TestPromptStrategy(unittest.TestCase):
@@ -647,7 +698,7 @@ class TestExploreBlockModeFromDPHSyntax(unittest.TestCase):
     """
     测试 DPH 语法中 mode 参数的解析
 
-    根据设计文档 docs/architecture/explore_block_merge.md:
+    根据设计文档 docs/design/architecture/explore_block_merge.md:
     - /explore/(mode="tool_call", ...) 应使用 ToolCallStrategy
     - /explore/(mode="prompt", ...) 应使用 PromptStrategy
     - 默认模式为 "tool_call"

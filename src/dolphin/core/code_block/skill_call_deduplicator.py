@@ -56,6 +56,15 @@ class SkillCallDeduplicator(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_history(self) -> list:
+        """Get the history of all recorded skill calls.
+
+        Returns:
+            List of skill call dictionaries
+        """
+        pass
+
 
 class NoOpSkillCallDeduplicator(SkillCallDeduplicator):
     """Empty implementation of skill call deduplicator
@@ -80,6 +89,10 @@ class NoOpSkillCallDeduplicator(SkillCallDeduplicator):
     def get_call_key(self, skill_call: Any) -> str:
         """Return an empty string as a placeholder"""
         return ""
+
+    def get_history(self) -> list:
+        """Return empty list as no history is recorded"""
+        return []
 
 
 class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
@@ -106,6 +119,30 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
         self.skillcalls.clear()
         self.call_results.clear()
         self._call_key_cache.clear()
+
+    def get_history(self) -> list:
+        """Get the history of all recorded skill calls.
+
+        Returns:
+            List of skill call dictionaries with name and arguments
+        """
+        history = []
+        for call_key in self.skillcalls.keys():
+            try:
+                # Parse the call_key format: "skill_name:json_args"
+                if ':' in call_key:
+                    name, args_str = call_key.split(':', 1)
+                    try:
+                        args = json.loads(args_str)
+                    except json.JSONDecodeError:
+                        args = args_str
+                    history.append({"name": name, "arguments": args})
+                else:
+                    history.append({"name": call_key, "arguments": {}})
+            except Exception:
+                # If parsing fails, add as-is
+                history.append({"raw": call_key})
+        return history
 
     def get_call_key(self, skill_call: Any) -> str:
         """Get the standardized string representation of a skill call.

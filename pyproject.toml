@@ -3,8 +3,8 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dolphin-language"
-dynamic = ["version"]
+name = "dolphin"
+version = "0.3.3"
 description = "Dolphin Language - An intelligent agent framework"
 authors = [
     {name = "AnyData", email = "contact@anydata.com"}
@@ -106,9 +106,6 @@ resource_skillkit = "DolphinLanguageSDK.skill.installed.resource_skillkit:Resour
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["dolphin*", "DolphinLanguageSDK*"]
-
-[tool.setuptools.dynamic]
-version = {file = "VERSION"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

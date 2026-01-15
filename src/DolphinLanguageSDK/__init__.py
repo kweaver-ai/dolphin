@@ -9,7 +9,7 @@ DolphinLanguageSDK - 兼容层
 - from DolphinLanguageSDK import Context → from dolphin.core import Context
 - from DolphinLanguageSDK import Env → from dolphin.sdk import Env
 
-详见 docs/architecture/module_restructure_design.md
+详见 docs/design/architecture/module_restructure_design.md
 """
 
 import warnings
@@ -18,7 +18,7 @@ import warnings
 warnings.warn(
     "DolphinLanguageSDK is deprecated. "
     "Please migrate to the new module structure: dolphin.core, dolphin.lib, dolphin.sdk, dolphin.cli. "
-    "See docs/architecture/module_restructure_design.md for migration guide.",
+    "See docs/design/architecture/module_restructure_design.md for migration guide.",
     DeprecationWarning,
     stacklevel=2
 )

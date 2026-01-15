@@ -4,7 +4,7 @@ This module defines the ExploreStrategy abstract interface and provides two conc
 - PromptStrategy: Prompt mode, invoking tools in the prompt using the =># format
 - ToolCallStrategy: Tool Call mode, utilizing the LLM's native tool_call capability
 
-Design document: docs/architecture/explore_block_merge.md
+Design document: docs/design/architecture/explore_block_merge.md
 """
 
 import json
@@ -168,6 +168,19 @@ class ExploreStrategy(ABC):
         if self._deduplicator_enabled:
             return self._deduplicator
         return self._noop_deduplicator
+
+    def reset_deduplicator(self):
+        """Reset the deduplicator state for retry scenarios."""
+        self._deduplicator.clear()
+
+    def get_tool_call_history(self) -> list:
+        """Get the history of tool calls from the deduplicator.
+
+        Returns:
+            List of tool call dictionaries
+        """
+        return self._deduplicator.get_history()
+
 
 class PromptStrategy(ExploreStrategy):
     """Prompt Pattern Strategy Implementation
