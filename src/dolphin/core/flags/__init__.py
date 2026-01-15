@@ -11,6 +11,7 @@ from .definitions import (
     EXPLORE_BLOCK_V2,
     DEBUG_MODE,
     DISABLE_LLM_CACHE,
+    ENABLE_PARALLEL_TOOL_CALLS,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "EXPLORE_BLOCK_V2",
     "DEBUG_MODE",
     "DISABLE_LLM_CACHE",
+    "ENABLE_PARALLEL_TOOL_CALLS",
 ]

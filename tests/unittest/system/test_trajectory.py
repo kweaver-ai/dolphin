@@ -28,6 +28,44 @@ from dolphin.core.trajectory.trajectory import Trajectory
 class MockSkillkit:
     """测试用的 Mock Skillkit，满足 Explore/Judge 所需接口，避免依赖真实 SkillFunction"""
 
+    # 存储 skill schemas 以便 _DummySkillFunction 可以引用
+    _SKILL_SCHEMAS = {
+        "mock_search": {
+            "type": "function",
+            "function": {
+                "name": "mock_search",
+                "description": "搜索工具",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "搜索查询关键词",
+                        }
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        "mock_calculator": {
+            "type": "function",
+            "function": {
+                "name": "mock_calculator",
+                "description": "计算器工具",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {
+                            "type": "string",
+                            "description": "计算表达式",
+                        }
+                    },
+                    "required": ["expression"],
+                },
+            },
+        },
+    }
+
     def __init__(self, skills: Optional[Dict[str, Dict[str, Any]]] = None):
         self._skills = skills or {
             "mock_search": {"name": "mock_search", "description": "搜索工具"},
@@ -38,17 +76,34 @@ class MockSkillkit:
         return len(self._skills) == 0
 
     def getSkills(self) -> List[Any]:
-        """提供给技能校验/Skillset 的技能列表（最小接口：get_function_name/get_owner_skillkit）"""
+        """提供给技能校验/Skillset 的技能列表（需完整实现 SkillFunction 接口）"""
+        # 将 schemas 引用传递给内部类
+        skill_schemas = MockSkillkit._SKILL_SCHEMAS
 
         class _DummySkillFunction:
             def __init__(self, name: str):
                 self._name = name
+                self.owner_skillkit = None
 
             def get_function_name(self) -> str:
                 return self._name
 
             def get_owner_skillkit(self) -> Optional[str]:
-                return None
+                return self.owner_skillkit
+
+            def set_owner_skillkit(self, owner) -> None:
+                self.owner_skillkit = owner
+
+            def get_openai_tool_schema(self) -> Dict[str, Any]:
+                """返回 OpenAI 格式的工具 schema，供 Skillset.getSkillsSchema() 使用"""
+                return skill_schemas.get(self._name, {
+                    "type": "function",
+                    "function": {
+                        "name": self._name,
+                        "description": f"{self._name} 工具",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                })
 
         return [_DummySkillFunction(name) for name in self._skills.keys()]
 
@@ -69,42 +124,7 @@ class MockSkillkit:
 
     def getSkillsSchema(self) -> List[Dict[str, Any]]:
         """用于 ToolCallStrategy 生成 tools 参数"""
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "mock_search",
-                    "description": "搜索工具",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "搜索查询关键词",
-                            }
-                        },
-                        "required": ["query"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "mock_calculator",
-                    "description": "计算器工具",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "expression": {
-                                "type": "string",
-                                "description": "计算表达式",
-                            }
-                        },
-                        "required": ["expression"],
-                    },
-                },
-            },
-        ]
+        return list(MockSkillkit._SKILL_SCHEMAS.values())
 
 
 # =============================================================================
@@ -472,7 +492,7 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
     from dolphin.core import flags
 
     # 禁用 EXPLORE_BLOCK_V2，使用 ExploreBlock
-    original_flag = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+    original_explore_flag = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
     flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
 
     try:
@@ -554,7 +574,7 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
 
     finally:
         # 恢复原始 flag 值
-        flags.set_flag(flags.EXPLORE_BLOCK_V2, original_flag)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, original_explore_flag)
 
 
 # =============================================================================
@@ -619,7 +639,7 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
         [f"{PIN_MARKER}\n这是需要被持久化到 history 的资源结论"]
     )
 
-    original_flag = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+    original_explore_flag = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
     flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
     try:
         with patch(
@@ -643,7 +663,7 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
             async for _ in executor.continue_exploration(content="下一轮问题"):
                 pass
     finally:
-        flags.set_flag(flags.EXPLORE_BLOCK_V2, original_flag)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, original_explore_flag)
 
     # ---------- 验证 ----------
     assert second_round_has_system[0], "continue_exploration 应重建 system 消息"
