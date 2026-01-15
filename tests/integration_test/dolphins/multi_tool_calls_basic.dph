@@ -1,0 +1,5 @@
+/explore/(
+    system_prompt="你是一个智能助手。当用户要求完成多个任务时，你应该一次性规划所有需要的工具调用，而不是逐个调用。",
+    tools=["webSearch", "poemWriterStream", "saveToLocal"],
+    mode="tool_call"
+)$query -> result

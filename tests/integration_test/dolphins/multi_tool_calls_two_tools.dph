@@ -1,0 +1,5 @@
+/explore/(
+    system_prompt="你是一个智能助手。当用户要求搜索多个主题时，你应该同时调用多次搜索工具。",
+    tools=["webSearch"],
+    mode="tool_call"
+)$query -> result

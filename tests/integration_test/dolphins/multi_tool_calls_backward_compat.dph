@@ -1,0 +1,5 @@
+/explore/(
+    system_prompt="你是一个智能助手。",
+    tools=["webSearch"],
+    mode="tool_call"
+)$query -> result

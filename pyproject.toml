@@ -57,13 +57,13 @@ cli = [
 
 # pip install dolphin-language[full] - 安装全部功能
 full = [
-    "dolphin-language[lib]",
-    "dolphin-language[cli]",
+    "dolphin[lib]",
+    "dolphin[cli]",
 ]
 
-# pip install dolphin-language[dev] - 开发依赖
+# pip install dolphin[dev] - 开发依赖
 dev = [
-    "dolphin-language[full]",
+    "dolphin[full]",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",

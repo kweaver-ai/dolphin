@@ -60,6 +60,7 @@ from dolphin.core.code_block.explore_strategy import (
 from dolphin.core.code_block.skill_call_deduplicator import (
     DefaultSkillCallDeduplicator,
 )
+from dolphin.core import flags
 
 logger = get_logger("code_block.explore_block")
 
@@ -108,6 +109,10 @@ class ExploreBlock(BasicCodeBlock):
         self.should_stop_exploration = False
         self.no_tool_call_count = 0  # Count consecutive rounds without tool calls
         self.pending_content = None  # Store content without tool_call for merging
+        
+        # Session-level tool call batch counter for stable ID generation
+        # Incremented each time LLM returns tool calls (per batch, not per tool)
+        self.session_tool_call_counter = 0
 
         # Hook-based verify attributes
         self.on_stop: Optional[HookConfig] = None
@@ -658,12 +663,19 @@ Please reconsider your approach and improve your answer based on the feedback ab
         if not tool_call_id:
             tool_call_id = f"call_{function_name}_{self.times}"
 
-            self.strategy.append_tool_response_message(
-                self.context, tool_call_id, str(tool_response), metadata
-            )
+        self.strategy.append_tool_response_message(
+            self.context, tool_call_id, str(tool_response), metadata
+        )
 
     async def _handle_new_tool_call(self, no_cache: bool):
-        """Handling New Tool Calls"""
+        """Handling New Tool Calls
+
+        Supports both single and multiple tool calls based on the
+        ENABLE_PARALLEL_TOOL_CALLS feature flag.
+        """
+        # Use current counter value; will only increment if tool calls detected
+        current_counter = self.session_tool_call_counter
+
         # Regenerate system message to include dynamically loaded tools
         current_skillkit = self.get_skillkit()
         updated_system_message = self.strategy.make_system_message(
@@ -712,6 +724,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 content=self.content if self.content else "",
                 early_stop_on_tool_call=True,
                 on_stream_chunk=on_chunk,
+                session_counter=current_counter,  # Pass counter for stable ID generation
             ):
                 # Use strategy's has_valid_tool_call method, compatible with both prompt and tool_call modes
                 if not self.strategy.has_valid_tool_call(stream_item, self.context):
@@ -763,10 +776,14 @@ Please reconsider your approach and improve your answer based on the feedback ab
             )
         yield self.recorder.get_progress_answers() if self.recorder else None
 
-        # Use strategy's detect_tool_call method to detect tool calls, compatible with both prompt and tool_call modes
-        tool_call = self.strategy.detect_tool_call(stream_item, self.context)
+        # Detect tool calls based on feature flag
+        if flags.is_enabled(flags.ENABLE_PARALLEL_TOOL_CALLS):
+            tool_calls = self.strategy.detect_tool_calls(stream_item, self.context)
+        else:
+            single = self.strategy.detect_tool_call(stream_item, self.context)
+            tool_calls = [single] if single else []
         
-        if tool_call is None:
+        if not tool_calls:
             # No tool call detected: stop immediately
             # If there is pending content, merge before adding
             if self.pending_content:
@@ -788,6 +805,10 @@ Please reconsider your approach and improve your answer based on the feedback ab
         # Reset no-tool-call count (because this round has tool call)
         self.no_tool_call_count = 0
 
+        # Increment session counter only when tool calls are actually detected
+        # This ensures stable ID generation without gaps
+        self.session_tool_call_counter += 1
+
         # If there is pending content, merge with current tool_call
         if self.pending_content:
             self.context.debug(f"Detected pending content, will merge with tool_call")
@@ -798,22 +819,48 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 stream_item.answer = self.pending_content
             self.pending_content = None
 
-        # Deduplicator
-        deduplicator = self.strategy.get_deduplicator()
-
-        # Check for duplicate calls
-        skill_call_for_dedup = (tool_call.name, tool_call.arguments)
-        if not deduplicator.is_duplicate(skill_call_for_dedup):
-            # Add tool call message
-            self.strategy.append_tool_call_message(
-                self.context, stream_item, tool_call
+        # Log detected tool calls (use info level for significant multi-tool events)
+        if len(tool_calls) > 1:
+            logger.info(
+                f"explore[{self.output_var}] detected {len(tool_calls)} tool calls: "
+                f"{[tc.name for tc in tool_calls]}"
             )
-            deduplicator.add(skill_call_for_dedup)
 
-            async for ret in self._execute_tool_call(stream_item, tool_call):
+        # Add tool calls message and execute
+        #
+        # Execution path selection:
+        # - Multiple tool calls (flag enabled + len > 1): Use new multi-tool-call path
+        #   with append_tool_calls_message() and _execute_tool_calls_sequential()
+        # - Single tool call (or flag disabled): Use existing single-tool-call path
+        #   for maximum backward compatibility, even when flag is enabled but only
+        #   one tool call is returned by LLM
+        if flags.is_enabled(flags.ENABLE_PARALLEL_TOOL_CALLS) and len(tool_calls) > 1:
+            # Multiple tool calls: use new methods
+            self.strategy.append_tool_calls_message(
+                self.context, stream_item, tool_calls
+            )
+            async for ret in self._execute_tool_calls_sequential(stream_item, tool_calls):
                 yield ret
         else:
-            await self._handle_duplicate_tool_call(tool_call, stream_item)
+            # Single tool call (or flag disabled): use existing methods for backward compatibility
+            tool_call = tool_calls[0]
+            
+            # Deduplicator
+            deduplicator = self.strategy.get_deduplicator()
+
+            # Check for duplicate calls
+            skill_call_for_dedup = (tool_call.name, tool_call.arguments)
+            if not deduplicator.is_duplicate(skill_call_for_dedup):
+                # Add tool call message
+                self.strategy.append_tool_call_message(
+                    self.context, stream_item, tool_call
+                )
+                deduplicator.add(skill_call_for_dedup)
+
+                async for ret in self._execute_tool_call(stream_item, tool_call):
+                    yield ret
+            else:
+                await self._handle_duplicate_tool_call(tool_call, stream_item)
 
     async def _execute_tool_call(self, stream_item: StreamItem, tool_call: ToolCall):
         """Execute tool call"""
@@ -896,6 +943,103 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 self.strategy.append_tool_response_message(
                     self.context, tool_call.id, answer_content
                 )
+
+    async def _execute_tool_calls_sequential(
+        self, 
+        stream_item: StreamItem, 
+        tool_calls: List[ToolCall]
+    ):
+        """Sequentially execute multiple tool calls (by index order).
+
+        Note: "parallel" in OpenAI terminology means the model decides multiple tool
+        calls in one turn, not that Dolphin executes them concurrently. This method
+        executes tool calls one after another in index order.
+        
+        Error Handling Strategy (based on OpenAI best practices):
+        - Non-critical failures: Continue with remaining tools, log errors
+        - ToolInterrupt: Propagate immediately (critical user or system interrupt)
+        - Malformed arguments: Skip the tool call with error response, continue others
+        
+        This approach provides graceful degradation while maintaining context integrity.
+        Each tool's response (success or error) is added to context for LLM visibility.
+        
+        Args:
+            stream_item: The streaming response item containing the tool calls
+            tool_calls: List of ToolCall objects to execute
+            
+        Yields:
+            Progress updates from each tool execution
+        """
+        # Track execution statistics for debugging
+        total_calls = len(tool_calls)
+        successful_calls = 0
+        failed_calls = 0
+        deduplicator = self.strategy.get_deduplicator()
+        
+        for i, tool_call in enumerate(tool_calls):
+            logger.debug(f"Executing tool call {i+1}/{total_calls}: {tool_call.name}")
+
+            # Skip tool calls with unparseable JSON arguments
+            # (arguments is None when JSON parsing failed during streaming)
+            if tool_call.arguments is None:
+                failed_calls += 1
+                self.context.error(
+                    f"Tool call {tool_call.name} (id={tool_call.id}) skipped: "
+                    f"JSON arguments failed to parse."
+                )
+                # Add error response to maintain context integrity
+                # This allows LLM to see the failure and potentially retry
+                self.strategy.append_tool_response_message(
+                    self.context,
+                    tool_call.id,
+                    f"Error: Failed to parse JSON arguments for tool {tool_call.name}",
+                    metadata={"error": True}
+                )
+                continue
+            
+            # Deduplicate to avoid repeated executions (side effects / cost).
+            skill_call_for_dedup = (tool_call.name, tool_call.arguments)
+            if deduplicator.is_duplicate(skill_call_for_dedup):
+                failed_calls += 1
+                self.context.warn(
+                    f"Duplicate tool call skipped: {deduplicator.get_call_key(skill_call_for_dedup)}"
+                )
+                self.strategy.append_tool_response_message(
+                    self.context,
+                    tool_call.id,
+                    f"Skipped duplicate tool call: {tool_call.name}",
+                    metadata={"duplicate": True},
+                )
+                continue
+            deduplicator.add(skill_call_for_dedup)
+
+            # Execute the tool call
+            try:
+                async for ret in self._execute_tool_call(stream_item, tool_call):
+                    yield ret
+                successful_calls += 1
+            except ToolInterrupt as e:
+                # ToolInterrupt is critical - propagate immediately
+                # (e.g., user cancellation, system limit reached)
+                logger.info(
+                    f"Tool execution interrupted at {i+1}/{total_calls}, "
+                    f"completed: {successful_calls}, failed: {failed_calls}"
+                )
+                raise e
+            except Exception as e:
+                # Non-critical failure: log and continue with remaining tools
+                # Response message is already added in _execute_tool_call's exception handler
+                failed_calls += 1
+                self.context.error(
+                    f"Tool call {tool_call.name} failed: {e}, continuing with remaining tools"
+                )
+        
+        # Log execution summary for debugging
+        if failed_calls > 0:
+            logger.warning(
+                f"Multiple tool calls completed with errors: "
+                f"{successful_calls}/{total_calls} successful, {failed_calls} failed"
+            )
 
     async def _handle_duplicate_tool_call(self, tool_call: ToolCall, stream_item: StreamItem):
         """Handling Duplicate Tool Calls"""
