@@ -998,6 +998,14 @@ class GlobalConfig:
     def get_llm_cache(self, llm: str, key: Messages):
         return self._llm_cache.getValue(llm, key=key.get_messages_as_dict())
 
+    def set_llm_cache_by_dict(self, llm: str, key: List[Dict[str, Any]], value: Any):
+        """Set LLM cache using a sanitized dict-list key."""
+        self._llm_cache.setValue(llm, key=key, value=value)
+
+    def get_llm_cache_by_dict(self, llm: str, key: List[Dict[str, Any]]):
+        """Get LLM cache using a sanitized dict-list key."""
+        return self._llm_cache.getValue(llm, key=key)
+
     @staticmethod
     def from_dict(config_dict: dict, base_dir: str = None) -> "GlobalConfig":
         is_new_config_format = "llms" in config_dict and "default" in config_dict
