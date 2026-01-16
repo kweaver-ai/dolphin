@@ -235,7 +235,7 @@ class RuntimeInstance:
 def set_variable(self):
     # 保持_progress字段的传统格式
     self.context.set_variable("_progress", [
-        stage.get_triditional_dict() for stage in self.stages
+        stage.get_traditional_dict() for stage in self.stages
     ])
 ```
 

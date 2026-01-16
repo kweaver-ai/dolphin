@@ -125,7 +125,10 @@ python tools/view_trajectory.py --latest --no-rich > output.txt
 
 ### 轨迹文件位置
 
-默认读取 `log/agent/` 目录下的轨迹文件。文件命名格式：
+默认读取 `data/dialog/` 目录下的对话/轨迹文件（当前默认）。
+同时为兼容历史版本，也支持读取旧的 `log/agent/` 轨迹文件。
+
+旧版文件命名格式：
 ```
 alfred_trajectory_{timestamp}_{session_id}.json
 ```
@@ -138,4 +141,3 @@ alfred_trajectory_{timestamp}_{session_id}.json
 - 超长内容会自动截断，避免输出过多
 - JSON 内容会自动语法高亮显示
 - 时间成分条只统计机器执行时间，排除用户输入等待时间
-

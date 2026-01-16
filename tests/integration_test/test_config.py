@@ -4,15 +4,16 @@ Integration Test Configuration Classes
 Defines the structure for integration test cases and configurations.
 """
 
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
 import sys
 import os
 
-# 添加项目路径到 sys.path
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../src"))
+# Add project root to sys.path for relative imports (must be before other imports)
+project_root = os.path.join(os.path.dirname(__file__), "..", "..")
+sys.path.insert(0, project_root)
 
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
 
 from dolphin.core.common.enums import Messages
 

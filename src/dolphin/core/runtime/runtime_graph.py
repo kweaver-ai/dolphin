@@ -84,7 +84,7 @@ class RuntimeGraph:
 
     def get_all_stages(self):
         return [
-            i.get_triditional_dict()
+            i.get_traditional_dict()
             for i in self.visible_instances
             if i.type == TypeRuntimeInstance.STAGE
         ]
