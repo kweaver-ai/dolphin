@@ -502,11 +502,34 @@ class ToolCallStrategy(ExploreStrategy):
         no_cache: bool = False,
     ) -> Dict[str, Any]:
         """Includes the tools parameter and an optional tool_choice"""
+        tools = skillkit.getSkillsSchema() if skillkit and not skillkit.isEmpty() else []
+        
+        # Debug: print tools schema
+        print(f"\n[DEBUG] ToolCallStrategy.get_llm_params:")
+        print(f"  Skillkit empty: {skillkit.isEmpty() if skillkit else 'None'}")
+        print(f"  Tools count: {len(tools)}")
+        if tools:
+            print(f"  Tools schema: {tools}")
+            # Check each tool for interrupt_config
+            for i, tool_schema in enumerate(tools):
+                tool_name = tool_schema.get('function', {}).get('name', 'unknown')
+                print(f"    Tool[{i}]: {tool_name}")
+                # Try to get the actual skill object
+                if skillkit:
+                    try:
+                        skill = skillkit.getSkill(tool_name)
+                        print(f"      Skill type: {type(skill).__name__}")
+                        print(f"      Has interrupt_config: {hasattr(skill, 'interrupt_config')}")
+                        if hasattr(skill, 'interrupt_config'):
+                            print(f"      interrupt_config: {skill.interrupt_config}")
+                    except Exception as e:
+                        print(f"      Error getting skill: {e}")
+        
         llm_params = {
             "messages": messages,
             "model": model,
             "no_cache": no_cache,
-            "tools": skillkit.getSkillsSchema() if skillkit and not skillkit.isEmpty() else [],
+            "tools": tools,
         }
 
         if tool_choice:

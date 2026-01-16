@@ -178,6 +178,7 @@ class LLMClient:
                 sock_connect=30,  # Keep connection timeout
                 sock_read=300,  # Single read timeout (for slow streaming data)
             )
+            print(f"------------------------llm={payload}")
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     model_config.api,

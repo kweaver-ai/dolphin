@@ -1,13 +1,77 @@
-import fcntl
 import json
 import os
+import sys
 import threading
 import time
 from typing import List, Dict, Any, Optional
 import uuid
 from dolphin.core.logging.logger import get_logger
 
+# Cross-platform file locking support
+_HAS_FCNTL = False
+_HAS_MSVCRT = False
+
+if sys.platform == 'win32':
+    # Windows: use msvcrt for file locking
+    try:
+        import msvcrt
+        _HAS_MSVCRT = True
+    except ImportError:
+        pass
+else:
+    # Unix/Linux: use fcntl for file locking
+    try:
+        import fcntl
+        _HAS_FCNTL = True
+    except ImportError:
+        pass
+
 logger = get_logger("utils.cache_kv")
+
+
+def _lock_file(f, exclusive=False):
+    """
+    Cross-platform file locking
+    
+    Args:
+        f: File object
+        exclusive: If True, acquire exclusive lock; otherwise shared lock
+    """
+    if _HAS_FCNTL:
+        # Unix/Linux: use fcntl
+        lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        fcntl.flock(f.fileno(), lock_type)
+    elif _HAS_MSVCRT:
+        # Windows: use msvcrt
+        # msvcrt.locking doesn't support shared locks, so we use exclusive
+        # Note: msvcrt requires seeking to the start
+        f.seek(0)
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+        except OSError:
+            # File might be too short, which is ok for our use case
+            pass
+    # If neither is available, proceed without locking (not ideal but won't crash)
+
+
+def _unlock_file(f):
+    """
+    Cross-platform file unlocking
+    
+    Args:
+        f: File object
+    """
+    if _HAS_FCNTL:
+        # Unix/Linux: use fcntl
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    elif _HAS_MSVCRT:
+        # Windows: use msvcrt
+        f.seek(0)
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    # If neither is available, nothing to unlock
 
 
 class CacheKV:
@@ -28,8 +92,7 @@ class CacheKV:
 
         try:
             with open(self.filePath, "r", encoding="utf-8") as f:
-                fd = f.fileno()
-                fcntl.flock(fd, fcntl.LOCK_SH)  # Shared lock for reading
+                _lock_file(f, exclusive=False)  # Shared lock for reading
                 try:
                     loaded_cache = json.load(f)
                     for key, value in loaded_cache.items():
@@ -46,7 +109,7 @@ class CacheKV:
                             # Compatible with old formats
                             self.cache[key] = {"value": value, "timestamp": time.time()}
                 finally:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    _unlock_file(f)
         except (json.JSONDecodeError, IOError) as e:
             logger.error(
                 f"Error loading cache file {self.filePath}: {e} try to backup and reset cache"
@@ -77,14 +140,13 @@ class CacheKV:
             temp_path = f"{self.filePath}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
             try:
                 with open(temp_path, "w", encoding="utf-8") as f:
-                    fd = f.fileno()
-                    fcntl.flock(fd, fcntl.LOCK_EX)  # Exclusive lock for writing
+                    _lock_file(f, exclusive=True)  # Exclusive lock for writing
                     try:
                         json.dump(self.cache, f, ensure_ascii=False)
                         f.flush()
-                        os.fsync(fd)  # Ensure data is written to disk
+                        os.fsync(f.fileno())  # Ensure data is written to disk
                     finally:
-                        fcntl.flock(fd, fcntl.LOCK_UN)
+                        _unlock_file(f)
 
                 # Atomic rename
                 os.rename(temp_path, self.filePath)

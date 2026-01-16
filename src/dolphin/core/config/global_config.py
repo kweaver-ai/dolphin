@@ -979,12 +979,18 @@ class GlobalConfig:
         return self._retrieval_model_config
 
     def get_model_config(self, llm_name: Optional[str]) -> LLMInstanceConfig:
-        if llm_name in self.llmInstanceConfigs:
-            return self.llmInstanceConfigs.get(llm_name, "")
-        elif not llm_name:
-            return self.llmInstanceConfigs.get(self.default_llm, {})
-        else:
-            raise ValueError(f"llm_name {llm_name} not found in llmInstanceConfigs")
+        # If no llm_name provided, use default
+        if not llm_name:
+            llm_name = self.default_llm
+        
+        # Check if model exists
+        if llm_name not in self.llmInstanceConfigs:
+            raise ValueError(
+                f"llm_name '{llm_name}' not found in llmInstanceConfigs. "
+                f"Available models: {list(self.llmInstanceConfigs.keys())}"
+            )
+        
+        return self.llmInstanceConfigs[llm_name]
 
     def get_default_model_config(self) -> LLMInstanceConfig:
         return self.get_model_config(self.default_llm)

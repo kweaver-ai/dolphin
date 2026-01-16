@@ -484,6 +484,10 @@ class DolphinExecutor:
         if isinstance(e, UserInterrupt):
             frame.status = FrameStatus.WAITING_FOR_INTERVENTION
             frame.wait_reason = WaitReason.USER_INTERRUPT
+            # *** FIX: Update block_pointer to current block before saving snapshot ***
+            # This ensures resume will continue from the interrupted block, not restart from beginning
+            frame.block_pointer = block_pointer
+            self.state_registry.update_frame(frame)  # Save updated pointer
             intervention_snapshot_id = self._save_frame_snapshot(frame)
             frame.error = {
                 "error_type": "UserInterrupt",
@@ -504,12 +508,17 @@ class DolphinExecutor:
         if isinstance(e, ToolInterrupt):
             frame.status = FrameStatus.WAITING_FOR_INTERVENTION
             frame.wait_reason = WaitReason.TOOL_REQUEST
+            # *** FIX: Update block_pointer to current block before saving snapshot ***
+            # This ensures resume will continue from the interrupted block, not restart from beginning
+            frame.block_pointer = block_pointer
+            self.state_registry.update_frame(frame)  # Save updated pointer
             intervention_snapshot_id = self._save_frame_snapshot(frame)
             frame.error = {
                 "error_type": "ToolInterrupt",
                 "message": str(e),
                 "tool_name": getattr(e, "tool_name", ""),
                 "tool_args": getattr(e, "tool_args", []),
+                "tool_config": getattr(e, "tool_config", {}),
                 "at_block": block_pointer,
                 "intervention_snapshot_id": intervention_snapshot_id,
             }

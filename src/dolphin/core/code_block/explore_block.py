@@ -102,6 +102,9 @@ class ExploreBlock(BasicCodeBlock):
         self.enable_skill_deduplicator = getattr(
             self, "enable_skill_deduplicator", True
         )
+        
+        # Enable tool interrupt mechanism for ExploreBlock
+        self._enable_tool_interrupt = True
 
         # State Variables
         self.times = 0
@@ -552,10 +555,10 @@ Please reconsider your approach and improve your answer based on the feedback ab
     def _has_pending_tool_call(self) -> bool:
         """Check if there are pending tool calls (interrupt recovery)"""
         intervention_tmp_key = "intervention_explore_block_vars"
-        return (
-            intervention_tmp_key in self.context.get_all_variables().keys()
-            and "tool" in self.context.get_all_variables().keys()
-        )
+        has_intervention = intervention_tmp_key in self.context.get_all_variables().keys()
+        has_tool = "tool" in self.context.get_all_variables().keys()
+        logger.debug(f"[DEBUG _has_pending_tool_call] has_intervention={has_intervention}, has_tool={has_tool}")
+        return has_intervention and has_tool
 
     async def _handle_resumed_tool_call(self):
         """Tools for handling interrupt recovery calls """
@@ -565,17 +568,35 @@ Please reconsider your approach and improve your answer based on the feedback ab
         intervention_vars = self.context.get_var_value(intervention_tmp_key)
         self.context.delete_variable(intervention_tmp_key)
 
-        # Restore complete message context
+        # Restore complete message context to context_manager buckets
         saved_messages = intervention_vars.get("prompt")
         if saved_messages is not None:
             msgs = Messages()
             msgs.extend_plain_messages(saved_messages)
-            self.context.set_messages(msgs)
+            # Use set_messages_batch to restore to context_manager buckets
+            # This ensures messages are available when to_dph_messages() is called
+            self.context.set_messages_batch(msgs, bucket=BuildInBucket.SCRATCHPAD.value)
 
         input_dict = self.context.get_var_value("tool")
         function_name = input_dict["tool_name"]
         raw_tool_args = input_dict["tool_args"]
         function_params_json = {arg["key"]: arg["value"] for arg in raw_tool_args}
+        
+        # *** FIX: Update the last tool_call message with modified parameters ***
+        # This ensures LLM sees the actual parameters used, not the original ones
+        messages = self.context.get_messages()
+        if messages and len(messages.get_messages()) > 0:
+            last_message = messages.get_messages()[-1]
+            # Check if last message is an assistant message with tool_calls
+            if (hasattr(last_message, 'role') and last_message.role == "assistant" and 
+                hasattr(last_message, 'tool_calls') and last_message.tool_calls):
+                # Find the matching tool_call
+                for tool_call in last_message.tool_calls:
+                    if hasattr(tool_call, 'function') and tool_call.function.name == function_name:
+                        # Update the arguments with modified parameters
+                        import json
+                        tool_call.function.arguments = json.dumps(function_params_json, ensure_ascii=False)
+                        logger.debug(f"[FIX] Updated tool_call arguments from original to modified: {function_params_json}")
 
         if self.recorder:
             self.recorder.update(
@@ -585,9 +606,58 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 skill_type=self.context.get_skill_type(function_name),
                 skill_args=function_params_json,
             )
+        
+        # *** Handle skip action ***
+        skip_tool = self.context.get_var_value("__skip_tool__")
+        skip_message = self.context.get_var_value("__skip_message__")
+        
+        # Clean up skip flags
+        if skip_tool:
+            self.context.delete_variable("__skip_tool__")
+        if skip_message:
+            self.context.delete_variable("__skip_message__")
+        
         self.context.delete_variable("tool")
 
         return_answer = {}
+        
+        # If user chose to skip, don't execute the tool
+        if skip_tool:
+            # Generate friendly skip message
+            params_str = ", ".join([f"{k}={v}" for k, v in function_params_json.items()])
+            default_skip_msg = f"Tool '{function_name}' was skipped by user"
+            if skip_message:
+                skip_response = f"[SKIPPED] {skip_message}"
+            else:
+                skip_response = f"[SKIPPED] {default_skip_msg} (parameters: {params_str})"
+            
+            return_answer["answer"] = skip_response
+            return_answer["think"] = skip_response
+            return_answer["status"] = "completed"
+            
+            if self.recorder:
+                self.recorder.update(
+                    item={"answer": skip_response, "block_answer": skip_response},
+                    stage=TypeStage.SKILL,
+                    source_type=SourceType.EXPLORE,
+                    skill_name=function_name,
+                    skill_type=self.context.get_skill_type(function_name),
+                    skill_args=function_params_json,
+                )
+            
+            yield [return_answer]
+            
+            # Add tool response message with skip indicator
+            tool_call_id = self._extract_tool_call_id()
+            if not tool_call_id:
+                tool_call_id = f"call_{function_name}_{self.times}"
+            
+            self.strategy.append_tool_response_message(
+                self.context, tool_call_id, skip_response, metadata={"skipped": True}
+            )
+            return
+        
+        # Normal execution (not skipped)
         try:
             props = {"intervention": False}
             have_answer = False
@@ -658,9 +728,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
         if not tool_call_id:
             tool_call_id = f"call_{function_name}_{self.times}"
 
-            self.strategy.append_tool_response_message(
-                self.context, tool_call_id, str(tool_response), metadata
-            )
+        self.strategy.append_tool_response_message(
+            self.context, tool_call_id, str(tool_response), metadata
+        )
 
     async def _handle_new_tool_call(self, no_cache: bool):
         """Handling New Tool Calls"""
@@ -916,7 +986,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
     def _handle_tool_interrupt(self, e: Exception, tool_name: str):
         """Handling Tool Interruptions"""
-        self.context.info(f"tool interrupt in call {tool_name} tool")
+        self.context.info(f"Tool interrupt in call {tool_name} tool")
         if "※tool" in self.context.get_all_variables().keys():
             self.context.delete_variable("※tool")
 

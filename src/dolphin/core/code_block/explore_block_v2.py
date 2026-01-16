@@ -116,6 +116,9 @@ class ExploreBlockV2(BasicCodeBlock):
         self.enable_skill_deduplicator = getattr(
             self, "enable_skill_deduplicator", True
         )
+        
+        # Enable tool interrupt mechanism for ExploreBlockV2
+        self._enable_tool_interrupt = True
 
     async def execute(
         self,
@@ -295,17 +298,36 @@ class ExploreBlockV2(BasicCodeBlock):
         intervention_vars = self.context.get_var_value(intervention_tmp_key)
         self.context.delete_variable(intervention_tmp_key)
 
-        # restore the complete message context before tool execution
+        # restore the complete message context to context_manager buckets
         saved_messages = intervention_vars.get("prompt")
         if saved_messages is not None:
             msgs = Messages()
             msgs.extend_plain_messages(saved_messages)
-            self.context.set_messages(msgs)
+            # Use set_messages_batch to restore to context_manager buckets
+            # This ensures messages are available when to_dph_messages() is called
+            from dolphin.core.context_engineer.config.settings import BuildInBucket
+            self.context.set_messages_batch(msgs, bucket=BuildInBucket.SCRATCHPAD.value)
 
         input_dict = self.context.get_var_value("tool")
         function_name = input_dict["tool_name"]
         raw_tool_args = input_dict["tool_args"]
         function_params_json = {arg["key"]: arg["value"] for arg in raw_tool_args}
+        
+        # *** FIX: Update the last tool_call message with modified parameters ***
+        # This ensures LLM sees the actual parameters used, not the original ones
+        messages = self.context.get_messages()
+        if messages and len(messages.get_messages()) > 0:
+            last_message = messages.get_messages()[-1]
+            # Check if last message is an assistant message with tool_calls
+            if (hasattr(last_message, 'role') and last_message.role == "assistant" and 
+                hasattr(last_message, 'tool_calls') and last_message.tool_calls):
+                # Find the matching tool_call
+                for tool_call in last_message.tool_calls:
+                    if hasattr(tool_call, 'function') and tool_call.function.name == function_name:
+                        # Update the arguments with modified parameters
+                        import json
+                        tool_call.function.arguments = json.dumps(function_params_json, ensure_ascii=False)
+                        logger.debug(f"[FIX] Updated tool_call arguments from original to modified: {function_params_json}")
 
         (
             self.recorder.update(
@@ -318,9 +340,59 @@ class ExploreBlockV2(BasicCodeBlock):
             if self.recorder
             else None
         )
+        
+        # *** Handle skip action ***
+        skip_tool = self.context.get_var_value("__skip_tool__")
+        skip_message = self.context.get_var_value("__skip_message__")
+        
+        # Clean up skip flags
+        if skip_tool:
+            self.context.delete_variable("__skip_tool__")
+        if skip_message:
+            self.context.delete_variable("__skip_message__")
+        
         self.context.delete_variable("tool")
 
         return_answer = {}
+        
+        # If user chose to skip, don't execute the tool
+        if skip_tool:
+            # Generate friendly skip message
+            params_str = ", ".join([f"{k}={v}" for k, v in function_params_json.items()])
+            default_skip_msg = f"Tool '{function_name}' was skipped by user"
+            if skip_message:
+                skip_response = f"[SKIPPED] {skip_message}"
+            else:
+                skip_response = f"[SKIPPED] {default_skip_msg} (parameters: {params_str})"
+            
+            return_answer["answer"] = skip_response
+            return_answer["think"] = skip_response
+            return_answer["status"] = "completed"
+            
+            (
+                self.recorder.update(
+                    item={"answer": skip_response, "block_answer": skip_response},
+                    stage=TypeStage.SKILL,
+                    source_type=SourceType.EXPLORE,
+                    skill_name=function_name,
+                    skill_type=self.context.get_skill_type(function_name),
+                    skill_args=function_params_json,
+                )
+                if self.recorder
+                else None
+            )
+            
+            yield [return_answer]
+            
+            # Add tool response message with skip indicator
+            tool_call_id = self._extract_tool_call_id()
+            if not tool_call_id:
+                tool_call_id = f"call_{function_name}_{self.times}"
+            
+            self._append_tool_message(tool_call_id, skip_response, metadata={"skipped": True})
+            return
+        
+        # Normal execution (not skipped)
         try:
             props = {"intervention": False}
             have_answer = False
@@ -480,6 +552,7 @@ class ExploreBlockV2(BasicCodeBlock):
             return
 
         # Add assistant message containing tool calls
+        logger.debug(f"[DEBUG] Tool call detected, preparing to execute: {stream_item.tool_name}")
         tool_call_id = f"call_{stream_item.tool_name}_{self.times}"
         tool_call_openai_format = [
             {
@@ -506,13 +579,16 @@ class ExploreBlockV2(BasicCodeBlock):
             )
             self.deduplicator_skillcall.add(tool_call)
 
+            logger.debug(f"[DEBUG] Calling _execute_tool_call for: {stream_item.tool_name}")
             async for ret in self._execute_tool_call(stream_item, tool_call_id):
                 yield ret
+            logger.debug(f"[DEBUG] _execute_tool_call completed for: {stream_item.tool_name}")
         else:
             await self._handle_duplicate_tool_call(tool_call, stream_item)
 
     async def _execute_tool_call(self, stream_item, tool_call_id: str):
         """Execute tool call"""
+        logger.debug(f"[DEBUG] _execute_tool_call ENTERED for: {stream_item.tool_name}")
         intervention_tmp_key = "intervention_explore_block_vars"
 
         try:

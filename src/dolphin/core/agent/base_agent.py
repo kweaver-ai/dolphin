@@ -406,12 +406,34 @@ class BaseAgent(ABC):
                             AgentState.PAUSED, "Agent paused due to tool interrupt"
                         )
                     
+                    # Map interrupt_type: "tool_interrupt" (internal) -> "tool_confirmation" (API)
+                    api_interrupt_type = self._pause_type.value
+                    if run_result.resume_handle:
+                        internal_type = run_result.resume_handle.interrupt_type
+                        if internal_type == "tool_interrupt":
+                            api_interrupt_type = "tool_confirmation"
+                        elif internal_type == "user_interrupt":
+                            api_interrupt_type = "user_interrupt"
+                    
                     # 统一输出格式：status 固定为 "interrupted"，通过 interrupt_type 区分
-                    yield {
+                    interrupt_response = {
                         "status": "interrupted",
                         "handle": run_result.resume_handle,
-                        "interrupt_type": run_result.resume_handle.interrupt_type if run_result.resume_handle else self._pause_type.value,
+                        "interrupt_type": api_interrupt_type,
                     }
+                    
+                    # For ToolInterrupt, include tool data from frame.error (same as step mode)
+                    if run_result.is_tool_interrupted and self._current_frame and self._current_frame.error:
+                        frame_error = self._current_frame.error
+                        if frame_error.get("error_type") == "ToolInterrupt":
+                            interrupt_response["data"] = {
+                                "tool_name": frame_error.get("tool_name", ""),
+                                "tool_description": "",  # Can be added if available
+                                "tool_args": frame_error.get("tool_args", []),
+                                "interrupt_config": frame_error.get("tool_config", {}),
+                            }
+                    
+                    yield interrupt_response
                     return
 
                 elif run_result.is_completed:
@@ -463,11 +485,32 @@ class BaseAgent(ABC):
                             )
                         
                         # 统一输出格式
-                        yield {
+                        # Map interrupt_type: "tool_interrupt" (internal) -> "tool_confirmation" (API)
+                        api_interrupt_type = self._pause_type.value
+                        if step_result.resume_handle:
+                            internal_type = step_result.resume_handle.interrupt_type
+                            if internal_type == "tool_interrupt":
+                                api_interrupt_type = "tool_confirmation"
+                            elif internal_type == "user_interrupt":
+                                api_interrupt_type = "user_interrupt"
+                        
+                        interrupt_response = {
                             "status": "interrupted",
                             "handle": step_result.resume_handle,
-                            "interrupt_type": step_result.resume_handle.interrupt_type if step_result.resume_handle else self._pause_type.value,
+                            "interrupt_type": api_interrupt_type,
                         }
+                        
+                        # For ToolInterrupt, include tool data from frame.error
+                        if step_result.is_tool_interrupted and self._current_frame and self._current_frame.error:
+                            frame_error = self._current_frame.error
+                            if frame_error.get("error_type") == "ToolInterrupt":
+                                interrupt_response["data"] = {
+                                    "tool_name": frame_error.get("tool_name", ""),
+                                    "tool_args": frame_error.get("tool_args", []),
+                                    "tool_config": frame_error.get("tool_config", {}),
+                                }
+                        
+                        yield interrupt_response
                         break
 
                     elif step_result.is_completed:
@@ -568,11 +611,22 @@ class BaseAgent(ABC):
         """Pause logic implemented by subclasses"""
         pass
 
-    async def resume(self, updates: Optional[Dict[str, Any]] = None) -> bool:
+    async def resume(
+        self, 
+        updates: Optional[Dict[str, Any]] = None,
+        resume_handle=None  # External resume handle (for stateless scenarios)
+    ) -> bool:
         """Resume Agent (based on coroutine)
 
         Args:
             updates: Variable updates to inject (used to resume from tool interruption)
+            resume_handle: Optional external resume handle (for web apps/stateless scenarios)
+                          If provided, will override internal _resume_handle
+                          This allows resuming across different requests/processes
+
+        Usage Scenarios:
+            1. Stateful (same process): resume(updates) - uses internal _resume_handle
+            2. Stateless (web apps): resume(updates, resume_handle) - uses external handle
         """
         if self.state != AgentState.PAUSED:
             raise AgentLifecycleException(
@@ -580,9 +634,18 @@ class BaseAgent(ABC):
             )
 
         try:
-            # Resume coroutine execution
-            if self._resume_handle is not None:
+            # Use external handle if provided (for stateless scenarios like web apps)
+            # Otherwise use internal handle (for stateful scenarios like testing)
+            handle_to_use = resume_handle if resume_handle is not None else self._resume_handle
+            
+            if handle_to_use is not None:
+                # Temporarily set internal handle for _on_resume_coroutine to use
+                original_handle = self._resume_handle
+                self._resume_handle = handle_to_use
+                
                 self._current_frame = await self._on_resume_coroutine(updates)
+                
+                # Clear handles after resume
                 self._resume_handle = None
                 self._pause_type = None
 
