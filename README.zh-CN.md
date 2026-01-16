@@ -24,7 +24,9 @@ Dolphin Language 是一个创新的编程语言和 SDK，专门设计用于构�
 - **长期记忆**：持久化的记忆存储和检索系统
 - **MCP 集成**：Model Context Protocol 支持，连接外部工具和服务
 
-### 🧪 完整的实验系统
+### 🧪 实验系统（规划中）
+
+注：此处提到的实验系统在当前仓库快照中未包含。
 
 - **基准测试**：标准化的性能评估和对比
 - **配置管理**：灵活的实验配置和参数调优
@@ -44,18 +46,29 @@ python=3.10+
 
 ## 🚀 快速安装
 
-推荐使用自动安装脚本，一键完成所有安装步骤：
+### 推荐：自动化安装
 
 ```bash
 git clone https://github.com/kweaver-ai/dolphin.git
-cd dolphin-language
-python install.py
+cd dolphin
+make dev-setup
 ```
 
-或者使用 Makefile：
+这将会：
+- 使用 `uv` 安装所有依赖
+- 设置开发环境
+- 使 `dolphin` 命令可用
+
+### 可选：手动安装
+
+如果需要手动控制：
 
 ```bash
-make install
+# 安装依赖
+uv sync --all-groups
+
+# 或使用 pip 以可编辑模式安装
+pip install -e ".[dev]"
 ```
 
 ### 仅构建（不安装）
@@ -63,33 +76,107 @@ make install
 如果只想构建 wheel 包而不安装：
 
 ```bash
-python install.py --build-only
-# 或者
 make build-only
+# 或者
+uv run python -m build
 ```
 
-### 手动安装
+**环境要求**：Python 3.10+ 和 [uv](https://docs.astral.sh/uv/) 包管理器（推荐）或 pip。
 
-如果需要手动控制安装过程，可以按以下步骤操作：
+更多安装选项，请查看 `make help`。
+
+## ⚙️ 配置
+
+运行 Dolphin 之前，需要配置 LLM API 凭证。请选择适合您工作流的方式：
+
+### 🚀 快速设置：环境变量（推荐）
+
+最简单的入门方式：
 
 ```bash
-# 1. 构建wheel包
-python3 -m pip install build
-python3 -m build
+# 设置您的 OpenAI API 密钥
+export OPENAI_API_KEY="sk-your-key-here"
 
-# 2. 安装dolphin_language包（版本号会自动从VERSION文件读取）
-pip install dist/dolphin_language-{VERSION}-py3-none-any.whl -i https://pypi.tuna.tsinghua.edu.cn/simple --force-reinstall --trusted-host pypi.tuna.tsinghua.edu.cn
+# 或添加到 shell 配置文件以持久化
+echo 'export OPENAI_API_KEY="sk-your-key-here"' >> ~/.bashrc  # 或 ~/.zshrc
 ```
 
-注：手动安装时需要将 `{VERSION}` 替换为 VERSION 文件中的实际版本号。
+**为什么用环境变量？**
+- ✅ 无需配置文件
+- ✅ 更安全（不会误提交敏感信息）
+- ✅ 适用于所有示例
+- ✅ 易于更新或轮换密钥
+
+**准备就绪！** 继续查看[快速开始](#-快速开始)运行您的第一个 Agent。
+
+### 📁 高级：配置文件（可选）
+
+对于复杂设置（多模型、自定义端点）：
+
+```bash
+# 1. 复制模板
+cp config/global.template.yaml config/global.yaml
+
+# 2. 编辑并填入您的 API 密钥
+vim config/global.yaml
+# 将 "********" 替换为您的实际 API 密钥
+```
+
+**配置示例**:
+```yaml
+clouds:
+  openai:
+    api: "https://api.openai.com/v1/chat/completions"
+    api_key: "sk-your-actual-key"  # ← 替换这里
+
+llms:
+  default:  # 自定义配置名（不是模型名）
+    cloud: "openai"
+    model_name: "gpt-4o"  # 实际的 OpenAI 模型名
+    temperature: 0.0
+```
+
+**配置优先级**（从高到低）：
+1. 环境变量（`OPENAI_API_KEY`）
+2. CLI 参数 `--config path/to/config.yaml`
+3. 项目配置 `./config/global.yaml`
+4. 用户配置 `~/.dolphin/config.yaml`
+5. 默认值
+
+💡 查看 [config/global.template.yaml](config/global.template.yaml) 了解所有选项。
 
 ## 🌟 快速开始
 
-### CLI 工具
+### 30 秒上手体验
 
-Dolphin 提供强大的命令行工具，支持三种运行模式：
+**前提条件**：确保已[配置](#%EF%B8%8F-配置) API 密钥。
 
 ```bash
+# 1. 创建示例数据文件
+echo "name,age,city
+Alice,30,New York
+Bob,25,San Francisco
+Charlie,35,Los Angeles" > /tmp/test_data.csv
+
+# 2. 运行您的第一个分析
+dolphin run --agent tabular_analyst \
+  --folder ./examples/tabular_analyst \
+  --query "/tmp/test_data.csv"
+```
+
+✅ 您将看到 Dolphin 智能分析数据并给出洞察！
+
+---
+
+### CLI 工具
+
+Dolphin 提供强大的命令行工具，支持四种运行模式：
+
+```bash
+# Explore 模式（默认，类似 Claude Code / Codex）
+dolphin
+dolphin explore
+
 # 运行 Agent
 dolphin run --agent my_agent --folder ./agents --query "分析数据"
 
@@ -104,6 +191,7 @@ dolphin chat --agent my_agent --folder ./agents
 
 | 子命令 | 描述 | 典型用途 |
 |--------|------|----------|
+| `explore` | Explore 模式（默认） | 交互式编程助手 |
 | `run` | 运行 Agent（默认） | 批量执行、脚本调用 |
 | `debug` | 调试模式 | 开发调试、问题排查 |
 | `chat` | 交互式对话 | 持续对话、探索测试 |
@@ -141,7 +229,7 @@ dolphin chat --help
 ### Python API
 
 ```python
-from DolphinLanguageSDK.agent.dolphin_agent import DolphinAgent
+from dolphin.sdk.agent.dolphin_agent import DolphinAgent
 import asyncio
 
 async def main():
@@ -160,6 +248,8 @@ async def main():
 
 asyncio.run(main())
 ```
+
+详细的 Python API 使用，请查看 [Dolphin Agent 集成指南](docs/usage/guides/dolphin-agent-integration.md)。
 
 ## 🛠️ 辅助工具
 
@@ -186,34 +276,7 @@ python tools/view_trajectory.py --index 1
 
 ## 🧪 实验系统
 
-Dolphin Language 提供了一个强大的实验系统，用于结构化地运行和管理 AI 工作流实验：
-
-### 快速开始实验
-
-```bash
-# 1. 创建新实验
-./experiments/bin/create --name my_experiment --dolphins path/to/dolphins_folder
-
-# 2. 配置实验参数（编辑 experiments/design/my_experiment/spec.txt）
-# 3. 运行实验
-./experiments/bin/run --name my_experiment
-```
-
-### 实验功能特性
-
-- **🎯 配置对比**：支持多种配置参数的自动组合测试
-- **📊 基准测试**：内置 Bird、Browse 等标准基准测试集
-- **🤖 智能评估**：基于 LLM 的语义答案比较
-- **📈 结果追踪**：详细的实验结果记录和统计分析
-- **🔄 批量运行**：支持大规模自动化实验
-
-### 支持的基准测试
-
-- **Bird 基准测试**：SQL 查询生成和验证
-- **Browse 基准测试**：网页浏览和信息提取
-- **自定义基准**：支持用户自定义测试集合
-
-详细文档：[experiments/README.md](experiments/README.md)
+（规划中）一些旧文档/示例中提到的 `experiments/` 实验系统，在当前仓库快照中未包含。
 
 ## 🔌 MCP 集成
 
@@ -262,14 +325,13 @@ mcp_servers:
 ## 📖 项目结构
 
 ```
-dolphin-language/
+dolphin/
 ├── bin/                    # CLI 入口
 │   └── dolphin             # 主命令行工具
-├── src/DolphinLanguageSDK/ # 核心 SDK
+├── src/dolphin/            # 核心 SDK
 ├── tools/                  # 辅助工具
 │   └── view_trajectory.py  # 轨迹可视化工具
 ├── examples/               # 示例项目
-├── experiments/            # 实验系统
 ├── tests/                  # 测试套件
 ├── docs/                   # 文档
 └── config/                 # 配置文件
@@ -310,9 +372,6 @@ AGENT data_analyst:
 
 # 深度搜索示例  
 ./examples/bin/deepsearch.sh
-
-# SQL 基准测试
-./experiments/bin/run --name bird_baseline
 ```
 
 ### 使用场景
@@ -346,9 +405,6 @@ make test
 
 # 运行单元测试
 python -m pytest tests/unittest/
-
-# 运行基准测试
-./experiments/bin/run --name browse_comp
 ```
 
 ### 测试覆盖
@@ -363,7 +419,7 @@ python -m pytest tests/unittest/
 ```bash
 # 克隆项目
 git clone https://github.com/kweaver-ai/dolphin.git
-cd dolphin-language
+cd dolphin
 
 # 设置开发环境
 make dev-setup

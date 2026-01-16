@@ -6,13 +6,16 @@ Executes integration tests for Dolphin Language functionality.
 
 import sys
 import os
+
+# Add project root to sys.path for relative imports (must be before other imports)
+project_root = os.path.join(os.path.dirname(__file__), "..", "..")
+sys.path.insert(0, project_root)
+
 import asyncio
 import time
 import traceback
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-
-# Add project root and src directory to sys.path for relative imports
 
 from dolphin.core.skill.skillkit import Skillkit
 from dolphin.core.executor.dolphin_executor import DolphinExecutor
@@ -31,9 +34,6 @@ from tests.integration_test.mocked_tools import (
 
 from tests.integration_test.test_config import IntegrationTest, IntegrationTestCase
 from tests.integration_test.test_loader import loadTestConfig
-
-project_root = os.path.join(os.path.dirname(__file__), "..", "..")
-sys.path.insert(0, project_root)
 
 
 @dataclass

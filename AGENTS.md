@@ -37,12 +37,62 @@
 
 ## 测试（Tests）
 
+### 目录结构
+
 - 测试目录：`tests/`，包含 `tests/unittest/`（单元测试）与 `tests/integration_test/`（集成测试）
 - 统一入口：`tests/run_tests.sh <test_type> [options]`
   - `test_type`: `unit` / `integration` / `all`
   - 常用参数：`-v/--verbose`、`--coverage`、`--parallel`、`--fail-fast`
   - 集成测试参数：`-f/--filter <pattern>`、`-c/--config <file>`、`--agent-only`、`--regular-only`
   - 环境参数：`--python <version>`、`--sync`、`--clean`
+
+### 测试编写规范
+
+**详细规范**: 参考 `tests/TEST_STYLE_GUIDE.md`
+
+#### 断言风格
+```python
+# ✅ Use pytest assert
+assert result == expected
+assert "keyword" in text
+assert isinstance(obj, SomeClass)
+
+# ❌ Avoid unittest assertions
+self.assertEqual(result, expected)  # Use assert instead
+```
+
+#### Mock 使用
+```python
+# ✅ Use decorator pattern
+from unittest.mock import patch, AsyncMock
+
+@patch('module.external_api')
+def test_feature(mock_api):
+    mock_api.return_value = "mocked"
+    # Test logic
+
+# ✅ Async mock
+@patch('module.async_func', new_callable=AsyncMock)
+async def test_async(mock_func):
+    mock_func.return_value = "result"
+```
+
+#### 测试命名
+- 清晰描述测试内容: `test_agent_returns_none_when_query_is_empty()`
+- 避免模糊命名: `test_case1()`, `test_bug()`
+
+#### 测试隔离
+- 每个测试独立运行，不依赖其他测试
+- 使用 fixtures 管理测试数据
+- 只 Mock 外部依赖，不 Mock 被测代码
+
+#### 测试提交清单
+- [ ] 使用 pytest assert 而非 unittest 断言
+- [ ] Mock 使用装饰器风格
+- [ ] 测试名称清晰描述测试内容
+- [ ] 每个测试函数只测试一个行为
+- [ ] 异步测试使用 `@pytest.mark.asyncio`
+- [ ] 没有测试间的依赖关系
 
 ## 文档约定
 

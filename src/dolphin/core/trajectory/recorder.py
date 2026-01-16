@@ -97,6 +97,13 @@ class Recorder:
             else:
                 safe_item = {"answer": item}
             params.update(safe_item)
+
+        # Unified answer field: ensure answer has value if block_answer is present
+        # This maintains backward compatibility while providing a consistent API
+        if "block_answer" in params and params["block_answer"]:
+            if "answer" not in params or not params["answer"]:
+                params["answer"] = params["block_answer"]
+
         self.progress.set_last_stage(**params)
 
         # Ensure end_time is set for completed stages
