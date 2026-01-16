@@ -265,12 +265,6 @@ class LLMModelFactory(LLM):
                 for key, value in llm_instance_config.headers.items()
                 if value is not None
             }
-            print(f"------------------------llm={payload}")
-            print(f"\n[DEBUG LLM] 开始调用 LLM...")
-            print(f"  API: {llm_instance_config.api}")
-            print(f"  Model: {payload['model']}")
-            print(f"  Tools: {len(payload.get('tools', []))} 个")
-            print(f"  tool_choice: {payload.get('tool_choice', 'N/A')}")
 
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
@@ -297,16 +291,13 @@ class LLMModelFactory(LLM):
                             )
 
                     result = None
-                    chunk_count = 0
                     async for line in response.content:
                         if not line.startswith(b"data"):
                             continue
 
                         try:
-                            chunk_count += 1
                             line_decoded = line.decode().split("data:")[1]
                             if "[DONE]" in line_decoded:
-                                print(f"\n[DEBUG LLM] 收到 [DONE]，总共 {chunk_count} 个 chunks")
                                 break
                             line_json = json.loads(line_decoded, strict=False)
                             if "choices" not in line_json:
@@ -327,9 +318,6 @@ class LLMModelFactory(LLM):
                                         or ""
                                     )
 
-                                    if delta_content and chunk_count <= 3:
-                                        print(f"[DEBUG LLM] Chunk {chunk_count} content: {delta_content[:50]}")
-
                                     accu_content += delta_content
                                     reasoning_content += delta_reasoning
 
@@ -340,24 +328,8 @@ class LLMModelFactory(LLM):
 
                                     # Parse tool_calls using ToolCallsParser
                                     delta = line_json["choices"][0]["delta"]
-                                    if "tool_calls" in delta and delta["tool_calls"]:
-                                        tool_call = delta["tool_calls"][0]
-                                        if "function" in tool_call:
-                                            if (
-                                                "name" in tool_call["function"]
-                                                and tool_call["function"]["name"]
-                                            ):
-                                                func_name = tool_call["function"][
-                                                    "name"
-                                                ]
-                                                print(f"\n[DEBUG LLM] 检测到工具调用: {func_name}")
-                                            if (
-                                                "arguments" in tool_call["function"]
-                                                and tool_call["function"]["arguments"]
-                                            ):
-                                                func_args.append(
-                                                    tool_call["function"]["arguments"]
-                                                )
+                                    tool_parser.parse_delta_dict(delta)
+
                                     if line_json.get("usage") or line_json["choices"][
                                         0
                                     ].get("usage"):
