@@ -212,7 +212,7 @@ class StageInstance(RuntimeInstance):
                 ]:
                     setattr(self, key, value)
 
-    def get_triditional_dict(self):
+    def get_traditional_dict(self):
         # Safe access to enum values with fallback
         stage_value = (
             self.stage.value if hasattr(self.stage, "value") else str(self.stage)
@@ -223,15 +223,22 @@ class StageInstance(RuntimeInstance):
             else str(self.status)
         )
 
+        # Unified answer field: prefer block_answer if answer is empty
+        # This ensures answer field always contains the streaming text output
+        # while maintaining backward compatibility with block_answer field
+        answer_value = self.output.answer
+        if not answer_value and self.output.block_answer:
+            answer_value = self.output.block_answer
+
         return {
             "id": self.id,
             "agent_name": self.agent_name,
             "stage": stage_value,
-            "answer": self.output.answer,
+            "answer": answer_value,  # Unified streaming text output
             "think": self.output.think,
             "status": status_value,
             "skill_info": self.skill_info.to_dict() if self.skill_info else None,
-            "block_answer": self.output.block_answer,
+            "block_answer": self.output.block_answer,  # Kept for backward compatibility (deprecated)
             "input_message": self.input.content,
             "interrupted": self.interrupted,
             "flags": self.flags,
@@ -242,6 +249,25 @@ class StageInstance(RuntimeInstance):
             "estimated_ratio_tokens": self.get_estimated_ratio_tokens(),
             "token_usage": self.token_usage,
         }
+
+    def get_triditional_dict(self):
+        """Deprecated: Use get_traditional_dict() instead.
+
+        This method is kept for backward compatibility and will be removed in v3.0.
+        The method name was a typo ('triditional' instead of 'traditional').
+
+        .. deprecated:: 2.1
+            Use :meth:`get_traditional_dict` instead.
+        """
+        import warnings
+        warnings.warn(
+            "get_triditional_dict() is deprecated due to typo. "
+            "Use get_traditional_dict() instead. "
+            "This method will be removed in v3.0.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.get_traditional_dict()
 
     def llm_empty_answer(self):
         return (
@@ -382,7 +408,7 @@ class ProgressInstance(RuntimeInstance):
         return self.stages[-1] if len(self.stages) > 0 else None
 
     def get_last_answer(self) -> dict:
-        return self.stages[-1].get_triditional_dict()
+        return self.stages[-1].get_traditional_dict()
 
     def get_step_answers(self):
         last_stage = self.get_last_stage()
@@ -405,7 +431,7 @@ class ProgressInstance(RuntimeInstance):
         Get stages as serializable dictionaries instead of raw objects
         This ensures compatibility when stages are used as variable values
         """
-        return [stage.get_triditional_dict() for stage in self.stages]
+        return [stage.get_traditional_dict() for stage in self.stages]
 
     def get_raw_stages(self):
         """
@@ -416,5 +442,5 @@ class ProgressInstance(RuntimeInstance):
 
     def set_variable(self):
         self.context.set_variable(
-            "_progress", [stage.get_triditional_dict() for stage in self.stages]
+            "_progress", [stage.get_traditional_dict() for stage in self.stages]
         )

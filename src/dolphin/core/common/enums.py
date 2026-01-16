@@ -1,4 +1,7 @@
 import json
+import logging
+import uuid
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 from datetime import datetime
@@ -9,7 +12,11 @@ from dolphin.core.common.constants import (
     MAX_ANSWER_COMPRESSION_LENGTH,
     ANSWER_CONTENT_PREFIX,
     ANSWER_CONTENT_SUFFIX,
+    TOOL_CALL_ID_PREFIX,
 )
+from dolphin.core import flags
+
+logger = logging.getLogger(__name__)
 
 # Type alias for message content - can be plain text or multimodal (OpenAI format)
 MessageContent = Union[str, List[Dict[str, Any]]]
@@ -910,44 +917,199 @@ def count_occurrences(str_list, target_str):
     return total_count
 
 
+@dataclass
+class ToolCallInfo:
+    """Single tool call information
+
+    Used to store parsed tool call data from LLM responses.
+    Supports both LLM-provided IDs and fallback ID generation.
+
+    Attributes:
+        id: Unique identifier for this tool call (LLM-provided or generated)
+        name: Name of the tool/function to call
+        arguments: Parsed arguments dict (None if parsing failed)
+        index: Position index in multi-tool-call response
+        raw_arguments: Original unparsed arguments string (for debugging)
+        is_complete: Whether the tool call arguments have been fully received
+                    and successfully parsed. False if stream is incomplete or
+                    JSON parsing failed.
+    """
+    id: str
+    name: str
+    arguments: Optional[Dict[str, Any]] = None
+    index: int = 0
+    raw_arguments: str = ""
+    is_complete: bool = False
+
+
 class StreamItem:
+    """Streaming response item from LLM
+    
+    Supports both single tool call (legacy) and multiple tool calls (new).
+    Feature flag ENABLE_PARALLEL_TOOL_CALLS controls which behavior is used.
+    """
+    
     def __init__(self):
         self.answer = ""
         self.think = ""
+        # Legacy fields (preserved for backward compatibility)
         self.tool_name = ""
         self.tool_args: Optional[dict[str, Any]] = None
+        # Stable tool_call_id for single tool call flows
+        self.tool_call_id: Optional[str] = None
+        # New fields for multiple tool calls
+        self.tool_calls: List[ToolCallInfo] = []
+        self.finish_reason: Optional[str] = None
         self.output_var_value = None
         self.token_usage = {}
 
     def has_tool_call(self) -> bool:
-        return self.tool_name != ""
+        """Check if there is a tool call (backward compatible).
+
+        Note: When ENABLE_PARALLEL_TOOL_CALLS flag is disabled, only checks
+        the legacy tool_name field to ensure backward compatibility.
+        This prevents accidentally triggering new code paths.
+        """
+        if flags.is_enabled(flags.ENABLE_PARALLEL_TOOL_CALLS):
+            return self.tool_name != "" or len(self.tool_calls) > 0
+        else:
+            # Flag disabled: only check legacy field for backward compatibility
+            return self.tool_name != ""
+
+    def has_tool_calls(self) -> bool:
+        """Check if there are multiple tool calls (new method)."""
+        return len(self.tool_calls) > 0
 
     def has_complete_tool_call(self) -> bool:
+        """Check if there is a complete tool call with parsed arguments."""
         return self.tool_name != "" and self.tool_args is not None
 
     def set_output_var_value(self, output_var_value):
         self.output_var_value = output_var_value
 
     def get_tool_call(self) -> dict[str, Any]:
+        """Get single tool call info (legacy method)."""
         return {
             "name": self.tool_name,
             "arguments": self.tool_args,
         }
 
-    def parse_from_chunk(self, chunk: dict):
+    def get_tool_calls(self) -> List[ToolCallInfo]:
+        """Get all tool calls.
+        
+        Returns:
+            List of ToolCallInfo objects. If tool_calls is empty but
+            legacy tool_name is set, returns a single-item list for compatibility.
+        """
+        if self.tool_calls:
+            return self.tool_calls
+        # Fallback to legacy field for backward compatibility
+        if self.tool_name:
+            # Set is_complete=True when tool_args has been successfully parsed
+            # This ensures detect_tool_calls() can properly detect legacy tool calls
+            return [ToolCallInfo(
+                id=f"{TOOL_CALL_ID_PREFIX}{self.tool_name}_0",
+                name=self.tool_name,
+                arguments=self.tool_args,
+                index=0,
+                raw_arguments=json.dumps(self.tool_args) if self.tool_args else "",
+                is_complete=self.tool_args is not None,  # Mark complete if args parsed
+            )]
+        return []
+
+    def parse_from_chunk(self, chunk: dict, session_counter: int | None = None):
+        """Parse streaming chunk from LLM response.
+
+        Args:
+            chunk: The LLM response chunk containing content, tool calls, etc.
+            session_counter: Optional session-level tool call batch counter for
+                           generating fallback tool_call_ids. If None, a short UUID
+                           will be used to ensure uniqueness across sessions.
+        """
+        # Generate a unique batch ID if no session_counter provided
+        batch_id = str(session_counter) if session_counter is not None else uuid.uuid4().hex[:8]
         self.answer = chunk.get("content", "")
         self.think = chunk.get("reasoning_content", "")
         self.token_usage = chunk.get("usage", {})
+        self.finish_reason = chunk.get("finish_reason")
+        self.tool_call_id = None
+        
+        # Parse multiple tool calls from tool_calls_data (new format)
+        tool_calls_data = chunk.get("tool_calls_data", {})
+        if tool_calls_data:
+            self.tool_calls = []
+            # Sort by index to ensure correct execution order
+            items = []
+            for index, data in tool_calls_data.items():
+                try:
+                    normalized_index = int(index)
+                except Exception:
+                    normalized_index = 0
+                items.append((normalized_index, data))
+            
+            for normalized_index, data in sorted(items, key=lambda x: x[0]):
+                if data.get("name"):
+                    args_str = "".join(data.get("arguments", []))
+                    parsed_args = None
+                    
+                    is_complete = False
+                    if args_str:
+                        try:
+                            parsed_args = json.loads(args_str)
+                            if isinstance(parsed_args, str):
+                                # Double JSON encoding detected - log for debugging
+                                logger.debug(
+                                    f"Double JSON encoding detected for tool call '{data.get('name')}', "
+                                    f"performing second parse. Original: {args_str[:200]}..."
+                                    if len(args_str) > 200 else
+                                    f"Double JSON encoding detected for tool call '{data.get('name')}', "
+                                    f"performing second parse. Original: {args_str}"
+                                )
+                                parsed_args = json.loads(parsed_args)
+                            is_complete = True  # Successfully parsed
+                        except json.JSONDecodeError:
+                            # Arguments not yet complete, keep as None
+                            # is_complete remains False
+                            pass
+                    
+                    # Generate or use tool_call_id
+                    # Priority: LLM-provided id > fallback with batch_id
+                    tool_call_id = data.get("id")
+                    if not tool_call_id:
+                        # Fallback: use batch_id and index for stable ID
+                        # Format: {TOOL_CALL_ID_PREFIX}{batch_id}_{index}
+                        tool_call_id = f"{TOOL_CALL_ID_PREFIX}{batch_id}_{normalized_index}"
+                    
+                    self.tool_calls.append(ToolCallInfo(
+                        id=tool_call_id,
+                        name=data["name"],
+                        arguments=parsed_args,
+                        index=normalized_index,
+                        raw_arguments=args_str,
+                        is_complete=is_complete,
+                    ))
+
+            # Provide a stable single tool_call_id (index 0) for legacy callers.
+            if self.tool_calls:
+                self.tool_call_id = self.tool_calls[0].id
+        
+        # Parse legacy single tool call (backward compatibility)
         if "func_name" in chunk and chunk["func_name"]:
             func_args_list = chunk.get("func_args", [])
             func_args_str = "".join(func_args_list) if func_args_list else ""
             parsed_args: Optional[dict[str, Any]] = None
             if func_args_str:
                 try:
-                    import json
-
                     parsed_args = json.loads(func_args_str)
                     if isinstance(parsed_args, str):
+                        # Double JSON encoding detected - log for debugging
+                        logger.debug(
+                            f"Double JSON encoding detected for legacy tool call '{chunk['func_name']}', "
+                            f"performing second parse. Original: {func_args_str[:200]}..."
+                            if len(func_args_str) > 200 else
+                            f"Double JSON encoding detected for legacy tool call '{chunk['func_name']}', "
+                            f"performing second parse. Original: {func_args_str}"
+                        )
                         parsed_args = json.loads(parsed_args)
                 except json.JSONDecodeError:
                     # The parameters are not yet complete, parsed_args remains None
@@ -955,18 +1117,36 @@ class StreamItem:
 
             self.tool_name = chunk["func_name"]
             self.tool_args = parsed_args
+            if not self.tool_call_id:
+                self.tool_call_id = f"{TOOL_CALL_ID_PREFIX}{batch_id}_0"
 
     def to_dict(self):
         result = {"answer": self.answer, "think": self.think}
 
         if self.tool_name:
             result["tool_call"] = self.get_tool_call()
+        
+        # Include multiple tool calls if present
+        if self.tool_calls:
+            result["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                    "index": tc.index,
+                }
+                for tc in self.tool_calls
+            ]
 
         if self.output_var_value is not None:
             result["output_var_value"] = self.output_var_value
 
         if self.token_usage:
             result["token_usage"] = self.token_usage
+        
+        if self.finish_reason:
+            result["finish_reason"] = self.finish_reason
+            
         return result
 
 

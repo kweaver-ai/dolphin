@@ -30,7 +30,7 @@ tests/
 │   │   ├── test_executor_like_agent_executor.py
 │   │   ├── test_explore_block.py
 │   │   └── test_explore_block_v2.py
-│   ├── context_engineer_v2/ # Context 工程测试
+│   ├── context_engineer/ # Context 工程测试
 │   │   ├── test_budget_manager.py
 │   │   ├── test_context_assembler.py
 │   │   ├── test_context_manager.py
@@ -245,7 +245,7 @@ python -m integration_test.test_runner --verbose
 |------|------|-----------|
 | `agent/` | Agent 生命周期、状态管理、协程 | 3 |
 | `blocks/` | 代码块解析、ExploreBlock、BasicCodeBlock | 4 |
-| `context_engineer_v2/` | 上下文工程、预算管理、Token 服务 | 4 |
+| `context_engineer/` | 上下文工程、预算管理、Token 服务 | 4 |
 | `coroutine/` | 协程执行、控制流、工具中断 | 4 |
 | `mem/` | 沙箱环境测试 | 1 |
 | `memory/` | 内存管理、存储、工具函数 | 3 |

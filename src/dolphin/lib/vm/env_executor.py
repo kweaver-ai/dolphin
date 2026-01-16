@@ -674,6 +674,19 @@ class LocalExecutor(EnvExecutor):
                     '__builtins__': __builtins__,
                     '__name__': '__main__',
                 }
+
+                # Preload common data-science aliases if available.
+                # This reduces "NameError: name 'np' is not defined" noise in typical analysis workflows.
+                try:
+                    import numpy as np  # type: ignore
+                    namespace.setdefault("np", np)
+                except Exception:
+                    pass
+                try:
+                    import pandas as pd  # type: ignore
+                    namespace.setdefault("pd", pd)
+                except Exception:
+                    pass
                 
                 # Restore previous session state
                 namespace.update(self._session_namespace)

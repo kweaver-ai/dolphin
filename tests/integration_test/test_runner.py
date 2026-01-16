@@ -6,13 +6,16 @@ Executes integration tests for Dolphin Language functionality.
 
 import sys
 import os
+
+# Add project root to sys.path for relative imports (must be before other imports)
+project_root = os.path.join(os.path.dirname(__file__), "..", "..")
+sys.path.insert(0, project_root)
+
 import asyncio
 import time
 import traceback
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-
-# Add project root and src directory to sys.path for relative imports
 
 from dolphin.core.skill.skillkit import Skillkit
 from dolphin.core.executor.dolphin_executor import DolphinExecutor
@@ -31,9 +34,6 @@ from tests.integration_test.mocked_tools import (
 
 from tests.integration_test.test_config import IntegrationTest, IntegrationTestCase
 from tests.integration_test.test_loader import loadTestConfig
-
-project_root = os.path.join(os.path.dirname(__file__), "..", "..")
-sys.path.insert(0, project_root)
 
 
 @dataclass
@@ -256,9 +256,24 @@ class IntegrationTestRunner:
 
             # Prepare configuration
 
+            # Extract and apply feature flags from test variables
+            from dolphin.core import flags
+            flag_overrides = {}
+            variables_to_pass = {}
+            
+            for key, value in testCase.parameters.variables.items():
+                # Check if this is a feature flag (starts with enable_ or disable_)
+                if key.startswith("enable_") or key.startswith("disable_"):
+                    # Convert variable name to flag name
+                    flag_name = key
+                    flag_overrides[flag_name] = value
+                else:
+                    # Regular variable
+                    variables_to_pass[key] = value
+
             # Prepare variables (removed toolDict construction since we use MockedSkillkit directly)
             variables = {
-                **testCase.parameters.variables,
+                **variables_to_pass,
                 "query": testCase.parameters.query,
                 "history": testCase.parameters.history,
             }
@@ -269,20 +284,27 @@ class IntegrationTestRunner:
                 allSkills = self.env.getGlobalSkills().getAllSkills()
                 variables["_agent_skills"] = allSkills
 
-            # Execute test
+            # Execute test with feature flag overrides
             config_path = os.path.join(project_root, "config", "global.yaml")
             executor = DolphinExecutor(global_configpath=config_path)
+            
+            # Check if model exists in global config
             if testCase.config.modelName in executor.config.llmInstanceConfigs:
+                llmConfig = executor.config.llmInstanceConfigs[testCase.config.modelName]
+                
+                # Merge test config with global config
+                # Test config takes precedence, but empty strings fall back to global config
                 config = {
                     "model_name": testCase.config.modelName,
-                    "type_api": testCase.config.typeApi,
-                    "api_key": testCase.config.apiKey,
-                    "api": testCase.config.api,
-                    "userid": testCase.config.userId,
+                    "type_api": testCase.config.typeApi or llmConfig.type_api.value,
+                    "api_key": testCase.config.apiKey or llmConfig.api_key,
+                    "api": testCase.config.api or llmConfig.api,
+                    "userid": testCase.config.userId or llmConfig.user_id,
                     "max_tokens": testCase.config.maxTokens,
                     "temperature": testCase.config.temperature,
                 }
             else:
+                # Model not in global config, use default LLM
                 llmConfig = executor.config.llmInstanceConfigs[
                     executor.config.default_llm
                 ]
@@ -310,17 +332,32 @@ class IntegrationTestRunner:
                 allSkills = self.env.getGlobalSkills().getAllSkills()
                 executor.context.set_skills(allSkills)
 
-            actualResult = None
-            async for resp in executor.run(content):
-                actualResult = resp
+            # Apply feature flag overrides for this test
+            # Note: Use try/finally to ensure flags are always reset, even if
+            # set_flag raises an exception (e.g., unknown flag in strict mode)
+            try:
+                if flag_overrides:
+                    print(f"  Applying feature flags: {flag_overrides}")
+                    for flag_name, flag_value in flag_overrides.items():
+                        flags.set_flag(flag_name, flag_value)
 
-            # Get GlobalVariablePool variables after execution
-            gvpVariables = executor.context.get_all_variables()
+                actualResult = None
+                async for resp in executor.run(content):
+                    actualResult = resp
 
-            # Add variables to actual result for validation
-            if actualResult is None:
-                actualResult = {}
-            actualResult["gvp_variables"] = gvpVariables
+                # Get GlobalVariablePool variables after execution
+                gvpVariables = executor.context.get_all_variables()
+
+                # Add variables to actual result for validation
+                if actualResult is None:
+                    actualResult = {}
+                actualResult["gvp_variables"] = gvpVariables
+            finally:
+                # Reset feature flags after test execution
+                # Always reset to ensure clean state for subsequent tests
+                if flag_overrides:
+                    flags.reset()
+
 
         return actualResult
 

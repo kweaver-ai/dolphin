@@ -1,6 +1,9 @@
 import random
 
 
+# Tool call ID prefix for generating fallback IDs
+TOOL_CALL_ID_PREFIX = "call_"
+
 MSG_CONTINUOUS_CONTENT = "如果问题未被解决我们就继续执行\n"
 ANSWER_CONTENT_PREFIX = "<answer>"
 ANSWER_CONTENT_SUFFIX = "</answer>"

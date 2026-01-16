@@ -122,6 +122,11 @@ class DolphinAgent(BaseAgent):
     async def achat(self, message = None, **kwargs) -> AsyncGenerator[Any, None]:
         """Interactive dialogue mode execution, used to continue multi-turn dialogues after the Agent is initialized and running.
 
+        .. deprecated:: 2.1
+            Use :meth:`continue_chat` instead. The achat method returns raw progress data
+            without wrapping, which is inconsistent with arun. The new continue_chat method
+            provides a consistent API by wrapping results in _progress list.
+
         Args:
             message: The message input by the user. Can be:
                      - str: Plain text message
@@ -132,6 +137,14 @@ class DolphinAgent(BaseAgent):
         Yields:
             Execution results
         """
+        import warnings
+        warnings.warn(
+            "achat() is deprecated and will be removed in v3.0. "
+            "Use continue_chat() instead for consistent API with arun().",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
         if self.executor is None:
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
 
@@ -148,6 +161,176 @@ class DolphinAgent(BaseAgent):
             **kwargs
         ):
             yield result
+
+    async def continue_chat(
+        self,
+        message: str = None,
+        stream_variables: bool = True,
+        stream_mode: str = "full",
+        **kwargs
+    ) -> AsyncGenerator[Any, None]:
+        """Continue multi-turn dialogue with consistent API format as arun().
+
+        This is the recommended method for multi-turn conversations, replacing achat().
+        Returns results wrapped in _progress list for consistency with arun().
+
+        Args:
+            message: The message input by the user. Can be:
+                     - str: Plain text message
+                     - List[Dict]: Multimodal content
+                     - None: Assume the message has been added to the Context
+            stream_variables: Whether to enable streaming variable output (default: True)
+            stream_mode: Streaming mode:
+                        - "full": Return full accumulated text (default)
+                        - "delta": Return only incremental text changes
+            **kwargs: Other parameters
+
+        Yields:
+            Results in the same format as arun():
+            {
+                '_status': 'running' | 'completed' | 'interrupted',
+                '_progress': [
+                    {
+                        'stage': 'llm' | 'tool_call' | ...,
+                        'status': 'running' | 'completed' | 'failed',
+                        'answer': str,  # Full text (stream_mode='full') or delta (stream_mode='delta')
+                        'delta': str,   # Only present when stream_mode='delta'
+                        ...
+                    }
+                ],
+                '_interrupt': {...}  # Only present when _status='interrupted'
+            }
+
+        Raises:
+            DolphinAgentException: If EXPLORE_BLOCK_V2 flag is not disabled or agent not initialized
+
+        Example:
+            # First run
+            async for result in agent.arun(query="Hello"):
+                process(result)
+
+            # Continue conversation
+            async for result in agent.continue_chat(message="Continue..."):
+                process(result)  # Same format as arun!
+        """
+        # Fail-fast check: EXPLORE_BLOCK_V2 must be disabled
+        from dolphin.core import flags
+        if flags.is_enabled(flags.EXPLORE_BLOCK_V2):
+            raise DolphinAgentException(
+                "INVALID_FLAG_STATE",
+                "continue_chat() requires EXPLORE_BLOCK_V2 flag to be disabled. "
+                "Set flags.set_flag(flags.EXPLORE_BLOCK_V2, False) before using continue_chat()."
+            )
+
+        # Lazy initialization if needed
+        if self.executor is None:
+            await self.initialize()
+
+        # Pass message through kwargs
+        if message:
+            kwargs["content"] = message
+
+        # Validate stream_mode
+        if stream_mode not in ("full", "delta"):
+            raise DolphinAgentException(
+                "INVALID_PARAMETER",
+                f"stream_mode must be 'full' or 'delta', got '{stream_mode}'"
+            )
+
+        # Track last answer for delta calculation
+        last_answer = {}
+
+        # Direct passthrough pattern (like achat), with optional wrapping
+        # This ensures streaming works correctly by yielding each result immediately
+        async for result in self.executor.continue_exploration(**kwargs):
+            # Interrupt: wrap in consistent format with _status="interrupted"
+            if isinstance(result, dict) and result.get("status") == "interrupted":
+                yield {
+                    "_status": "interrupted",
+                    "_progress": [],
+                    "_interrupt": result  # Preserve original interrupt info
+                }
+                return
+
+            # Streaming mode: get context variables (contains _progress)
+            ctx = self.executor.context if self.executor else None
+            if ctx is not None and stream_variables:
+                if self.output_variables is not None and len(self.output_variables) > 0:
+                    data = ctx.get_variables_values(self.output_variables)
+                else:
+                    data = ctx.get_all_variables_values()
+
+                # Apply delta mode if requested
+                if stream_mode == "delta" and "_progress" in data:
+                    data = self._apply_delta_mode(data, last_answer)
+
+                # data already contains _status and _progress from context
+                yield data
+            else:
+                # Non-streaming or no context: wrap raw result
+                yield {
+                    "_status": "running",
+                    "_progress": [result] if isinstance(result, dict) else []
+                }
+
+        # Final state: mark as completed
+        try:
+            ctx = self.executor.context if self.executor else None
+            if ctx is not None:
+                if self.output_variables is not None and len(self.output_variables) > 0:
+                    final_data = ctx.get_variables_values(self.output_variables)
+                else:
+                    final_data = ctx.get_all_variables_values()
+
+                # Explicitly mark completion status
+                final_data["_status"] = "completed"
+
+                # Apply delta mode to final data
+                if stream_mode == "delta" and "_progress" in final_data:
+                    final_data = self._apply_delta_mode(final_data, last_answer)
+
+                yield final_data
+        except Exception:
+            pass
+
+    def _apply_delta_mode(self, data: dict, last_answer: dict) -> dict:
+        """Apply delta mode to progress data by calculating incremental changes.
+
+        Args:
+            data: Current data with _progress list
+            last_answer: Dictionary tracking last answer text per stage
+
+        Returns:
+            Modified data with delta field added to each progress item
+        """
+        if "_progress" not in data or not isinstance(data["_progress"], list):
+            return data
+
+        for prog in data["_progress"]:
+            if not isinstance(prog, dict):
+                continue
+
+            stage = prog.get("stage", "")
+            stage_id = prog.get("id", stage)  # Use ID if available
+            current_answer = prog.get("answer", "")
+
+            # Calculate delta
+            last_text = last_answer.get(stage_id, "")
+            if not last_text:
+                # First time: full text is delta
+                delta = current_answer
+            elif current_answer.startswith(last_text):
+                # Normal case: extract new portion
+                delta = current_answer[len(last_text):]
+            else:
+                # Text changed unexpectedly: reset
+                delta = current_answer
+
+            # Update tracking and add delta field
+            last_answer[stage_id] = current_answer
+            prog["delta"] = delta
+
+        return data
 
     async def _on_initialize(self):
         """Initialize Agent component"""
@@ -370,6 +553,7 @@ class DolphinAgent(BaseAgent):
         self,
         run_mode: bool = True,
         stream_variables: bool = True,
+        stream_mode: str = "full",
         **kwargs,
     ) -> AsyncGenerator[Any, None]:
         """Run the Agent asynchronously.
@@ -380,6 +564,14 @@ class DolphinAgent(BaseAgent):
 
                 Important: When stream_variables=True, fast mode is enforced (equivalent to run_mode=True),
                 the run_mode passed by the caller will be ignored and only effective in this branch.
+
+        Args:
+            run_mode: Whether to run in fast mode (default: True)
+            stream_variables: Whether to enable streaming variable output (default: True)
+            stream_mode: Streaming mode (default: "full"):
+                        - "full": Return full accumulated text
+                        - "delta": Return only incremental text changes (framework calculates automatically)
+            **kwargs: Additional runtime variables
 
         Note: Tool interruption handling when stream_variables=True:
                 1. During streaming variable views (dict), if a tool interruption occurs, an interruption information dictionary is produced:
@@ -414,9 +606,16 @@ class DolphinAgent(BaseAgent):
                 yield item
             return
 
+        # Validate stream_mode
+        if stream_mode not in ("full", "delta"):
+            raise DolphinAgentException(
+                "INVALID_PARAMETER",
+                f"stream_mode must be 'full' or 'delta', got '{stream_mode}'"
+            )
+
         # Streaming variable pattern: capture execution progress via progress_callback, while using fast mode to avoid frequent snapshots
         if self.executor is None:
-            # If not yet initialized, trigger initialization
+            # If not yet initialized, trigger initialization (lazy loading)
             await self.initialize()
 
         # Queue for callbacks (bounded, discard old, keep new, to avoid memory bloat)
@@ -424,6 +623,8 @@ class DolphinAgent(BaseAgent):
         queue: asyncio.Queue = asyncio.Queue(maxsize=32)
         # Used to pass tool interrupt information
         interrupt_info = None
+        # Track last answer for delta calculation
+        last_answer = {} if stream_mode == "delta" else None
 
         def _queue_put_latest(payload):
             try:
@@ -451,6 +652,11 @@ class DolphinAgent(BaseAgent):
                     data = ctx.get_variables_values(self.output_variables)
                 else:
                     data = ctx.get_all_variables_values()
+
+                # Apply delta mode if requested
+                if stream_mode == "delta" and last_answer is not None:
+                    data = self._apply_delta_mode(data, last_answer)
+
                 _queue_put_latest(data)
             except Exception:
                 # Callback exceptions must not affect main execution
@@ -527,9 +733,15 @@ class DolphinAgent(BaseAgent):
                         self.output_variables is not None
                         and len(self.output_variables) > 0
                     ):
-                        yield ctx.get_variables_values(self.output_variables)
+                        final_data = ctx.get_variables_values(self.output_variables)
                     else:
-                        yield ctx.get_all_variables_values()
+                        final_data = ctx.get_all_variables_values()
+
+                    # Apply delta mode to final data
+                    if stream_mode == "delta" and last_answer is not None:
+                        final_data = self._apply_delta_mode(final_data, last_answer)
+
+                    yield final_data
             except Exception:
                 pass
 

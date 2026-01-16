@@ -1,0 +1,145 @@
+{
+    "testSuite": {
+        "name": "Multiple Tool Calls Integration Tests",
+        "description": "Integration tests for multiple tool calls feature (ENABLE_PARALLEL_TOOL_CALLS flag)",
+        "version": "1.0.0",
+        "configNote": "Model settings can be overridden via environment variables: DOLPHIN_TEST_MODEL, DOLPHIN_TEST_API_TYPE, DOLPHIN_TEST_API_KEY, DOLPHIN_TEST_API_URL",
+        "defaultConfig": {
+            "modelName": "${DOLPHIN_TEST_MODEL:-qwen-plus}",
+            "typeApi": "${DOLPHIN_TEST_API_TYPE:-openai}",
+            "apiKey": "${DOLPHIN_TEST_API_KEY:-}",
+            "api": "${DOLPHIN_TEST_API_URL:-}",
+            "userId": "b32ad442-aadd-11ef-ac00-3e62f7949701",
+            "maxTokens": 2000,
+            "temperature": 0.0
+        }
+    },
+    "testCases": [
+        {
+            "name": "multi_tool_calls_basic",
+            "description": "测试基本的多工具调用场景：LLM 一次返回多个工具调用并顺序执行",
+            "enabled": true,
+            "timeout": 60,
+            "parameters": {
+                "query": "请帮我完成以下三个任务：1) 搜索关于人工智能的最新信息 2) 写一首关于科技的诗 3) 将诗保存到 /tmp/tech_poem.txt",
+                "history": [],
+                "variables": {
+                    "enable_parallel_tool_calls": true
+                }
+            },
+            "dolphinLangPath": "dolphins/multi_tool_calls_basic.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [
+                    "exception",
+                    "timeout",
+                    "error"
+                ],
+                "tools": [
+                    "webSearch",
+                    "poemWriterStream",
+                    "saveToLocal"
+                ],
+                "outputFormat": null,
+                "errorExpected": false,
+                "emptyAnswerCheck": true,
+                "variableChecks": [
+                    {
+                        "variableName": "_progress",
+                        "expectedContent": "webSearch"
+                    },
+                    {
+                        "variableName": "_progress",
+                        "expectedContent": "poemWriterStream"
+                    },
+                    {
+                        "variableName": "_progress",
+                        "expectedContent": "saveToLocal"
+                    }
+                ]
+            }
+        },
+        {
+            "name": "multi_tool_calls_two_tools",
+            "description": "测试两个工具调用的场景：验证 LLM 可以同时返回两个工具调用",
+            "enabled": true,
+            "timeout": 45,
+            "parameters": {
+                "query": "请同时搜索人工智能和量子计算的信息",
+                "history": [],
+                "variables": {
+                    "enable_parallel_tool_calls": true
+                }
+            },
+            "dolphinLangPath": "dolphins/multi_tool_calls_two_tools.dph",
+            "expectedResult": {
+                "contentKeywords": [
+                    "人工智能",
+                    "量子"
+                ],
+                "excludeKeywords": [
+                    "exception",
+                    "timeout"
+                ],
+                "tools": [
+                    "webSearch"
+                ],
+                "outputFormat": null,
+                "errorExpected": false,
+                "emptyAnswerCheck": true
+            }
+        },
+        {
+            "name": "multi_tool_calls_error_handling",
+            "description": "测试多工具调用的错误处理：当其中一个工具失败时，其他工具仍应继续执行",
+            "enabled": true,
+            "timeout": 45,
+            "parameters": {
+                "query": "请搜索人工智能信息，然后写一首诗",
+                "history": [],
+                "variables": {
+                    "enable_parallel_tool_calls": true
+                }
+            },
+            "dolphinLangPath": "dolphins/multi_tool_calls_error_handling.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [],
+                "tools": [
+                    "webSearch",
+                    "poemWriterStream"
+                ],
+                "outputFormat": null,
+                "errorExpected": false,
+                "emptyAnswerCheck": false
+            }
+        },
+        {
+            "name": "multi_tool_calls_backward_compat",
+            "description": "测试向后兼容性：当 flag 关闭时，应该使用旧的单工具调用逻辑",
+            "enabled": true,
+            "timeout": 45,
+            "parameters": {
+                "query": "请搜索人工智能的信息",
+                "history": [],
+                "variables": {
+                    "enable_parallel_tool_calls": false
+                }
+            },
+            "dolphinLangPath": "dolphins/multi_tool_calls_backward_compat.dph",
+            "expectedResult": {
+                "contentKeywords": [],
+                "excludeKeywords": [
+                    "exception",
+                    "timeout"
+                ],
+                "tools": [
+                    "webSearch"
+                ],
+                "outputFormat": null,
+                "errorExpected": false,
+                "emptyAnswerCheck": true
+            }
+        }
+    ]
+}
