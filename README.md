@@ -24,7 +24,9 @@ Dolphin Language is an innovative programming language and SDK designed specific
 - **Long-term Memory**: Persistent memory storage and retrieval system
 - **MCP Integration**: Model Context Protocol support for connecting external tools and services
 
-### 🧪 Complete Experiment System
+### 🧪 Experiment System (Planned)
+
+Note: The experiment system mentioned here is not included in this repository snapshot.
 
 - **Benchmarking**: Standardized performance evaluation and comparison
 - **Configuration Management**: Flexible experiment configuration and parameter tuning
@@ -44,18 +46,29 @@ python=3.10+
 
 ## 🚀 Quick Installation
 
-Recommended: Use the automatic installation script for one-click setup:
+### Recommended: Automated Setup
 
 ```bash
 git clone https://github.com/kweaver-ai/dolphin.git
-cd dolphin-language
-python install.py
+cd dolphin
+make dev-setup
 ```
 
-Or use Makefile:
+This will:
+- Install all dependencies using `uv`
+- Set up the development environment
+- Make the `dolphin` command available
+
+### Alternative: Manual Installation
+
+If you prefer manual control:
 
 ```bash
-make install
+# Install dependencies
+uv sync --all-groups
+
+# Or using pip in editable mode
+pip install -e ".[dev]"
 ```
 
 ### Build Only (No Install)
@@ -63,33 +76,107 @@ make install
 To build the wheel package without installing:
 
 ```bash
-python install.py --build-only
-# or
 make build-only
+# or
+uv run python -m build
 ```
 
-### Manual Installation
+**Requirements**: Python 3.10+ and [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip.
 
-For manual control over the installation process:
+For more installation options, see `make help`.
+
+## ⚙️ Configuration
+
+Before running Dolphin, configure your LLM API credentials. Choose the method that fits your workflow:
+
+### 🚀 Quick Setup: Environment Variables (Recommended)
+
+The simplest way to get started:
 
 ```bash
-# 1. Build wheel package
-python3 -m pip install build
-python3 -m build
+# Set your OpenAI API key
+export OPENAI_API_KEY="sk-your-key-here"
 
-# 2. Install dolphin_language package
-pip install dist/dolphin_language-{VERSION}-py3-none-any.whl --force-reinstall
+# Or add to your shell profile for persistence
+echo 'export OPENAI_API_KEY="sk-your-key-here"' >> ~/.bashrc  # or ~/.zshrc
 ```
 
-Note: Replace `{VERSION}` with the actual version number from the VERSION file.
+**Why environment variables?**
+- ✅ No configuration files needed
+- ✅ More secure (won't accidentally commit secrets)
+- ✅ Works across all examples
+- ✅ Easy to update or rotate keys
+
+**You're ready!** Continue to [Quick Start](#-quick-start) to run your first agent.
+
+### 📁 Advanced: Configuration File (Optional)
+
+For complex setups (multiple models, custom endpoints):
+
+```bash
+# 1. Copy the template
+cp config/global.template.yaml config/global.yaml
+
+# 2. Edit with your API key
+vim config/global.yaml
+# Replace "********" with your actual API key
+```
+
+**Example configuration**:
+```yaml
+clouds:
+  openai:
+    api: "https://api.openai.com/v1/chat/completions"
+    api_key: "sk-your-actual-key"  # ← Replace this
+
+llms:
+  default:  # Custom config name (not a model name)
+    cloud: "openai"
+    model_name: "gpt-4o"  # Actual OpenAI model
+    temperature: 0.0
+```
+
+**Configuration Priority** (highest to lowest):
+1. Environment variables (`OPENAI_API_KEY`)
+2. CLI argument `--config path/to/config.yaml`
+3. Project config `./config/global.yaml`
+4. User config `~/.dolphin/config.yaml`
+5. Default values
+
+💡 See [config/global.template.yaml](config/global.template.yaml) for all options.
 
 ## 🌟 Quick Start
 
-### CLI Tool
+### Your First Query (30 seconds)
 
-Dolphin provides a powerful command-line tool with three running modes:
+**Prerequisites**: Make sure you've [configured](#%EF%B8%8F-configuration) your API key.
 
 ```bash
+# 1. Create a sample data file
+echo "name,age,city
+Alice,30,New York
+Bob,25,San Francisco
+Charlie,35,Los Angeles" > /tmp/test_data.csv
+
+# 2. Run your first analysis
+dolphin run --agent tabular_analyst \
+  --folder ./examples/tabular_analyst \
+  --query "/tmp/test_data.csv"
+```
+
+✅ You should see Dolphin analyzing your data with intelligent insights!
+
+---
+
+### CLI Tool
+
+Dolphin provides a powerful command-line tool with four running modes:
+
+```bash
+# Explore mode (default, like Claude Code / Codex)
+dolphin
+dolphin explore
+
 # Run Agent
 dolphin run --agent my_agent --folder ./agents --query "Analyze data"
 
@@ -104,6 +191,7 @@ dolphin chat --agent my_agent --folder ./agents
 
 | Subcommand | Description | Typical Usage |
 |------------|-------------|---------------|
+| `explore` | Explore mode (default) | Interactive coding assistant |
 | `run` | Run Agent (default) | Batch execution, scripting |
 | `debug` | Debug mode | Development, troubleshooting |
 | `chat` | Interactive chat | Continuous conversation, exploration |
@@ -141,7 +229,7 @@ Detailed CLI documentation: [bin/README.md](bin/README.md)
 ### Python API
 
 ```python
-from DolphinLanguageSDK.agent.dolphin_agent import DolphinAgent
+from dolphin.sdk.agent.dolphin_agent import DolphinAgent
 import asyncio
 
 async def main():
@@ -160,6 +248,9 @@ async def main():
 
 asyncio.run(main())
 ```
+
+For detailed Python API usage, see [Dolphin Agent Integration Guide](docs/usage/guides/dolphin-agent-integration.md).
+
 
 ## 🛠️ Utility Tools
 
@@ -184,36 +275,9 @@ python tools/view_trajectory.py --index 1
 
 Detailed tools documentation: [tools/README.md](tools/README.md)
 
-## 🧪 Experiment System
+## 🧪 Experiment System (Planned)
 
-Dolphin Language provides a powerful experiment system for structured AI workflow experiments:
-
-### Quick Start Experiments
-
-```bash
-# 1. Create new experiment
-./experiments/bin/create --name my_experiment --dolphins path/to/dolphins_folder
-
-# 2. Configure experiment parameters (edit experiments/design/my_experiment/spec.txt)
-# 3. Run experiment
-./experiments/bin/run --name my_experiment
-```
-
-### Experiment Features
-
-- **🎯 Configuration Comparison**: Automatic combination testing of various config parameters
-- **📊 Benchmarking**: Built-in Bird, Browse and other standard benchmark sets
-- **🤖 Intelligent Evaluation**: LLM-based semantic answer comparison
-- **📈 Result Tracking**: Detailed experiment result recording and statistical analysis
-- **🔄 Batch Running**: Support for large-scale automated experiments
-
-### Supported Benchmarks
-
-- **Bird Benchmark**: SQL query generation and validation
-- **Browse Benchmark**: Web browsing and information extraction
-- **Custom Benchmarks**: Support for user-defined test collections
-
-Detailed documentation: [experiments/README.md](experiments/README.md)
+The experiment system mentioned in some older docs/examples is not included in this repository snapshot.
 
 ## 🔌 MCP Integration
 
@@ -262,14 +326,13 @@ Detailed documentation: [docs/design/skill/mcp_integration_design.md](docs/desig
 ## 📖 Project Structure
 
 ```
-dolphin-language/
+dolphin/
 ├── bin/                    # CLI entry point
 │   └── dolphin             # Main CLI tool
-├── src/DolphinLanguageSDK/ # Core SDK
+├── src/dolphin/            # Core SDK
 ├── tools/                  # Utility tools
 │   └── view_trajectory.py  # Trajectory visualization tool
 ├── examples/               # Example projects
-├── experiments/            # Experiment system
 ├── tests/                  # Test suite
 ├── docs/                   # Documentation
 └── config/                 # Configuration files
@@ -310,9 +373,6 @@ AGENT data_analyst:
 
 # Deep search example  
 ./examples/bin/deepsearch.sh
-
-# SQL benchmark test
-./experiments/bin/run --name bird_baseline
 ```
 
 ### Use Cases
@@ -346,9 +406,6 @@ make test
 
 # Run unit tests
 python -m pytest tests/unittest/
-
-# Run benchmark tests
-./experiments/bin/run --name browse_comp
 ```
 
 ### Test Coverage
@@ -363,7 +420,7 @@ python -m pytest tests/unittest/
 ```bash
 # Clone project
 git clone https://github.com/kweaver-ai/dolphin.git
-cd dolphin-language
+cd dolphin
 
 # Setup development environment
 make dev-setup

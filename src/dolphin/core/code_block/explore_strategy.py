@@ -4,15 +4,18 @@ This module defines the ExploreStrategy abstract interface and provides two conc
 - PromptStrategy: Prompt mode, invoking tools in the prompt using the =># format
 - ToolCallStrategy: Tool Call mode, utilizing the LLM's native tool_call capability
 
-Design document: docs/design/architecture/explore_block_merge.md
+Design documents:
+- Strategy design: docs/design/architecture/explore_block_merge.md
+- Multiple tool calls: docs/design/core/multiple-tool-calls.md
 """
 
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from dolphin.core.common.enums import StreamItem, Messages, MessageRole
+from dolphin.core.common.constants import TOOL_CALL_ID_PREFIX
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.skill.skillkit import Skillkit
@@ -155,6 +158,75 @@ class ExploreStrategy(ABC):
             scrapted_messages,
         )
 
+    # ============ Multiple Tool Calls Support ============
+
+    def detect_tool_calls(
+        self,
+        stream_item: StreamItem,
+        context: Context
+    ) -> List[ToolCall]:
+        """Detect multiple tool calls from streaming responses (new method).
+
+        Default implementation wraps detect_tool_call() to return a single-item list.
+        Subclasses that support native multi-tool-call (e.g., ToolCallStrategy)
+        should override this method to properly extract multiple tool calls.
+
+        Note: PromptStrategy uses this default implementation since it relies on
+        the =># text format which doesn't support native parallel tool calls.
+
+        Args:
+            stream_item: The streaming response item from LLM
+            context: The execution context
+
+        Returns:
+            List of ToolCall objects. Empty list if no tool calls detected.
+        """
+        single = self.detect_tool_call(stream_item, context)
+        return [single] if single else []
+
+    def append_tool_calls_message(
+        self,
+        context: Context,
+        stream_item: StreamItem,
+        tool_calls: List[ToolCall],
+    ):
+        """Append multiple tool calls message to context.
+        
+        Creates a single assistant message containing all tool calls in OpenAI format.
+        This is required for proper multi-tool-call support where all tool calls
+        must be in a single message.
+        
+        Args:
+            context: The execution context
+            stream_item: The streaming response item (for extracting content)
+            tool_calls: List of ToolCall objects to include in the message
+        """
+        tool_calls_openai_format = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.name,
+                    "arguments": (
+                        json.dumps(tc.arguments, ensure_ascii=False)
+                        if tc.arguments
+                        else "{}"
+                    ),
+                },
+            }
+            for tc in tool_calls
+        ]
+
+        content = stream_item.answer or ""
+        scratched_messages = Messages()
+        scratched_messages.add_tool_call_message(
+            content=content, tool_calls=tool_calls_openai_format
+        )
+        context.add_bucket(
+            BuildInBucket.SCRATCHPAD.value,
+            scratched_messages,
+        )
+
     def set_deduplicator_enabled(self, enabled: bool):
         """Enable or disable the skill call deduplicator
 
@@ -242,7 +314,7 @@ class PromptStrategy(ExploreStrategy):
         system_prompt: str,
         tools_format: str = "medium"
     ) -> str:
-        """构建 Prompt 模式的系统消息
+        """Build system message for Prompt mode.
 
         Includes:
         - Goals and tool schemas
@@ -322,7 +394,7 @@ class PromptStrategy(ExploreStrategy):
             return None
 
         skill_name, arguments = skill_call
-        tool_call_id = f"call_{skill_name}_{id(stream_item) % 10000}"
+        tool_call_id = f"{TOOL_CALL_ID_PREFIX}{skill_name}_{id(stream_item) % 10000}"
 
         return ToolCall(
             id=tool_call_id,
@@ -448,7 +520,7 @@ class ToolCallStrategy(ExploreStrategy):
         system_prompt: str,
         tools_format: str = "medium"
     ) -> str:
-        """构建 Tool Call 模式的系统消息
+        """Build system message for Tool Call mode.
 
         Includes:
         - Goals and tool descriptions
@@ -548,7 +620,7 @@ class ToolCallStrategy(ExploreStrategy):
         if not stream_item.has_tool_call():
             return None
 
-        tool_call_id = f"call_{stream_item.tool_name}_{id(stream_item) % 10000}"
+        tool_call_id = stream_item.tool_call_id or f"{TOOL_CALL_ID_PREFIX}{stream_item.tool_name}_{id(stream_item) % 10000}"
 
         return ToolCall(
             id=tool_call_id,
@@ -572,3 +644,52 @@ class ToolCallStrategy(ExploreStrategy):
     ) -> str:
         """Return the complete answer"""
         return stream_item.answer or ""
+
+    def detect_tool_calls(
+        self,
+        stream_item: StreamItem,
+        context: Context
+    ) -> List[ToolCall]:
+        """Detect multiple tool calls from Tool Call mode responses.
+        
+        Overrides base class to properly handle multiple tool calls
+        from the StreamItem.tool_calls list.
+        
+        Note: Only returns tool calls where arguments have been successfully parsed.
+        Logs warnings for tool calls with unparseable arguments when stream is complete.
+        
+        Args:
+            stream_item: The streaming response item from LLM
+            context: The execution context
+            
+        Returns:
+            List of ToolCall objects with valid arguments.
+        """
+        tool_call_infos = stream_item.get_tool_calls()
+        if not tool_call_infos:
+            return []
+        
+        result = []
+        for info in tool_call_infos:
+            # Only include tool calls that are complete (arguments successfully parsed)
+            # The is_complete field is set during parse_from_chunk when JSON parsing succeeds
+            if info.is_complete and info.arguments is not None:
+                result.append(ToolCall(
+                    id=info.id,
+                    name=info.name,
+                    arguments=info.arguments,
+                    raw_text=None
+                ))
+            elif stream_item.finish_reason is not None and not info.is_complete:
+                # Stream has ended but arguments failed to parse - log warning
+                context.warn(
+                    f"Tool call {info.name} (id={info.id}) skipped: "
+                    f"Stream ended but JSON arguments incomplete or invalid. "
+                    f"Raw arguments: '{info.raw_arguments[:200]}...'" 
+                    if len(info.raw_arguments) > 200 else
+                    f"Tool call {info.name} (id={info.id}) skipped: "
+                    f"Stream ended but JSON arguments incomplete or invalid. "
+                    f"Raw arguments: '{info.raw_arguments}'"
+                )
+        
+        return result

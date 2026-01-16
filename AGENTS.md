@@ -2,10 +2,97 @@
 
 本文件对本仓库全局生效（除非子目录有更具体的 `AGENTS.md` 覆盖）。
 
+## 智能体人设
+
+你是一个经验丰富的编程大师，专注于高效、可扩展、兼容、可维护、注释良好和低熵的代码。
+
 ## 代码规范
 
 - 所有代码注释（含 docstring）必须使用英文
 - 所有新增日志（log message）必须使用英文
+
+## 熵减原则（Entropy Reduction）
+
+目标：每次变更都应让系统更“有序”——更易理解、更一致、更可维护；避免引入无谓复杂度与噪声。
+
+### 适用范围
+
+- 代码、测试、配置、脚本、文档、目录结构与命名
+
+### 具体规则
+
+- 优先做“根因修复”，避免临时补丁式堆叠
+- 除非必要，不做大范围无关格式化/重命名/移动文件（减少 diff 噪声）
+- 保持一致性：遵循既有架构、命名、目录分层与风格；新增模式需说明收益与迁移策略
+- 降低复杂度：能删就删（dead code/unused deps/重复逻辑）；能合并就合并（重复配置/重复文档）
+- 提升可读性：抽象层级清晰、接口边界明确、默认行为可预测；避免“聪明但难懂”的写法
+- 变更可验证：新增/修改行为应配套最小必要的测试或可运行示例；并同步更新文档
+
+### PR 自检清单
+
+- [ ] diff 是否只包含与目标相关的改动？
+- [ ] 是否减少了重复/耦合/临时逻辑，而不是增加？
+- [ ] 命名、目录、风格是否与现有保持一致？
+- [ ] 是否补齐了必要的测试/文档/示例？
+
+## 测试（Tests）
+
+### 目录结构
+
+- 测试目录：`tests/`，包含 `tests/unittest/`（单元测试）与 `tests/integration_test/`（集成测试）
+- 统一入口：`tests/run_tests.sh <test_type> [options]`
+  - `test_type`: `unit` / `integration` / `all`
+  - 常用参数：`-v/--verbose`、`--coverage`、`--parallel`、`--fail-fast`
+  - 集成测试参数：`-f/--filter <pattern>`、`-c/--config <file>`、`--agent-only`、`--regular-only`
+  - 环境参数：`--python <version>`、`--sync`、`--clean`
+
+### 测试编写规范
+
+**详细规范**: 参考 `tests/TEST_STYLE_GUIDE.md`
+
+#### 断言风格
+```python
+# ✅ Use pytest assert
+assert result == expected
+assert "keyword" in text
+assert isinstance(obj, SomeClass)
+
+# ❌ Avoid unittest assertions
+self.assertEqual(result, expected)  # Use assert instead
+```
+
+#### Mock 使用
+```python
+# ✅ Use decorator pattern
+from unittest.mock import patch, AsyncMock
+
+@patch('module.external_api')
+def test_feature(mock_api):
+    mock_api.return_value = "mocked"
+    # Test logic
+
+# ✅ Async mock
+@patch('module.async_func', new_callable=AsyncMock)
+async def test_async(mock_func):
+    mock_func.return_value = "result"
+```
+
+#### 测试命名
+- 清晰描述测试内容: `test_agent_returns_none_when_query_is_empty()`
+- 避免模糊命名: `test_case1()`, `test_bug()`
+
+#### 测试隔离
+- 每个测试独立运行，不依赖其他测试
+- 使用 fixtures 管理测试数据
+- 只 Mock 外部依赖，不 Mock 被测代码
+
+#### 测试提交清单
+- [ ] 使用 pytest assert 而非 unittest 断言
+- [ ] Mock 使用装饰器风格
+- [ ] 测试名称清晰描述测试内容
+- [ ] 每个测试函数只测试一个行为
+- [ ] 异步测试使用 `@pytest.mark.asyncio`
+- [ ] 没有测试间的依赖关系
 
 ## 文档约定
 

@@ -1386,6 +1386,7 @@ class BasicCodeBlock:
         content: str,
         early_stop_on_tool_call: bool = False,
         on_stream_chunk=None,
+        session_counter: int = 0,
     ):
         """
         LLM chat stream with optional early stopping on tool call detection.
@@ -1398,6 +1399,8 @@ class BasicCodeBlock:
             on_stream_chunk: Optional callback for CLI rendering.
                 Signature: (chunk_text: str, full_text: str, is_final: bool) -> None
                 If None, uses default console() output.
+            session_counter: Session-level tool call batch counter for generating stable
+                fallback tool_call_ids. Passed to StreamItem.parse_from_chunk().
         """
         # Store the model name in context for consistency across multiple rounds
         if "model" in llm_params and llm_params["model"]:
@@ -1428,7 +1431,7 @@ class BasicCodeBlock:
             self.context.check_user_interrupt()
 
             stream_item = StreamItem()
-            stream_item.parse_from_chunk(chunk)
+            stream_item.parse_from_chunk(chunk, session_counter=session_counter)
 
             # Rendering: use callback if provided, otherwise default console output
             chunk_text = stream_item.answer[cur_len:]

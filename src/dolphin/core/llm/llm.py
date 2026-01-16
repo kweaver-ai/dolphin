@@ -10,6 +10,7 @@ from dolphin.core.common.enums import MessageRole, Messages
 from dolphin.core.config.global_config import LLMInstanceConfig
 from dolphin.core.common.constants import (
     MSG_CONTINUOUS_CONTENT,
+    TOOL_CALL_ID_PREFIX,
     is_msg_duplicate_skill_call,
 )
 from dolphin.core.context.context import Context
@@ -17,6 +18,115 @@ from dolphin.core.logging.logger import get_logger
 from dolphin.core.llm.message_sanitizer import sanitize_and_log
 
 logger = get_logger("llm")
+
+
+class ToolCallsParser:
+    """Helper class for parsing tool calls from LLM streaming responses.
+
+    This class consolidates the tool_calls parsing logic used by both
+    LLMModelFactory (raw HTTP) and LLMOpenai (SDK) implementations.
+    """
+
+    def __init__(self):
+        self.tool_calls_data: dict = {}
+        self.func_name: str | None = None
+        self.func_args: list = []
+
+    def parse_delta_dict(self, delta: dict, tool_calls_key: str = "tool_calls"):
+        """Parse tool_calls from a dict delta (used by LLMModelFactory).
+
+        Args:
+            delta: The delta dict from streaming response
+            tool_calls_key: Key name for tool_calls in delta
+        """
+        if tool_calls_key not in delta or not delta[tool_calls_key]:
+            return
+
+        for tool_call in delta[tool_calls_key]:
+            index = self._normalize_index(tool_call.get("index", 0))
+
+            if index not in self.tool_calls_data:
+                self.tool_calls_data[index] = {"id": None, "name": None, "arguments": []}
+
+            # Preserve tool_call_id from LLM
+            if tool_call.get("id"):
+                self.tool_calls_data[index]["id"] = tool_call["id"]
+
+            if "function" in tool_call:
+                if tool_call["function"].get("name"):
+                    self.tool_calls_data[index]["name"] = tool_call["function"]["name"]
+                if tool_call["function"].get("arguments"):
+                    self.tool_calls_data[index]["arguments"].append(
+                        tool_call["function"]["arguments"]
+                    )
+
+            # Legacy single tool call: update from index 0 for backward compat
+            if index == 0:
+                self._update_legacy_fields(tool_call)
+
+    def parse_delta_object(self, delta):
+        """Parse tool_calls from an OpenAI SDK delta object (used by LLMOpenai).
+
+        Args:
+            delta: The delta object from OpenAI SDK streaming response
+        """
+        if not hasattr(delta, "tool_calls") or delta.tool_calls is None:
+            return
+
+        for tool_call in delta.tool_calls:
+            # Get index from OpenAI SDK object
+            index = getattr(tool_call, "index", 0) or 0
+
+            if index not in self.tool_calls_data:
+                self.tool_calls_data[index] = {"id": None, "name": None, "arguments": []}
+
+            # Preserve tool_call_id from LLM
+            if getattr(tool_call, "id", None):
+                self.tool_calls_data[index]["id"] = tool_call.id
+
+            if hasattr(tool_call, "function") and tool_call.function is not None:
+                if tool_call.function.name is not None:
+                    self.tool_calls_data[index]["name"] = tool_call.function.name
+                if tool_call.function.arguments is not None:
+                    self.tool_calls_data[index]["arguments"].append(tool_call.function.arguments)
+
+            # Legacy single tool call: update from index 0 for backward compat
+            if index == 0:
+                self._update_legacy_fields_from_object(tool_call)
+
+    def _normalize_index(self, raw_index) -> int:
+        """Normalize index to integer, defaulting to 0 on error."""
+        try:
+            return int(raw_index)
+        except (ValueError, TypeError):
+            return 0
+
+    def _update_legacy_fields(self, tool_call: dict):
+        """Update legacy single tool call fields from dict."""
+        if "function" in tool_call:
+            if tool_call["function"].get("name"):
+                self.func_name = tool_call["function"]["name"]
+            if tool_call["function"].get("arguments"):
+                self.func_args.append(tool_call["function"]["arguments"])
+
+    def _update_legacy_fields_from_object(self, tool_call):
+        """Update legacy single tool call fields from SDK object."""
+        if hasattr(tool_call, "function") and tool_call.function is not None:
+            if tool_call.function.name is not None:
+                self.func_name = tool_call.function.name
+            if tool_call.function.arguments is not None:
+                self.func_args.append(tool_call.function.arguments)
+
+    def get_result(self) -> dict:
+        """Get the parsed result as a dict to merge into the response."""
+        result = {}
+        if self.func_name:
+            result["func_name"] = self.func_name
+        if self.func_args:
+            result["func_args"] = self.func_args
+        if self.tool_calls_data:
+            result["tool_calls_data"] = self.tool_calls_data
+        return result
 
 
 class LLM:
@@ -63,6 +173,14 @@ class LLM:
     def get_cache(self, llm: str, cache_key: Messages):
         return self.context.get_config().get_llm_cache(llm, cache_key)
 
+    def set_cache_by_dict(self, llm: str, cache_key: list, cache_value: Any):
+        """Set cache using dict list as key (for sanitized messages)."""
+        self.context.get_config().set_llm_cache_by_dict(llm, cache_key, cache_value)
+
+    def get_cache_by_dict(self, llm: str, cache_key: list):
+        """Get cache using dict list as key (for sanitized messages)."""
+        return self.context.get_config().get_llm_cache_by_dict(llm, cache_key)
+
     def log_request(self, messages: Messages, continous_content: Optional[str] = None):
         self.context.debug(
             "LLM chat messages[{}] length[{}] continous_content[{}]".format(
@@ -89,16 +207,20 @@ class LLMModelFactory(LLM):
         self.log_request(messages, continous_content)
 
         self.set_messages(messages, continous_content)
+
+        # Sanitize messages BEFORE cache check to ensure consistent cache keys
+        sanitized_messages = sanitize_and_log(
+            messages.get_messages_as_dict(), logger.warning
+        )
+
         if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
-            cache_value = self.get_cache(llm_instance_config.model_name, messages)
-            if cache_value:
+            # Use sanitized messages for cache key to ensure consistency
+            cache_value = self.get_cache_by_dict(llm_instance_config.model_name, sanitized_messages)
+            if cache_value is not None:
                 yield cache_value
                 return
         try:
-            # Sanitize messages for OpenAI compatibility
-            sanitized_messages = sanitize_and_log(
-                messages.get_messages_as_dict(), logger.warning
-            )
+            # Reuse sanitized messages from cache key generation (no need to sanitize again)
 
             # Build request payload
             payload = {
@@ -124,8 +246,9 @@ class LLMModelFactory(LLM):
             line_json = ""
             accu_content = ""
             reasoning_content = ""
-            func_name = None
-            func_args = []
+            finish_reason = None
+            # Use ToolCallsParser to handle tool calls parsing
+            tool_parser = ToolCallsParser()
 
             timeout = aiohttp.ClientTimeout(
                 total=1800,  # Disable overall timeout (use with caution)
@@ -148,7 +271,7 @@ class LLMModelFactory(LLM):
             print(f"  Model: {payload['model']}")
             print(f"  Tools: {len(payload.get('tools', []))} 个")
             print(f"  tool_choice: {payload.get('tool_choice', 'N/A')}")
-            
+
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     llm_instance_config.api,
@@ -206,11 +329,16 @@ class LLMModelFactory(LLM):
 
                                     if delta_content and chunk_count <= 3:
                                         print(f"[DEBUG LLM] Chunk {chunk_count} content: {delta_content[:50]}")
-                                    
+
                                     accu_content += delta_content
                                     reasoning_content += delta_reasoning
 
-                                    # Handling tool_calls
+                                    # Capture finish_reason
+                                    chunk_finish_reason = line_json["choices"][0].get("finish_reason")
+                                    if chunk_finish_reason:
+                                        finish_reason = chunk_finish_reason
+
+                                    # Parse tool_calls using ToolCallsParser
                                     delta = line_json["choices"][0]["delta"]
                                     if "tool_calls" in delta and delta["tool_calls"]:
                                         tool_call = delta["tool_calls"][0]
@@ -244,11 +372,12 @@ class LLMModelFactory(LLM):
                                 # {"completion_tokens": 26, "prompt_tokens": 159, "total_tokens": 185, "prompt_tokens_details": {"cached_tokens": 0, "uncached_tokens": 159}, "completion_tokens_details": {"reasoning_tokens": 0}}
                                 result["usage"] = line_json.get("usage", {})
 
-                                # Add tool call information to the result
-                                if func_name:
-                                    result["func_name"] = func_name
-                                if func_args:
-                                    result["func_args"] = func_args
+                                # Add tool call information using ToolCallsParser
+                                result.update(tool_parser.get_result())
+
+                                # Add finish_reason for downstream tool call validation
+                                if finish_reason:
+                                    result["finish_reason"] = finish_reason
 
                                 yield result
                         except Exception as e:
@@ -257,7 +386,12 @@ class LLMModelFactory(LLM):
                             )
 
                     if result:
-                        self.set_cache(llm_instance_config.model_name, messages, result)
+                        # Use sanitized messages for cache key to ensure consistency
+                        self.set_cache_by_dict(
+                            llm_instance_config.model_name,
+                            sanitized_messages,
+                            result
+                        )
 
                     if "choices" in line_json:
                         await self.update_usage(line_json)
@@ -306,16 +440,19 @@ class LLMOpenai(LLM):
 
         self.set_messages(messages, continous_content)
 
-        if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
-            cache_value = self.get_cache(llm_instance_config.model_name, messages)
-            if cache_value:
-                yield cache_value
-                return
-
-        # Sanitize messages for OpenAI compatibility
+        # Sanitize messages BEFORE cache check to ensure consistent cache keys
         sanitized_messages = sanitize_and_log(
             messages.get_messages_as_dict(), logger.warning
         )
+
+        if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
+            # Use sanitized messages for cache key to ensure consistency
+            cache_value = self.get_cache_by_dict(llm_instance_config.model_name, sanitized_messages)
+            if cache_value is not None:
+                yield cache_value
+                return
+
+        # Reuse sanitized messages from cache key generation (no need to sanitize again)
 
         # Prepare API call parameters
         api_params = {
@@ -337,9 +474,11 @@ class LLMOpenai(LLM):
 
         accu_answer = ""
         accu_reasoning = ""
-        func_name = None
-        func_args = []
+        finish_reason = None
         result = None
+        # Use ToolCallsParser to handle tool calls parsing
+        tool_parser = ToolCallsParser()
+
         async for chunk in response:
             delta = chunk.choices[0].delta
             if hasattr(delta, "content") and delta.content is not None:
@@ -351,21 +490,34 @@ class LLMOpenai(LLM):
             ):
                 accu_reasoning += delta.reasoning_content
 
-            if hasattr(delta, "tool_calls") and delta.tool_calls is not None:
-                if delta.tool_calls[0].function.name is not None:
-                    func_name = delta.tool_calls[0].function.name
-                if delta.tool_calls[0].function.arguments is not None:
-                    func_args.append(delta.tool_calls[0].function.arguments)
+            # Capture finish_reason
+            chunk_finish_reason = chunk.choices[0].finish_reason
+            if chunk_finish_reason:
+                finish_reason = chunk_finish_reason
+
+            # Parse tool_calls using ToolCallsParser
+            tool_parser.parse_delta_object(delta)
 
             await self.update_usage(chunk)
 
             result = {
                 "content": accu_answer,
                 "reasoning_content": accu_reasoning,
-                "func_name": func_name,
-                "func_args": func_args,
             }
+
+            # Add tool call information using ToolCallsParser
+            result.update(tool_parser.get_result())
+
+            # Add finish_reason for downstream tool call validation
+            if finish_reason:
+                result["finish_reason"] = finish_reason
+
             yield result
 
         if result:
-            self.set_cache(llm_instance_config.model_name, messages, result)
+            # Use sanitized messages for cache key to ensure consistency
+            self.set_cache_by_dict(
+                llm_instance_config.model_name,
+                sanitized_messages,
+                result
+            )

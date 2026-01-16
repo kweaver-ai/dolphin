@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-可视化展示 Agent Trajectory 的命令行工具
+CLI tool to visualize saved Agent trajectories.
 
 Usage:
   python tools/view_trajectory.py <trajectory_file>
@@ -18,12 +18,22 @@ from datetime import datetime
 
 
 def get_trajectory_dir() -> Path:
-    """获取 trajectory 目录"""
-    # 从脚本位置推断项目根目录
+    """Get the default trajectory directory.
+
+    Prefer the current default dialog history location (`data/dialog/`).
+    Fall back to legacy locations for backward compatibility.
+    """
+    # Infer project root from script location
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
-    trajectory_dir = project_root / "log" / "agent"
-    return trajectory_dir
+    candidates = [
+        project_root / "data" / "dialog",
+        project_root / "log" / "agent",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def parse_trajectory_filename(filename: str) -> Optional[Tuple[str, str]]:
@@ -56,19 +66,35 @@ def list_trajectory_files(trajectory_dir: Path, limit: int = 20) -> List[Tuple[P
     """
     files = []
 
-    for filepath in trajectory_dir.glob("alfred_trajectory_*.json"):
-        stat = filepath.stat()
-        parsed = parse_trajectory_filename(filepath.name)
+    if trajectory_dir.name == "dialog":
+        for filepath in trajectory_dir.rglob("dialog_*.json"):
+            stat = filepath.stat()
+            files.append(
+                (
+                    filepath,
+                    {
+                        "filename": str(filepath.relative_to(trajectory_dir)),
+                        "mtime": datetime.fromtimestamp(stat.st_mtime),
+                        "size": stat.st_size,
+                        "timestamp": "unknown",
+                        "session_prefix": "unknown",
+                    },
+                )
+            )
+    else:
+        for filepath in trajectory_dir.glob("alfred_trajectory_*.json"):
+            stat = filepath.stat()
+            parsed = parse_trajectory_filename(filepath.name)
 
-        info = {
-            "filename": filepath.name,
-            "mtime": datetime.fromtimestamp(stat.st_mtime),
-            "size": stat.st_size,
-            "timestamp": parsed[0] if parsed else "unknown",
-            "session_prefix": parsed[1] if parsed else "unknown"
-        }
+            info = {
+                "filename": filepath.name,
+                "mtime": datetime.fromtimestamp(stat.st_mtime),
+                "size": stat.st_size,
+                "timestamp": parsed[0] if parsed else "unknown",
+                "session_prefix": parsed[1] if parsed else "unknown",
+            }
 
-        files.append((filepath, info))
+            files.append((filepath, info))
 
     # 按修改时间倒序排序
     files.sort(key=lambda x: x[1]["mtime"], reverse=True)
@@ -116,7 +142,7 @@ def print_trajectory_list(files: List[Tuple[Path, dict]], use_rich: bool = True)
                     info["session_prefix"],
                     mtime_str,
                     f"{size_kb:.1f} KB",
-                    filepath.name
+                    info.get("filename", filepath.name)
                 )
 
             console.print()

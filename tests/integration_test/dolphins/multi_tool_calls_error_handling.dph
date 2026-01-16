@@ -1,0 +1,5 @@
+/explore/(
+    system_prompt="你是一个智能助手。请按照用户要求执行任务。",
+    tools=["webSearch", "poemWriterStream"],
+    mode="tool_call"
+)$query -> result

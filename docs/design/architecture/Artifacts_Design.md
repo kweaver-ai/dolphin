@@ -141,7 +141,7 @@ src/DolphinLanguageSDK/
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**现有 Stage 结构 (`StageInstance.get_triditional_dict()`)：**
+**现有 Stage 结构 (`StageInstance.get_traditional_dict()`)：**
 ```python
 {
     "id": "uuid",
@@ -1088,7 +1088,7 @@ class ArtifactUpdatedEvent:
 
 - **较重（会波及多处）**
   - 新增 `TypeStage.ARTIFACT` 并让 runtime/recorder/graph/前端都理解该 stage
-  - 调整 `StageInstance.get_triditional_dict()` 以支持通用 `payload`（让 artifact 成为一等 stage）
+  - 调整 `StageInstance.get_traditional_dict()` 以支持通用 `payload`（让 artifact 成为一等 stage）
   - 引入独立 `ArtifactEventBus`（脱离 `_progress` 的事件通道）
   - 引入更完整的持久化（文件/DB/对象存储）+ 版本 diff/回滚等高级能力
   - CLI 强交互（编辑器、确认对话、选择版本）并可能引入 tool interrupt

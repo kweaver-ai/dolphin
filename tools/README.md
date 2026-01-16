@@ -125,7 +125,10 @@ python tools/view_trajectory.py --latest --no-rich > output.txt
 
 ### Trajectory File Location
 
-By default, reads trajectory files from the `log/agent/` directory. File naming format:
+By default, reads dialog/trajectory files from `data/dialog/` (current default).
+For backward compatibility, it also supports legacy `log/agent/` trajectories.
+
+Legacy file naming format:
 ```
 alfred_trajectory_{timestamp}_{session_id}.json
 ```
@@ -138,4 +141,3 @@ Example: `alfred_trajectory_20251129_094530_8e8e8202.json`
 - Long content is automatically truncated to avoid excessive output
 - JSON content is automatically syntax-highlighted
 - Time breakdown bar only counts machine execution time, excluding user input wait time
-
