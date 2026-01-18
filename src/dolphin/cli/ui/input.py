@@ -5,9 +5,14 @@ Provides enhanced input prompts with:
 - Tab/arrow-key completion for debug commands
 - ESC key interrupt handling for agent execution
 - Slash command shortcuts for conversation mode
+- Multimodal input processing (@paste, @image:, @url: markers)
+
+Type Annotations:
+    All public functions use proper type hints with forward references
+    for InterruptToken (via TYPE_CHECKING) to avoid circular imports.
 """
 
-from typing import List, Optional, Callable, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Union, Dict, Any
 from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import InMemoryHistory
@@ -16,6 +21,10 @@ from prompt_toolkit.keys import Keys
 
 if TYPE_CHECKING:
     from dolphin.cli.interrupt.handler import InterruptToken
+
+# Type aliases for better clarity
+MultimodalContentBlock = Dict[str, Any]
+MultimodalInput = Union[str, List[MultimodalContentBlock]]
 
 
 # Debug command definitions for auto-completion
@@ -277,3 +286,55 @@ async def prompt_interrupt_input(prompt_text: str = "💬 New instructions (Ente
         return (await session.prompt_async(prompt_text)).strip()
     except (EOFError, KeyboardInterrupt):
         return ""
+
+
+async def prompt_conversation_with_multimodal(
+    prompt_text: str = "> ",
+    interrupt_token: Optional["InterruptToken"] = None,
+    verbose: bool = False
+) -> MultimodalInput:
+    """
+    Prompt for user input with ESC interrupt support and multimodal marker processing.
+    
+    Supports the following multimodal markers:
+    - @paste: Read image from clipboard
+    - @image:<path>: Read image from file path
+    - @url:<url>: Reference image by URL
+    
+    Args:
+        prompt_text: The prompt string to display
+        interrupt_token: InterruptToken to trigger on ESC press
+        verbose: If True, print image processing status messages
+        
+    Returns:
+        str: Plain text input if no multimodal markers
+        List[MultimodalContentBlock]: Multimodal content blocks if markers are present
+        
+    Raises:
+        EscapeInterrupt: When ESC key is pressed
+        EOFError: When Ctrl+D is pressed
+        KeyboardInterrupt: When Ctrl+C is pressed
+    """
+    from dolphin.cli.multimodal import process_multimodal_input
+    
+    # Get raw input using interrupt-aware prompt
+    raw_input = await prompt_with_interrupt(
+        prompt_text=prompt_text,
+        interrupt_token=interrupt_token,
+        completer=ConversationCompleter()
+    )
+    
+    # Process multimodal markers
+    try:
+        return process_multimodal_input(raw_input, verbose=verbose)
+    except (ValueError, IOError, FileNotFoundError) as e:
+        # Expected errors during multimodal processing (invalid path, clipboard error, etc.)
+        # Always notify user of multimodal processing failure
+        print(f"⚠️ Multimodal processing failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        # Fallback to raw text input
+        return raw_input
+
+

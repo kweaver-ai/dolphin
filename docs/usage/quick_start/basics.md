@@ -1,193 +1,93 @@
-# 基础概念
+# Basics
 
-本文档介绍 Dolphin Language SDK 的核心概念和基本原理。
+This document introduces the core concepts of Dolphin (DSL + runtime).
 
-## 什么是 Dolphin Language？
+## What is Dolphin?
 
-Dolphin Language 是一种领域特定语言（DSL），专为构建AI工作流而设计。它结合了自然语言描述和结构化语法，让开发者能够轻松定义复杂的AI任务。
+Dolphin is a domain-specific language (DSL) designed for building agent workflows.
+You describe tasks using structured blocks, variables, and tool calls.
 
-## 核心概念
+## Core concepts
 
-### 1. 上下文 (Context)
+### 1) Context
 
-上下文是程序执行的基础，包含：
-- 变量池 (Variable Pool)
-- 消息历史 (Message History)
-- 技能套件 (Skillkits)
-- 执行状态 (Execution State)
+At runtime, Dolphin executes inside a context that contains variables, messages, and skills.
 
 ```python
-from DolphinLanguageSDK.context import Context
+from dolphin.core import Context
 
-# 创建上下文
 context = Context()
 ```
 
-### 2. 变量系统
+### 2) Variables
 
-#### 变量类型
-- **用户变量**: 由用户定义的变量
-- **内置变量**: 以下划线开头的系统变量（如 `_status`、`_previous_status`、`_progress` 等）
+Assign with `->`, reference with `$name`.
 
-#### 变量引用
 ```dolphin
-# 定义变量
 "Hello" -> message
 42 -> number
 
-# 引用变量
-$message
-$number
+@print($message) -> output
+```
 
-# 嵌套访问
+You can also access nested fields:
+
+```dolphin
 $user.profile.name
 $items[0]
 ```
 
-#### 变量赋值
-```dolphin
-# 单次赋值 (->)
-"value" -> variable
+### 3) Skills and tools
 
-# 累积赋值 (>>)
-"first" -> list_var
-"second" -> list_var  # list_var 现在是 ["first", "second"]
-```
-
-### 3. 技能系统 (Skill System)
-
-技能是可重用的工具模块：
+Tools are reusable functions exposed to the DSL.
 
 ```python
-from DolphinLanguageSDK.skill import SkillFunction
+from dolphin.core import SkillFunction
 
-# 定义技能
 @SkillFunction
 def my_tool(param1, param2):
     return {"result": "processed"}
 ```
 
-#### 内置技能
-- `print` - 打印输出
-- `web_search` - 网络搜索
-- `browser_use` - 浏览器操作
-- `data_analysis` - 数据分析
+### 4) Common block types
 
-#### 技能注册
-```python
-# 手动注册
-context.register_skill("my_tool", my_tool)
+Assignment:
 
-# 或使用装饰器
-@context.skill
-def another_tool():
-    pass
-```
-
-### 4. 代码块类型
-
-#### 探索块 (/explore/)
-AI驱动的探索和工具调用：
-```dolphin
-/explore/(tools=[web_search], model="gpt-4")
-搜索最新技术趋势
--> trends
-```
-
-#### 提示块 (/prompt/)
-直接LLM调用：
-```dolphin
-/prompt/(model="gpt-4")
-写一首诗
--> poem
-```
-
-#### 工具块 (@tool)
-直接工具调用：
-```dolphin
-@web_search(query="AI发展") 
--> result
-```
-
-#### 赋值块
 ```dolphin
 "constant value" -> var
 $existing_var -> new_var
 ```
 
-#### 判断块 (/judge/)
-```dolphin
-/judge/(criteria="是否符合要求")
-$content
--> judgment
-```
-
-### 5. 执行模式
-
-#### 快速模式 (run_mode=True)
-- 连续执行直到中断或完成
-- 性能更好
-- 适合生产环境
-
-#### 步进模式 (run_mode=False)
-- 逐步执行每个块
-- 便于调试
-- 开发阶段使用
-
-### 6. 上下文管理
-
-#### 上下文压缩
-自动压缩长对话：
-```python
-from DolphinLanguageSDK.context_engineer import ContextEngineer
-
-engine = ContextEngineer()
-compressed = engine.compress(messages)
-```
-
-#### 长期记忆
-持久化存储：
-```python
-# 保存记忆
-context.memory.save("key", "value")
-
-# 检索记忆
-value = context.memory.load("key")
-```
-
-### 7. 协程执行
-
-支持暂停和恢复：
-```python
-# 暂停
-handle = await agent.pause()
-
-# 恢复
-await agent.resume(updates)
-```
-
-## 程序结构
-
-典型的 `.dph` 文件结构：
+LLM call (`/prompt/`, requires an API key):
 
 ```dolphin
-# 1. 头部信息
-@DESC 智能体描述
-@VERSION 1.0
+/prompt/(model="gpt-4o-mini")
+Write a haiku about the ocean.
+-> poem
+```
 
-# 2. 变量定义
+Tool call:
+
+```dolphin
+@print("Hello from a tool call") -> output
+```
+
+## Typical `.dph` structure
+
+```dolphin
+@DESC My first agent
+
 "initial value" -> var1
 
-# 3. 执行块
-/explore/(tools=[...])
-任务描述
--> result
+/prompt/(model="gpt-4o-mini")
+Use the following input to answer the question:
+$query
+-> answer
 
-# 4. 输出
-@print($result) -> output
+@print($answer) -> output
 ```
 
-## 下一步
+## Next
 
-- [代码块类型](../language/code_blocks.md) - 详细了解各种代码块
-- [核心功能](../core/agents.md) - 学习智能体系统
+- [Code Blocks](../concepts/code_blocks.md) - Code blocks in detail
+- [Agent Integration](../guides/dolphin-agent-integration.md) - Use Dolphin with the SDK

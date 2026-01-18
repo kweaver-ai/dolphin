@@ -1,63 +1,52 @@
-# 安装指南
+# Installation
 
-本文档将指导您完成 Dolphin Language SDK 的安装和配置。
+This guide installs Dolphin from source (the repository you are currently in).
 
-## 系统要求
+## Requirements
 
-- Python 3.10 或更高版本
-- uv (推荐) 或 pip
+- Python 3.10+ (3.11 recommended)
 - Git
+- One of:
+  - `uv` (recommended, faster)
+  - `pip`
 
-## 安装方式
-
-### 方式一：使用 uv (推荐)
+## Option A: Use `uv` (recommended)
 
 ```bash
-# 1. 克隆仓库
 git clone https://github.com/kweaver-ai/dolphin.git
-cd dolphin-language
+cd dolphin
 
-# 2. 设置开发环境
+# Create and sync `.venv/` with all dependency groups
 make dev-setup
 
-# 3. 验证安装
+# Verify
 make test
 ```
 
-### 方式二：使用 pip
+## Option B: Use `pip` + venv (no `uv`)
 
 ```bash
-# 1. 克隆仓库
 git clone https://github.com/kweaver-ai/dolphin.git
-cd dolphin-language
+cd dolphin
 
-# 2. 安装依赖
-pip install -e ".[dev]"
+# Create a clean venv under `env/`
+python3.11 -m venv env/quick_start
+source env/quick_start/bin/activate
 
-# 3. 验证安装
-python -m pytest tests/
+# Install Dolphin (editable) + CLI dependencies
+pip install -e ".[cli]"
+
+# Verify
+dolphin --version
+dolphin --help
 ```
 
-## 验证安装
+## Notes on offline environments
 
-创建一个简单的测试文件：
+If your environment has no network access, you must prepare dependency wheels in advance
+or use an existing pre-synced virtualenv (for example, one created by `make dev-setup`).
 
-```python
-# test_installation.py
-from DolphinLanguageSDK import DolphinLanguage
+## Next
 
-# 创建一个简单的程序
-dolphin = DolphinLanguage()
-print("Dolphin Language SDK 安装成功！")
-```
-
-运行测试：
-
-```bash
-python test_installation.py
-```
-
-## 下一步
-
-- [快速入门](quickstart.md) - 学习基本用法
-- [基础概念](basics.md) - 了解核心概念
+- [Quick Start](quickstart.md) - Learn basic usage and CLI commands
+- [Basics](basics.md) - Understand core concepts
