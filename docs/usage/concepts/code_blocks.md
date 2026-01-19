@@ -102,4 +102,4 @@ $variable_name
 
 ## 下一步
 
-- [DSL语法规则](../language_rules.md) - 完整语法参考
+- [DSL语法规则](../language_rules/language_rules.md) - 完整语法参考

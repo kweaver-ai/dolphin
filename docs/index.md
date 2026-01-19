@@ -17,11 +17,11 @@ Dolphin Language SDK 是一个强大的中文AI工作流编排框架，专为构
 
 ### 新手入门
 - [安装指南](getting-started/installation.md) - 了解如何安装和设置
-- [快速入门](getting-started/quickstart.md) - 5分钟上手
+- [快速开始](usage/quick_start/quickstart.md) - 5分钟上手
 - [基础概念](getting-started/basics.md) - 理解核心概念
 
 ### 语言规范
-- [DSL语法规则](language_rules.md) - 完整的语法参考
+- [DSL语法规则](usage/language_rules/language_rules.md) - 完整的语法参考
 - [代码块类型](language/code_blocks.md) - 各种代码块详解
 
 ### 核心功能

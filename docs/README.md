@@ -2,13 +2,24 @@
 
 欢迎来到 Dolphin Language SDK 文档中心！
 
-## 📋 语言政策
+## 📋 语言政策 / Language Policy
 
 本文档库遵循以下语言规范：
 
-- **Usage 文档 (`usage/`)**: 英文为主，面向所有使用者和开发者
-- **Design 文档 (`design/`)**: 中文为主，面向团队内部技术讨论
-- **例外**: 详细技术指南可保留中文，但需提供英文快速参考版本
+- **Usage 文档 (`usage/`)**: **英文 (English)** - 面向国际用户和开发者
+  - 核心教程 (Installation, Quick Start, Basics) 已更新为英文
+  - 配置参考和 API 文档使用英文
+  - 目的：方便国际社区贡献和使用
+
+- **Design 文档 (`design/`)**: **中文 (Chinese)** - 面向团队内部技术讨论
+  - 架构设计和实现细节保持中文
+  - 便于团队内部深度技术交流
+
+- **导航文档 (README.md, index.md)**: **中文导航 + 英文链接** - 方便中文用户快速定位
+  - 保持中文目录和说明，链接到英文内容
+  - 提供双语快速参考
+
+**注意**: 如果您更喜欢中文文档，欢迎在 GitHub Issues 中提出，我们可以考虑提供社区翻译版本。
 
 ## 🗂️ 文档结构
 
@@ -40,9 +51,9 @@ docs/
 | 我想... | 查看文档 |
 |---------|----------|
 | 🔧 安装 Dolphin SDK | [Installation Guide](usage/quick_start/installation.md) |
-| 🚀 快速开始使用 | [Quick Start Guide](usage/quick_start/quickstart.md) |
+| 🚀 快速开始使用 | [快速开始](usage/quick_start/quickstart.md) |
 | 📄 了解基础概念 | [Basics](usage/quick_start/basics.md) |
-| 📖 学习语言规则 | [Language Rules](usage/concepts/language_rules.md) |
+| 📖 学习语言规则 | [Language Rules](usage/language_rules/language_rules.md) |
 
 ### 使用文档
 
@@ -67,9 +78,9 @@ docs/
 ## 📚 必备文档清单
 
 - ✅ [README.md](README.md) - 文档导航和语言政策（本文件）
-- ✅ [Quick Start Guide](usage/quick_start/quickstart.md) - 5分钟快速上手
+- ✅ [快速开始](usage/quick_start/quickstart.md) - 5分钟快速上手，包含DSL语法和CLI使用
 - ✅ [Installation Guide](usage/quick_start/installation.md) - 详细安装说明
-- ✅ [Language Rules](usage/concepts/language_rules.md) - DSL语法规范
+- ✅ [Language Rules](usage/language_rules/language_rules.md) - DSL语法规范
 - ✅ [Configuration Reference](usage/configuration/) - 配置格式说明
 
 ## 🔗 其他资源

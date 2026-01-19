@@ -290,8 +290,9 @@ class DolphinAgent(BaseAgent):
                     final_data = self._apply_delta_mode(final_data, last_answer)
 
                 yield final_data
-        except Exception:
-            pass
+        except (AttributeError, KeyError) as e:
+            # Expected errors when context/variables are not fully initialized
+            self._logger.debug(f"Could not get final variables in continue_chat: {e}")
 
     def _apply_delta_mode(self, data: dict, last_answer: dict) -> dict:
         """Apply delta mode to progress data by calculating incremental changes.
@@ -742,8 +743,9 @@ class DolphinAgent(BaseAgent):
                         final_data = self._apply_delta_mode(final_data, last_answer)
 
                     yield final_data
-            except Exception:
-                pass
+            except (AttributeError, KeyError) as e:
+                # Expected errors when context/variables are not fully initialized
+                self._logger.debug(f"Could not get final variables in arun: {e}")
 
     async def _on_pause_coroutine(self):
         """Pause coroutine"""
