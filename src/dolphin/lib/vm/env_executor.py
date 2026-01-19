@@ -68,6 +68,7 @@ class AsyncCommandManager:
                     cls._instance = super().__new__(cls)
                     cls._instance._commands: Dict[str, AsyncCommand] = {}
                     cls._instance._output_lock = threading.Lock()
+                    cls._instance._status_lock = threading.Lock()
         return cls._instance
     
     def start_command(
@@ -170,14 +171,23 @@ class AsyncCommandManager:
 
     def _update_status(self, cmd: AsyncCommand):
         """Update command status non-blockingly."""
-        if cmd.status in (CommandStatus.COMPLETED, CommandStatus.FAILED, CommandStatus.CANCELLED):
-            return
+        with self._status_lock:
+            if cmd.status in (
+                CommandStatus.COMPLETED,
+                CommandStatus.FAILED,
+                CommandStatus.CANCELLED,
+            ):
+                return
 
-        return_code = cmd.process.poll()
-        if return_code is not None:
-            cmd.return_code = return_code
-            cmd.status = CommandStatus.COMPLETED if return_code == 0 else CommandStatus.FAILED
-            logger.debug(f"[{cmd.command_id}] Status updated: {cmd.status.value}, return_code={return_code}")
+            return_code = cmd.process.poll()
+            if return_code is not None:
+                cmd.return_code = return_code
+                cmd.status = (
+                    CommandStatus.COMPLETED if return_code == 0 else CommandStatus.FAILED
+                )
+                logger.debug(
+                    f"[{cmd.command_id}] Status updated: {cmd.status.value}, return_code={return_code}"
+                )
 
     def wait_command(
         self, 
@@ -231,7 +241,8 @@ class AsyncCommandManager:
         except subprocess.TimeoutExpired:
             # Still running
             logger.debug(f"[{command_id}] Timeout expired after {timeout}s, command still running")
-            cmd.status = CommandStatus.TIMEOUT
+            with self._status_lock:
+                cmd.status = CommandStatus.TIMEOUT
             
             with self._output_lock:
                 partial_output = cmd.output_buffer
@@ -266,7 +277,8 @@ class AsyncCommandManager:
         except Exception:
             pass
         
-        cmd.status = CommandStatus.CANCELLED
+        with self._status_lock:
+            cmd.status = CommandStatus.CANCELLED
         return True
     
     def get_command_info(self, command_id: str) -> Optional[Dict[str, Any]]:

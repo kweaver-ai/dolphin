@@ -212,7 +212,7 @@ class LLMClient:
                             },  # Filter sensitive information
                         }
                         self.context.error(f"LLM HTTP error: {error_info}")
-                        raise Exception(
+                        raise RuntimeError(
                             f"LLM {model_config.model_name} request error (status {response.status}): {error_str}"
                         )
                     async for line in response.content:
@@ -226,10 +226,10 @@ class LLMClient:
                             break
                         try:
                             line_json = json.loads(line_decoded, strict=False)
-                        except Exception:
-                            raise Exception(
-                                f"LLM {model_config.model_name} request error: {line_decoded}"
-                            )
+                        except json.JSONDecodeError as e:
+                            raise ValueError(
+                                f"LLM {model_config.model_name} response JSON decode error: {line_decoded}"
+                            ) from e
                         if line_json.get("choices"):
                             # Accumulate content
                             delta_content = (
@@ -274,9 +274,9 @@ class LLMClient:
                 ),
             }
             self.context.error(f"LLM client connection error: {error_info}")
-            raise Exception(
+            raise ConnectionError(
                 f"LLM {model_config.model_name} connection error: {repr(e)}"
-            )
+            ) from e
         except Exception as e:
             # Error log: records other unexpected errors
             error_info = {
@@ -1190,7 +1190,13 @@ class LLMClient:
                     self.context.warn(
                         f"LLM call failed with AttributeError retry: {i}, error: {e}"
                     )
-            except Exception as e:
+            except (
+                aiohttp.ClientError,
+                asyncio.TimeoutError,
+                TimeoutError,
+                ValueError,
+                RuntimeError,
+            ) as e:
                 # Check if this is a multimodal-related error
                 error_str = str(e)
                 is_multimodal_error = (
@@ -1237,6 +1243,17 @@ class LLMClient:
                         "reasoning_content": "",
                     }
                     return
+            except Exception as e:
+                error_info = {
+                    "error_type": "UnexpectedExceptionNotRetried",
+                    "retry_attempt": i + 1,
+                    "max_retries": self.Retry_Count,
+                    "model": llm_instance_config.model_name,
+                    "error_message": str(e),
+                    "error_class": type(e).__name__,
+                }
+                self.context.error(f"LLM unexpected exception (not retried): {error_info}")
+                raise
 
         # Error log: Records detailed information about final failures
         final_failure_info = {
