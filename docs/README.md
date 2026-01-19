@@ -53,7 +53,7 @@ docs/
 | 🔧 安装 Dolphin SDK | [Installation Guide](usage/quick_start/installation.md) |
 | 🚀 快速开始使用 | [快速开始](usage/quick_start/quickstart.md) |
 | 📄 了解基础概念 | [Basics](usage/quick_start/basics.md) |
-| 📖 学习语言规则 | [Language Rules](usage/concepts/language_rules.md) |
+| 📖 学习语言规则 | [Language Rules](usage/language_rules/language_rules.md) |
 
 ### 使用文档
 
@@ -80,7 +80,7 @@ docs/
 - ✅ [README.md](README.md) - 文档导航和语言政策（本文件）
 - ✅ [快速开始](usage/quick_start/quickstart.md) - 5分钟快速上手，包含DSL语法和CLI使用
 - ✅ [Installation Guide](usage/quick_start/installation.md) - 详细安装说明
-- ✅ [Language Rules](usage/concepts/language_rules.md) - DSL语法规范
+- ✅ [Language Rules](usage/language_rules/language_rules.md) - DSL语法规范
 - ✅ [Configuration Reference](usage/configuration/) - 配置格式说明
 
 ## 🔗 其他资源

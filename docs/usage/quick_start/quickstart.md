@@ -23,7 +23,11 @@ mkdir -p my_agents config
 
 ### Step 2: Create configuration file
 
-Create `config/global.yaml`:
+Create `config/global.yaml` based on your API provider:
+
+> ⚠️ **Important**: Choose the configuration that matches your API key. Using an OpenAI configuration with a DeepSeek API key (or vice versa) will cause errors.
+
+**Option A: OpenAI**
 
 ```yaml
 default: gpt-4o-mini
@@ -44,7 +48,28 @@ llms:
     type_api: openai
 ```
 
-**For Chinese users using Alibaba DashScope:**
+**Option B: DeepSeek**
+
+```yaml
+default: deepseek-chat
+fast: deepseek-chat
+clouds:
+  default: deepseek
+  deepseek:
+    api: https://api.deepseek.com
+    api_key: "${DEEPSEEK_API_KEY}"
+llms:
+  deepseek-chat:
+    cloud: deepseek
+    model_name: deepseek-chat
+    type_api: openai
+  deepseek-reasoner:
+    cloud: deepseek
+    model_name: deepseek-reasoner
+    type_api: openai
+```
+
+**Option C: Alibaba DashScope (Chinese users)**
 
 ```yaml
 default: qwen-plus
@@ -71,33 +96,136 @@ llms:
 # For OpenAI
 export OPENAI_API_KEY="sk-your-actual-api-key-here"
 
+# For DeepSeek
+export DEEPSEEK_API_KEY="sk-your-deepseek-key-here"
+
 # For Alibaba DashScope (Chinese users)
 export ALIYUN_API_KEY="sk-your-dashscope-key-here"
 ```
 
 **Tip**: You can create a `.env` file (copy from `.env.example`) and use `source .env` to load environment variables automatically.
 
+**Note on Models**: The examples below use the default model from your `global.yaml` config. If you want to use a specific model (e.g., `gpt-4o`, `claude-3-5-sonnet`), add `model="model-name"` to the block parameters.
+
 ## 2. Your First Agent
 
-Create `my_agents/summarizer.dph`:
+### Example 1: Generate a Complete Quiz App in One Line
+
+Dolphin's `output="jsonl"` lets you generate **structured lists** with one line of DSL:
+
+Create `my_agents/quiz_maker.dph`:
 
 ```dolphin
-/prompt/(model="gpt-4o-mini")
-Summarize the following text in 3 bullet points:
-$query
--> summary
+/prompt/(output="jsonl")
+Create a 5-question quiz about: $topic
 
-@print($summary) -> output
+Each question should have:
+- question: the question text
+- options: array of 4 choices (A, B, C, D)
+- answer: the correct letter
+- explanation: why this answer is correct
+-> quiz
 ```
 
 Run it:
 
 ```bash
-dolphin run --agent summarizer --folder ./my_agents --config ./config/global.yaml \
-  --query "Dolphin is a DSL for building LLM agent workflows. It provides a simple syntax for orchestrating LLM calls, tool usage, and control flow."
+dolphin run --agent quiz_maker --folder ./my_agents --config ./config/global.yaml \
+  --topic "Python programming basics"
 ```
 
-Expected output: A summary of the input text in 3 bullet points.
+**Note**: In just 10 lines of DSL, you created:
+- 5 well-structured quiz questions
+- With options, answers, and explanations
+- Ready to plug into any quiz app!
+
+No JSON parsing, no validation code - Dolphin handles it all.
+
+### Example 2: AI That Catches Its Own Mistakes
+
+The `/judge/` block lets agents **verify their work using code**. Watch it find a bug:
+
+Create `my_agents/code_reviewer.dph`:
+
+```dolphin
+'''
+def calculate_average(numbers):
+    total = 0
+    for n in numbers:
+        total += n
+    return total / len(numbers)  # Bug: crashes on empty list!
+''' -> code
+
+/judge/(
+    tools=[_python],
+    criteria="Test this code with edge cases. Find any bugs."
+)
+Review this Python function for bugs: $code
+-> review
+```
+
+Run it:
+
+```bash
+dolphin run --agent code_reviewer --folder ./my_agents --config ./config/global.yaml
+```
+
+**Note**: The agent doesn't just read the code - it:
+1. 🔍 Identifies potential edge cases
+2. 🧪 Writes test code: `calculate_average([])`
+3. 💥 Runs it and catches the ZeroDivisionError!
+4. ✅ Reports the bug with a fix suggestion
+
+This is **self-verifying AI** - it writes tests to validate its own analysis!
+
+### Example 3: End-to-End Automation (Plan → Execute → Deliver)
+
+The `/explore/` block is Dolphin's most powerful feature. Give it a goal, and watch it **figure out the steps**:
+
+Create `my_agents/daily_briefing.dph`:
+
+```dolphin
+/explore/(
+    tools=[_date, _python, _write_file]
+) 
+Create a personalized daily briefing for me:
+
+1. Get today's date
+2. Calculate: days until end of year, days until next Friday
+3. Generate a motivational quote
+4. Write everything to a file called 'daily_briefing.md'
+
+Format the file nicely with markdown.
+-> result
+```
+
+Run it:
+
+```bash
+dolphin run --agent daily_briefing --folder ./my_agents --config ./config/global.yaml
+```
+
+**Note**: You only said WHAT you wanted. The agent decided HOW:
+1. 📅 Called `_date` to get today's date
+2. 🐍 Used `_python` to calculate the days
+3. 💡 Generated a motivational quote
+4. 📝 Wrote `daily_briefing.md` to disk - a real file you can open!
+
+**Check your file:**
+```bash
+cat daily_briefing.md
+```
+
+This is the power of autonomous agents - you describe the end state, they figure out the path!
+
+---
+
+**What You Just Learned**:
+| Block | Superpower | Use Case |
+|-------|------------|----------|
+| `/prompt/` | **Structured output** (JSON, lists) | Generate data for apps |
+| `/judge/` | **Self-verification** with tools | Code review, fact-checking |
+| `/explore/` | **Autonomous planning** | End-to-end automation |
 
 ## 3. Test Installation (Optional)
 
@@ -106,7 +234,6 @@ If you want to verify Dolphin is installed correctly without using an LLM, you c
 Create `my_agents/hello.dph`:
 ```dolphin
 "Hello, World!" -> message
-@print($message) -> output
 ```
 
 Run it:
@@ -187,23 +314,32 @@ dolphin run --agent <agent_name> --folder <agents_folder> --config ./config/glob
 
 ### Error: `[Errno 2] No such file or directory: './config/global.yaml'`
 
-**Solution**: Create the configuration file as shown in section 1, step 2.
+**Solution**: Create the configuration file as shown in Step 2 above.
 
-### Error: `llm_name gpt-4o-mini not found in llmInstanceConfigs`
+### Error: `Model 'xxx' not found in configuration`
 
-**Solution**: Make sure your `config/global.yaml` includes the model you're trying to use in the `llms` section.
-
-### Error: API authentication failed
+**Cause**: The model specified in your `.dph` file is not defined in `global.yaml`.
 
 **Solution**:
-1. Verify your API key is correct
-2. Make sure the environment variable is set: `echo $OPENAI_API_KEY`
-3. Check that the configuration file references the correct environment variable: `"${OPENAI_API_KEY}"`
+1. Remove the `model` parameter from your `.dph` file to use the default model, OR
+2. Add the model to the `llms` section in your `global.yaml`, OR
+3. Use one of the available models listed in the error message
+
+### Error: API authentication failed / Incorrect API key
+
+**Cause**: Configuration and API key mismatch. Common scenarios:
+- Using an OpenAI configuration with a DeepSeek API key
+- Using a DeepSeek configuration with an OpenAI API key
+
+**Solution**:
+1. Verify your API key is correct: `echo $DEEPSEEK_API_KEY` or `echo $OPENAI_API_KEY`
+2. **Ensure your `global.yaml` matches your API provider** (see Step 2 above)
+3. Check that the environment variable name in `global.yaml` matches what you exported
 
 ## Next Steps
 
 - [Basics](basics.md) - Core concepts and DSL building blocks
-- [Language Rules](../concepts/language_rules.md) - Full language rules
+- [Language Rules](../language_rules/language_rules.md) - Full language rules
 - [Agent Integration](../guides/dolphin-agent-integration.md) - Use Dolphin with the SDK
 
 ## More Documentation

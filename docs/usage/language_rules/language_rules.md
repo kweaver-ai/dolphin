@@ -306,7 +306,13 @@ Dolphin Language 提供多种内置函数：
 
 ### **9.2 /explore/ 代码块**
 
-用于智能体探索和工具调用，支持多步推理。
+用于智能体自主探索和工具调用，采用 **ReAct（Reasoning + Acting）模式**进行多步推理。
+
+**工作原理**：
+- Agent 会交替执行「思考(Reasoning)」和「行动(Acting)」
+- 每一步 Agent 先分析当前状态，决定下一步行动
+- 调用工具获取结果后，根据结果继续推理
+- 循环直到任务完成或达到最大步数
 
 - 语法
 
@@ -325,14 +331,24 @@ Dolphin Language 提供多种内置函数：
 - 示例
 
   ```
+  # 数据分析任务：Agent 会自主查询数据库、执行代码、搜索信息
   /explore/(tools=[executeSQL, _python, _search], model="v3") 解决数据分析问题 -> result
+  
+  # 信息搜索任务：Agent 会搜索网络并用 Python 处理数据
   /explore/(tools=[_search, _python], model="v3") 搜索并分析信息 -> analysis
+  
+  # 限定工具范围：仅使用特定 skillkit 的工具
   /explore/(tools=[resource_skillkit.*]) 仅暴露 ResourceSkillkit 工具 -> result
   ```
 
 ### **9.3 /judge/ 代码块**
 
-用于判断和评估任务。
+用于智能判断和评估任务。与 `/prompt/` 的区别在于：`/judge/` **可以调用工具获取信息后再做判断**。
+
+**典型场景**：
+- 需要调用工具验证某个条件是否成立
+- 需要查询外部数据后做决策
+- 需要结合实时信息进行评估
 
 - 语法
 
@@ -341,16 +357,24 @@ Dolphin Language 提供多种内置函数：
   ```
 
 - 支持的参数
-  - `system_prompt`: 系统提示词
+  - `tools`: 可用工具列表（核心参数，允许 Agent 调用工具获取信息）
+  - `criteria`: 判断标准（可选，用于指导 LLM 的判断逻辑）
   - `model`: 指定使用的模型
-  - `tools`: 可用工具列表
+  - `system_prompt`: 系统提示词
 
 - 返回类型：`Dict[str, Any]` - 返回包含判断结果的字典，通常包含工具调用信息或评估结果
 
 - 示例
 
   ```
-  /judge/(system_prompt="", model="qwen-plus", tools=[]) 总结以上内容 -> summary
+  # 简单判断：基于 criteria 对内容进行评估
+  /judge/(criteria="内容是否专业且适合营销") $description -> is_suitable
+  
+  # 工具辅助判断：调用搜索工具验证信息真实性
+  /judge/(tools=[_search], criteria="信息是否属实") $claim -> verification_result
+  
+  # 数据驱动判断：查询数据库后判断条件
+  /judge/(tools=[executeSQL], criteria="库存是否充足") 检查产品 $product_id 的库存状态 -> stock_check
   ```
 
 ------

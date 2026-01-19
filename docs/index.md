@@ -21,7 +21,7 @@ Dolphin Language SDK 是一个强大的中文AI工作流编排框架，专为构
 - [基础概念](getting-started/basics.md) - 理解核心概念
 
 ### 语言规范
-- [DSL语法规则](language_rules.md) - 完整的语法参考
+- [DSL语法规则](usage/language_rules/language_rules.md) - 完整的语法参考
 - [代码块类型](language/code_blocks.md) - 各种代码块详解
 
 ### 核心功能
