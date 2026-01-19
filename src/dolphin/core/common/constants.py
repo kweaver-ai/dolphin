@@ -106,40 +106,35 @@ def count_overlapping_occurrences(text: str, pattern: str) -> int:
     """
     Count overlapping occurrences of pattern in text using regex lookahead.
 
-    Performance Optimization (2026-01-18):
-    - Replaced O(n) loop-based approach with O(n) regex implementation
-    - Achieved 6.8x average speedup in real-world scenarios (see PERFORMANCE_OPTIMIZATION_REPORT.md)
-    - Benchmarks: 10 SVG cards (5KB): 6.3x faster, 100 SVG cards (24KB): 6.8x faster
-    - Time savings: ~85% reduction in duplicate detection overhead
-    - Added LRU cache for regex compilation: additional 10-20% improvement on repeated patterns
+    This function is optimized for LLM duplicate output detection, achieving 6.8x average
+    speedup over the original loop-based implementation. See PERFORMANCE_OPTIMIZATION_REPORT.md
+    for detailed benchmarks and analysis.
 
-    Technical Details:
-    - Uses regex lookahead assertion (?=...) to enable overlapping matches
-    - C-based regex implementation vs pure Python loop reduces interpreter overhead
-    - Pattern escaping via re.escape() ensures special regex chars are handled safely
-    - Regex compilation cached via LRU cache (maxsize=128) to avoid recompilation overhead
+    Key Design Decisions:
+        - Uses regex lookahead (?=...) for overlapping matches (required for accurate loop detection)
+        - C-based regex vs Python loop reduces interpreter overhead significantly
+        - LRU-cached compilation provides additional 10-20% improvement on repeated patterns
 
-    Why Overlapping Matches Matter:
-    - Required to accurately detect infinite loops (e.g., "XXXXX" has 4 matches of "XX")
-    - Non-overlapping would only find 2 matches, leading to false negatives
-    - Critical for detecting LLM output loops while avoiding false positives on legitimate
-      repeated content (e.g., 30 SVG cards with identical CSS = 30 repetitions, OK)
+    Why Overlapping Matches:
+        - "XXXXX" contains 4 overlapping matches of "XX" (positions 0,1,2,3)
+        - Non-overlapping would find only 2, causing false negatives in loop detection
+        - Threshold set to allow legitimate repetitions (e.g., 30 SVG cards with same CSS)
 
     Args:
         text: The text to search in
-        pattern: The pattern to search for (will be escaped for regex safety)
+        pattern: The pattern to search for (auto-escaped for regex safety)
 
     Returns:
         Number of overlapping occurrences found
 
     Example:
         >>> count_overlapping_occurrences("XXXXX", "XX")
-        4  # Matches at positions 0, 1, 2, 3 (overlapping)
+        4
 
-    Performance:
-        - Typical input (5-50KB): 0.05-0.5ms (first call), 0.04-0.4ms (cached pattern)
-        - Memory usage: O(matches) for result list, typically <1KB
-        - Cache memory: ~10KB for 128 cached patterns
+    Performance (typical 5-50KB input):
+        - First call: 0.05-0.5ms
+        - Cached pattern: 0.04-0.4ms
+        - Memory: O(matches), typically <1KB
     """
     compiled_pattern = _compile_duplicate_pattern(pattern)
     return len(compiled_pattern.findall(text))

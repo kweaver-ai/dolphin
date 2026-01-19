@@ -680,12 +680,12 @@ class LocalExecutor(EnvExecutor):
                 try:
                     import numpy as np  # type: ignore
                     namespace.setdefault("np", np)
-                except Exception:
+                except ImportError:
                     pass
                 try:
                     import pandas as pd  # type: ignore
                     namespace.setdefault("pd", pd)
-                except Exception:
+                except ImportError:
                     pass
                 
                 # Restore previous session state
