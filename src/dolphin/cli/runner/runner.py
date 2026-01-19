@@ -403,13 +403,13 @@ async def _promptUserInput(
     try:
         from dolphin.cli.ui.input import (
             prompt_conversation_with_multimodal,
-            EscapeInterrupt 
+            EscapeInterrupt
         )
         from dolphin.cli.ui.console import StatusBar
         import sys
 
         StatusBar._debug_log(f"_promptUserInput: starting (simplified)")
-        
+
         # Ensure cursor is visible before prompting
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
@@ -424,14 +424,13 @@ async def _promptUserInput(
 
             # Use multimodal-aware prompt that processes @paste, @image:, @url: syntax
             # Returns: str for plain text, List[Dict] for multimodal content
-            # The prompt appears naturally after content - no cursor positioning needed
             currentQuery = await prompt_conversation_with_multimodal(
-                prompt_text="> ", 
+                prompt_text="> ",
                 interrupt_token=interrupt_token,
                 verbose=True
             )
             StatusBar._debug_log(f"_promptUserInput: got input: {currentQuery!r}")
-                
+
         except EscapeInterrupt:
             # ESC pressed during input - treat as empty input
             StatusBar._debug_log(f"_promptUserInput: EscapeInterrupt")
@@ -441,12 +440,12 @@ async def _promptUserInput(
         from dolphin.cli.ui.console import console_conversation_end
         console_conversation_end()
         return None, True, None
-    
+
     # Handle multimodal content (List[Dict]) - return directly without string checks
     if isinstance(currentQuery, list):
         # This is multimodal content, return as-is
         return currentQuery, False, None
-    
+
     # For string input, check exit commands and debug prefixes
     if not currentQuery or currentQuery.lower().strip() in ["exit", "quit", "q", ""]:
         console("Conversation ended", verbose=args.saveHistory)
