@@ -1,0 +1,25 @@
+'''
+Test multiple interrupts in explore block with LLM continuation
+This script tests multiple high-risk tool calls that each require confirmation.
+
+Available tools:
+- high_risk_tool: Requires confirmation (param: string)
+- safe_tool: Safe operation, no confirmation needed (param: string)
+''' -> system_prompt
+
+'''
+Task: Perform three operations:
+1. Call high_risk_tool with param="first_operation"
+2. After first completes, call high_risk_tool again with param="second_operation"
+3. Finally, summarize both operations using safe_tool with param="summary"
+
+Each high-risk operation requires careful confirmation.
+''' -> query_explore
+
+/explore/(
+    tools=["high_risk_tool", "safe_tool"],
+    system_prompt=$system_prompt
+) $query_explore -> explore_result
+
+'''Final result: {explore_result}''' -> final_result
+

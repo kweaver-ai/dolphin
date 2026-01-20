@@ -1,0 +1,13 @@
+'''
+Test tool interrupt with parameter modification - @tool block
+This script tests the ability to modify tool parameters during interrupt.
+The tool will be interrupted with param="original_value", 
+but should execute with param="modified_value" after user modification.
+''' -> system_prompt
+
+'''Perform a high risk operation with param="original_value" using high_risk_tool.''' -> operation_msg
+
+@high_risk_tool(param="original_value") -> tool_result
+
+'''Final result: {tool_result}''' -> final_result
+

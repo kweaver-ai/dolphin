@@ -1,0 +1,26 @@
+'''
+Test multi-step explore block with interrupts and LLM continuation
+This script tests that after interrupt and resume, the LLM can continue reasoning.
+
+Available tools:
+- high_risk_tool: Requires confirmation (param: string)
+- safe_tool: Safe operation, no confirmation needed (param: string)
+''' -> system_prompt
+
+'''
+Task: Perform the following operations in sequence:
+1. First, call high_risk_tool with param="step1_operation"
+2. After the first operation completes, analyze the result
+3. Then call safe_tool with param="step2_operation" to complete the workflow
+4. Finally, provide a summary of both operations
+
+Please execute these steps carefully and provide detailed reasoning.
+''' -> query_explore
+
+/explore/(
+    tools=["high_risk_tool", "safe_tool"],
+    system_prompt=$system_prompt
+) $query_explore -> explore_result
+
+'''Final result: {explore_result}''' -> final_result
+

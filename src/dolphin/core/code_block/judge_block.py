@@ -148,15 +148,39 @@ class JudgeBlock(BasicCodeBlock):
                 new_tool_args = {arg["key"]: arg["value"] for arg in raw_tool_args}
 
                 props = {"intervention": False, "gvp": self.context}
+                
+                # *** Handle skip action ***
+                skip_tool = self.context.get_var_value("__skip_tool__")
+                skip_message = self.context.get_var_value("__skip_message__")
+                
+                # Clean up skip flags
+                if skip_tool:
+                    self.context.delete_variable("__skip_tool__")
+                if skip_message:
+                    self.context.delete_variable("__skip_message__")
+                
                 self.context.delete_variable("tool")
 
-                async for resp_item in self.skill_run(
-                    source_type=SourceType.SKILL,
-                    skill_name=tool_name,
-                    skill_params_json=new_tool_args,
-                    props=props,
-                ):
-                    yield resp_item
+                # If user chose to skip, don't execute the tool
+                if skip_tool:
+                    # Generate friendly skip message
+                    params_str = ", ".join([f"{k}={v}" for k, v in new_tool_args.items()])
+                    default_skip_msg = f"Tool '{tool_name}' was skipped by user"
+                    if skip_message:
+                        skip_response = f"[SKIPPED] {skip_message}"
+                    else:
+                        skip_response = f"[SKIPPED] {default_skip_msg} (parameters: {params_str})"
+                    
+                    yield {"answer": skip_response}
+                else:
+                    # Normal execution (not skipped)
+                    async for resp_item in self.skill_run(
+                        source_type=SourceType.SKILL,
+                        skill_name=tool_name,
+                        skill_params_json=new_tool_args,
+                        props=props,
+                    ):
+                        yield resp_item
             else:
                 self.recorder.set_output_var(self.assign_type, self.output_var)
 

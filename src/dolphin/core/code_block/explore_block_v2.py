@@ -298,11 +298,23 @@ class ExploreBlockV2(BasicCodeBlock):
         # restore the complete message context to context_manager buckets
         saved_messages = intervention_vars.get("prompt")
         if saved_messages is not None:
+            from dolphin.core.common.enums import MessageRole
+            from dolphin.core.context_engineer.config.settings import BuildInBucket
+            
+            # *** FIX: Filter out messages that are already in other buckets ***
+            # To avoid duplication, only restore messages generated during the conversation:
+            # - SYSTEM messages are already in SYSTEM bucket (from initial execute)
+            # - USER messages are already in QUERY/HISTORY buckets (initial query and history)
+            # - We only need to restore ASSISTANT and TOOL messages (conversation progress)
+            filtered_messages = [
+                msg for msg in saved_messages 
+                if msg.get("role") in [MessageRole.ASSISTANT.value, MessageRole.TOOL.value]
+            ]
+            
             msgs = Messages()
-            msgs.extend_plain_messages(saved_messages)
+            msgs.extend_plain_messages(filtered_messages)
             # Use set_messages_batch to restore to context_manager buckets
             # This ensures messages are available when to_dph_messages() is called
-            from dolphin.core.context_engineer.config.settings import BuildInBucket
             self.context.set_messages_batch(msgs, bucket=BuildInBucket.SCRATCHPAD.value)
 
         input_dict = self.context.get_var_value("tool")
