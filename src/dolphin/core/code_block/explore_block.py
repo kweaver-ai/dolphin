@@ -103,9 +103,6 @@ class ExploreBlock(BasicCodeBlock):
         self.enable_skill_deduplicator = getattr(
             self, "enable_skill_deduplicator", True
         )
-        
-        # Enable tool interrupt mechanism for ExploreBlock
-        self._enable_tool_interrupt = True
 
         # State Variables
         self.times = 0

@@ -116,9 +116,6 @@ class ExploreBlockV2(BasicCodeBlock):
         self.enable_skill_deduplicator = getattr(
             self, "enable_skill_deduplicator", True
         )
-        
-        # Enable tool interrupt mechanism for ExploreBlockV2
-        self._enable_tool_interrupt = True
 
     async def execute(
         self,

@@ -92,8 +92,6 @@ class BasicCodeBlock:
         self.tool_choice: Optional[str] = None
         # Whether to enable skill deduplication (used only in explore blocks, enabled by default)
         self.enable_skill_deduplicator: bool = True
-        # Whether to enable tool interrupt mechanism (only for explore blocks)
-        self._enable_tool_interrupt: bool = False
         self.skills = None
         self.system_prompt = ""
 
@@ -1135,6 +1133,7 @@ class BasicCodeBlock:
         skill_params_json: Dict[str, Any] = {},
         props=None,
     ):
+        from dolphin.core.utils.tools import ToolInterrupt
         if self.context.is_skillkit_empty():
             self.context.warn(f"skillkit is None, skill_name[{skill_name}]")
             return
@@ -1202,12 +1201,11 @@ class BasicCodeBlock:
         props.update({"gvp": self.context})
         try:
             # Check for tool interrupt configuration (ToolInterrupt mechanism)
-            # Only enabled in ExploreBlock/ExploreBlockV2, ignored in other blocks (@tool, judge, etc.)
+            # Default: all tool calls support interrupt if tool has interrupt_config
             # Skip interrupt check if this is a resumed tool call (intervention=False)
-            logger.debug(f"[DEBUG skill_run] _enable_tool_interrupt={self._enable_tool_interrupt}, skill_name={skill_name}, intervention={props.get('intervention', True)}")
-            if self._enable_tool_interrupt and props.get('intervention', True):
+            if props.get('intervention', True):
                 interrupt_config = getattr(skill, 'interrupt_config', None)
-                logger.debug(f"[DEBUG skill_run] interrupt_config={interrupt_config}")
+                logger.debug(f"[DEBUG skill_run] skill_name={skill_name}, interrupt_config={interrupt_config}, intervention={props.get('intervention', True)}")
                 
                 if interrupt_config and interrupt_config.get('requires_confirmation'):
                     logger.debug(f"[DEBUG skill_run] Tool {skill_name} requires confirmation, raising ToolInterrupt")
@@ -1226,8 +1224,7 @@ class BasicCodeBlock:
                         for k, v in skill_params_json.items()
                     ]
                     
-                    # Throw ToolInterrupt (fixed before execution)
-                    from dolphin.core.utils.tools import ToolInterrupt
+                    # Throw ToolInterrupt (checked before execution)
                     raise ToolInterrupt(
                         message=message,
                         tool_name=skill_name,

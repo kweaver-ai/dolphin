@@ -15,8 +15,6 @@ class JudgeBlock(BasicCodeBlock):
 
         self.llm_client = LLMClient(self.context)
         self.debug_info = debug_infos
-        # Enable tool interrupt mechanism for JudgeBlock
-        self._enable_tool_interrupt = True
 
     async def judge_tool_call(
         self,

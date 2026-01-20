@@ -1,0 +1,24 @@
+'''
+Test tool interrupt with resume - multiple tools in sequence
+This script tests interrupt, resume, and continued execution
+''' -> system_prompt
+
+'''Step 1: Execute first high risk tool''' -> step1_msg
+
+@high_risk_tool(param="first_operation") -> result1
+
+'''Step 2: Execute second high risk tool''' -> step2_msg
+
+@high_risk_tool(param="second_operation") -> result2
+
+'''Step 3: Execute safe tool''' -> step3_msg
+
+@safe_tool(param="final_operation") -> result3
+
+'''
+All operations completed:
+- Result 1: {result1}
+- Result 2: {result2}
+- Result 3: {result3}
+''' -> final_result
+

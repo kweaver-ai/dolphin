@@ -1,0 +1,21 @@
+'''
+Test explore v1 block with toolcall mode and tool interrupt
+This script tests explore block v1 in toolcall mode with interrupt mechanism
+
+Available tools:
+- high_risk_tool: Requires confirmation (param: string)
+- safe_tool: Safe operation, no confirmation needed (param: string)
+''' -> system_prompt
+
+'''
+Task: Perform a high risk operation with param="toolcall_test" using high_risk_tool.
+''' -> query_explore
+
+/explore/(
+    tools=["high_risk_tool", "safe_tool"],
+    system_prompt=$system_prompt,
+    mode=tool_call
+) $query_explore -> explore_result
+
+'''Final result: {explore_result}''' -> final_result
+

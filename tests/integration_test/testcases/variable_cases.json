@@ -2,16 +2,7 @@
     "testSuite": {
         "name": "Dolphin Language Variable Integration Tests",
         "description": "Integration tests for GlobalVariablePool variable validation",
-        "version": "1.0.0",
-        "defaultConfig": {
-            "modelName": "Tome-L",
-            "api": "http://192.168.152.11:8303/v1/chat/completions",
-            "typeApi": "openai",
-            "apiKey": "",
-            "userId": "b32ad442-aadd-11ef-ac00-3e62f7949701",
-            "maxTokens": 1000,
-            "temperature": 0.0
-        }
+        "version": "1.0.0"
     },
     "testCases": [
         {

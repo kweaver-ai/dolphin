@@ -11,8 +11,6 @@ class ToolBlock(BasicCodeBlock):
     def __init__(self, context: Context, debug_infos: Optional[dict] = None):
         super().__init__(context=context)
         self.already_append_flag = False
-        # Enable tool interrupt mechanism for ToolBlock
-        self._enable_tool_interrupt = True
 
     def parse_tool_call(self):
         """Parse tool calls, now using the unified parse_block_content method

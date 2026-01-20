@@ -91,10 +91,36 @@ class MockedSkillkit(Skillkit):
         """
         yield "内容已经保存至：" + path
 
+    async def high_risk_tool(self, param: str = "", **kwargs) -> Any:
+        """
+        High risk operation that requires user confirmation.
+
+        Args:
+            param: Operation parameter
+        """
+        yield f"High risk operation completed successfully with param: {param}"
+
+    async def safe_tool(self, param: str = "", **kwargs) -> Any:
+        """
+        Safe operation that doesn't require confirmation.
+
+        Args:
+            param: Operation parameter
+        """
+        yield f"Safe operation completed with param: {param}"
+
     def getSkills(self) -> List[SkillFunction]:
         """
         get tools skill.
         """
+        high_risk_skill = SkillFunction(self.high_risk_tool)
+        high_risk_skill.interrupt_config = {
+            "requires_confirmation": True,
+            "confirmation_message": "⚠️  Confirm high risk operation with param='{param}'? This operation cannot be undone!"
+        }
+        
+        safe_skill = SkillFunction(self.safe_tool)
+        
         return [
             SkillFunction(self.poemWriterStream),
             SkillFunction(self.webSearch),
@@ -102,4 +128,6 @@ class MockedSkillkit(Skillkit):
             SkillFunction(self.computerExpert),
             SkillFunction(self.emailSender),
             SkillFunction(self.saveToLocal),
+            high_risk_skill,
+            safe_skill,
         ]

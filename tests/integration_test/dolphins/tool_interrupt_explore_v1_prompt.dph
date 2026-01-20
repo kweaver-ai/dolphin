@@ -1,0 +1,23 @@
+'''
+Test explore v1 block with prompt mode and tool interrupt
+This script tests explore block v1 in prompt mode with interrupt mechanism
+
+Available tools:
+- high_risk_tool: Requires confirmation (param: string)
+- safe_tool: Safe operation, no confirmation needed (param: string)
+
+Use the =>$ syntax to call tools in prompt mode.
+''' -> system_prompt
+
+'''
+Task: Perform a high risk operation with param="prompt_test" using high_risk_tool.
+''' -> query_explore
+
+/explore/(
+    tools=["high_risk_tool", "safe_tool"],
+    system_prompt=$system_prompt,
+    mode=prompt
+) $query_explore -> explore_result
+
+'''Final result: {explore_result}''' -> final_result
+
