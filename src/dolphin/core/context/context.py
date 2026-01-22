@@ -969,10 +969,13 @@ class Context:
         if bucket is None:
             bucket = BuildInBucket.SCRATCHPAD.value
 
-        # Empty the current bucket
-        self.context_manager.clear_bucket(bucket)
-        # Add new messages
-        self.context_manager.add_bucket(bucket, messages)
+        # Replace bucket content (or create if not exists)
+        if self.context_manager.has_bucket(bucket):
+            # Use replace_bucket_content to directly replace existing bucket
+            self.context_manager.replace_bucket_content(bucket, messages)
+        else:
+            # Create new bucket if it doesn't exist
+            self.context_manager.add_bucket(bucket, messages)
 
         # Mark as dirty
         self.messages_dirty = True

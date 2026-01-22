@@ -66,6 +66,10 @@ class TriditionalToolkit(Skillkit):
 
             # Add tool type information to the SkillFunction
             openai_function.original_tool = tool
+            
+            # Copy interrupt_config from tool to SkillFunction if it exists
+            if hasattr(tool, 'interrupt_config'):
+                openai_function.interrupt_config = tool.interrupt_config
 
             openai_functions[tool_name] = openai_function
 

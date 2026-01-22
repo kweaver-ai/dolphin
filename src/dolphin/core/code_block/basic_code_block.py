@@ -1133,6 +1133,7 @@ class BasicCodeBlock:
         skill_params_json: Dict[str, Any] = {},
         props=None,
     ):
+        from dolphin.core.utils.tools import ToolInterrupt
         if self.context.is_skillkit_empty():
             self.context.warn(f"skillkit is None, skill_name[{skill_name}]")
             return
@@ -1199,6 +1200,40 @@ class BasicCodeBlock:
             props = {}
         props.update({"gvp": self.context})
         try:
+            # Check for tool interrupt configuration (ToolInterrupt mechanism)
+            # Default: all tool calls support interrupt if tool has interrupt_config
+            # Skip interrupt check if this is a resumed tool call (intervention=False)
+            if props.get('intervention', True):
+                interrupt_config = getattr(skill, 'interrupt_config', None)
+                logger.debug(f"[DEBUG skill_run] skill_name={skill_name}, interrupt_config={interrupt_config}, intervention={props.get('intervention', True)}")
+                
+                if interrupt_config and interrupt_config.get('requires_confirmation'):
+                    logger.debug(f"[DEBUG skill_run] Tool {skill_name} requires confirmation, raising ToolInterrupt")
+                    # Format confirmation message (support parameter interpolation)
+                    message = interrupt_config.get('confirmation_message', 'Tool requires confirmation')
+                    if message and skill_params_json:
+                        try:
+                            message = message.format(**skill_params_json)
+                        except (KeyError, ValueError):
+                            # If parameter interpolation fails, use original message
+                            pass
+                    
+                    # Construct tool arguments list
+                    tool_args = [
+                        {"key": k, "value": v, "type": type(v).__name__}
+                        for k, v in skill_params_json.items()
+                    ]
+                    
+                    # Throw ToolInterrupt (checked before execution)
+                    raise ToolInterrupt(
+                        message=message,
+                        tool_name=skill_name,
+                        tool_args=tool_args,
+                        tool_config=interrupt_config
+                    )
+                else:
+                    logger.debug(f"[DEBUG skill_run] Tool {skill_name} does not require confirmation, proceeding with execution")
+            
             console_skill_call(
                 skill_name, skill_params_json, verbose=self.context.verbose, skill=skill
             )
@@ -1409,6 +1444,12 @@ class BasicCodeBlock:
 
             if recorder:
                 recorder.update(item=stream_item, raw_output=stream_item.answer)
+
+            # Update tool call detection flags
+            if stream_item.has_tool_call():
+                tool_call_detected = True
+                if stream_item.has_complete_tool_call():
+                    complete_tool_call = stream_item.get_tool_call()
 
             yield stream_item
 

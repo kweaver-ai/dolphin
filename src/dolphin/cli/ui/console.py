@@ -1738,14 +1738,14 @@ class ConsoleUI:
         
         # Block type icons and colors
         block_icons = {
-            "explore": ("🔍", Theme.SECONDARY),
-            "prompt": ("💬", Theme.SUCCESS),
-            "judge": ("⚖️", Theme.WARNING),
-            "assign": ("📝", Theme.PRIMARY),
-            "tool": ("⚡", Theme.ACCENT),
+            "explore": ("[?]", Theme.SECONDARY),
+            "prompt": ("[>]", Theme.SUCCESS),
+            "judge": ("[J]", Theme.WARNING),
+            "assign": ("[=]", Theme.PRIMARY),
+            "tool": ("[*]", Theme.ACCENT),
         }
         
-        icon, color = block_icons.get(block_type.lower(), ("📦", Theme.LABEL))
+        icon, color = block_icons.get(block_type.lower(), ("[X]", Theme.LABEL))
         
         # Build output line
         header = f"{color}{Theme.BOLD}{icon} {block_type.upper()}{Theme.RESET}"

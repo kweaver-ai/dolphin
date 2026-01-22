@@ -1,0 +1,21 @@
+'''
+Test explore v2 block with tool interrupt
+This script tests explore block v2 with interrupt mechanism
+
+Available tools:
+- high_risk_tool: Requires confirmation (param: string)
+- safe_tool: Safe operation, no confirmation needed (param: string)
+''' -> system_prompt
+
+'''
+Task: Perform a high risk operation with param="test_value" using high_risk_tool.
+After that, perform a safe operation with param="safe_value" using safe_tool.
+''' -> query_explore
+
+/explore/(
+    tools=["high_risk_tool", "safe_tool"],
+    system_prompt=$system_prompt
+) $query_explore -> explore_result
+
+'''Final result: {explore_result}''' -> final_result
+

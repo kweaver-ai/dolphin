@@ -332,9 +332,11 @@ class ToolInterrupt(Exception):
         message="The tool was interrupted.",
         tool_name: str = None,
         tool_args: List[Dict] = None,
+        tool_config: Dict = None,
         *args,
         **kwargs,
     ):
         super().__init__(message, *args, **kwargs)
         self.tool_name = tool_name if tool_name else ""
         self.tool_args = tool_args if tool_args else []
+        self.tool_config = tool_config if tool_config else {}

@@ -1,0 +1,11 @@
+'''
+Test @tool block with tool interrupt
+This script tests direct tool call (@tool) with interrupt mechanism
+''' -> system_prompt
+
+'''Test @tool interrupt with high risk tool''' -> query_tool
+
+@high_risk_tool(param="test_value") -> tool_result
+
+'''Final result: {tool_result}''' -> final_result
+

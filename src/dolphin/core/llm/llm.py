@@ -249,7 +249,6 @@ class LLMModelFactory(LLM):
             finish_reason = None
             # Use ToolCallsParser to handle tool calls parsing
             tool_parser = ToolCallsParser()
-
             timeout = aiohttp.ClientTimeout(
                 total=1800,  # Disable overall timeout (use with caution)
                 sock_connect=30,  # Keep connection timeout
@@ -320,7 +319,7 @@ class LLMModelFactory(LLM):
 
                                     accu_content += delta_content
                                     reasoning_content += delta_reasoning
-                                    
+
                                     # Capture finish_reason
                                     chunk_finish_reason = line_json["choices"][0].get("finish_reason")
                                     if chunk_finish_reason:
@@ -461,7 +460,7 @@ class LLMOpenai(LLM):
                 and delta.reasoning_content is not None
             ):
                 accu_reasoning += delta.reasoning_content
-            
+
             # Capture finish_reason
             chunk_finish_reason = chunk.choices[0].finish_reason
             if chunk_finish_reason:

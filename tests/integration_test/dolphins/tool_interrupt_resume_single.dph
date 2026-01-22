@@ -1,0 +1,11 @@
+'''
+Test tool interrupt with resume - single tool
+This script tests basic interrupt and resume functionality
+''' -> system_prompt
+
+'''Execute high risk operation''' -> operation_msg
+
+@high_risk_tool(param="resume_test") -> tool_result
+
+'''Operation completed successfully: {tool_result}''' -> final_result
+

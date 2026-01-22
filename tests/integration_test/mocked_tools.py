@@ -280,3 +280,74 @@ class SaveToLocal(BaseMockedTool):
                 "block_answer": "",
                 "status": "False",
             }
+
+
+class HighRiskTool(BaseMockedTool):
+    """High risk tool that requires confirmation before execution"""
+    name = "high_risk_tool"
+    description = "High risk operation that requires user confirmation"
+    inputs = {"param": {"type": "string", "description": "Operation parameter", "required": True}}
+    outputs = {"result": {"type": "string", "description": "Operation result"}}
+    props = {}
+
+    def __init__(self):
+        """Initialize HighRiskTool with interrupt_config"""
+        super().__init__(
+            name=self.name,
+            description=self.description,
+            inputs=self.inputs,
+            outputs=self.outputs,
+            props=self.props,
+        )
+        
+        # Configure tool interrupt
+        self.interrupt_config = {
+            "requires_confirmation": True,
+            "confirmation_message": "⚠️  Confirm high risk operation with param='{param}'? This operation cannot be undone!"
+        }
+
+    def run_stream(self, tool_input: dict = None, props: Optional[dict] = None, **kwargs) -> Any:
+        """Execute high risk operation"""
+        # Extract param from tool_input or kwargs
+        param = None
+        if tool_input:
+            param = tool_input.get("param")
+        if param is None and kwargs:
+            param = kwargs.get("param")
+        
+        yield {
+            "result": f"High risk operation completed successfully with param: {param}"
+        }
+
+
+class SafeTool(BaseMockedTool):
+    """Safe tool that doesn't require confirmation"""
+    name = "safe_tool"
+    description = "Safe operation that doesn't require confirmation"
+    inputs = {"param": {"type": "string", "description": "Operation parameter", "required": True}}
+    outputs = {"result": {"type": "string", "description": "Operation result"}}
+    props = {}
+
+    def __init__(self):
+        """Initialize SafeTool without interrupt_config"""
+        super().__init__(
+            name=self.name,
+            description=self.description,
+            inputs=self.inputs,
+            outputs=self.outputs,
+            props=self.props,
+        )
+        # No interrupt_config - this is a safe tool
+
+    def run_stream(self, tool_input: dict = None, props: Optional[dict] = None, **kwargs) -> Any:
+        """Execute safe operation"""
+        # Extract param from tool_input or kwargs
+        param = None
+        if tool_input:
+            param = tool_input.get("param")
+        if param is None and kwargs:
+            param = kwargs.get("param")
+        
+        yield {
+            "result": f"Safe operation completed with param: {param}"
+        }

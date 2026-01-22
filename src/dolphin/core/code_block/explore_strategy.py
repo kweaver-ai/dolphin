@@ -574,11 +574,12 @@ class ToolCallStrategy(ExploreStrategy):
         no_cache: bool = False,
     ) -> Dict[str, Any]:
         """Includes the tools parameter and an optional tool_choice"""
+        tools = skillkit.getSkillsSchema() if skillkit and not skillkit.isEmpty() else []
         llm_params = {
             "messages": messages,
             "model": model,
             "no_cache": no_cache,
-            "tools": skillkit.getSkillsSchema() if skillkit and not skillkit.isEmpty() else [],
+            "tools": tools,
         }
 
         if tool_choice:

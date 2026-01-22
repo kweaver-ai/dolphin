@@ -1,0 +1,374 @@
+{
+  "testSuite": {
+    "name": "Tool Interrupt Integration Tests",
+    "description": "Integration tests for tool interrupt mechanism across different block types",
+    "version": "1.0.0"
+  },
+  "testCases": [
+    {
+      "name": "test_tool_interrupt_toolblock_confirm",
+      "description": "Test @tool block interrupt - user confirms execution",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "test_mode": "interrupt_simulation"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_toolblock.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": ["high_risk_tool"],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variables": {
+          "tool_result": {
+            "contains": "High risk operation completed"
+          }
+        }
+      },
+      "notes": "This test requires manual intervention - set enabled=true and run with interrupt handler"
+    },
+    {
+      "name": "test_tool_interrupt_judge_confirm",
+      "description": "Test judge block interrupt - LLM selects high risk tool and user confirms",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "test_mode": "interrupt_simulation"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_judge.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variables": {
+          "judge_result": {
+            "contains": "High risk operation completed"
+          }
+        }
+      },
+      "notes": "This test requires manual intervention - set enabled=true and run with interrupt handler"
+    },
+    {
+      "name": "test_tool_interrupt_explore_v2_confirm",
+      "description": "Test explore v2 block interrupt - LLM calls high risk tool and user confirms",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": true,
+          "test_mode": "interrupt_simulation"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_explore_v2.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variables": {
+          "explore_result": {
+            "contains": "completed"
+          }
+        }
+      },
+      "notes": "This test requires manual intervention - set enabled=true and run with interrupt handler. Tests V2 mode."
+    },
+    {
+      "name": "test_tool_interrupt_explore_v1_toolcall_confirm",
+      "description": "Test explore v1 block in toolcall mode with interrupt",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": false,
+          "test_mode": "interrupt_simulation"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_explore_v1_toolcall.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variables": {
+          "explore_result": {
+            "contains": "completed"
+          }
+        }
+      },
+      "notes": "This test requires manual intervention - set enabled=true and run with interrupt handler. Tests V1 toolcall mode."
+    },
+    {
+      "name": "test_tool_interrupt_explore_v1_prompt_confirm",
+      "description": "Test explore v1 block in prompt mode with interrupt",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": false,
+          "test_mode": "interrupt_simulation"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_explore_v1_prompt.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": ["high_risk_tool"],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variables": {
+          "explore_result": {
+            "contains": "completed"
+          }
+        }
+      },
+      "notes": "This test requires manual intervention - set enabled=true and run with interrupt handler. Tests V1 prompt mode."
+    },
+    {
+      "name": "test_tool_interrupt_skip_behavior",
+      "description": "Test that skipping a tool allows execution to continue",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "test_mode": "interrupt_skip"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_toolblock.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variables": {
+          "tool_result": {
+            "contains": "skip"
+          }
+        }
+      },
+      "notes": "This test requires manual intervention - user should choose 'skip' action. Tests skip behavior."
+    },
+    {
+      "name": "test_tool_interrupt_resume_single",
+      "description": "Test interrupt resume mechanism - single tool",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "test_mode": "interrupt_resume"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_resume_single.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variableChecks": [
+          {
+            "variableName": "tool_result",
+            "expectedContent": "resume_test"
+          }
+        ]
+      },
+      "notes": "Tests basic interrupt resume functionality with single tool using real resume mechanism"
+    },
+    {
+      "name": "test_tool_interrupt_resume_multi",
+      "description": "Test interrupt resume mechanism - multiple tools in sequence",
+      "enabled": true,
+      "timeout": 60,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "test_mode": "interrupt_resume"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_resume_multi.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variableChecks": [
+          {
+            "variableName": "result1",
+            "expectedContent": "first_operation"
+          }
+        ]
+      },
+      "notes": "Tests interrupt resume with multiple sequential tools - demonstrates full resume workflow"
+    },
+    {
+      "name": "test_tool_interrupt_modify_params_toolblock",
+      "description": "Test parameter modification during interrupt - @tool block",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "test_mode": "interrupt_modify_params"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_modify_toolblock.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error", "original_value"],
+        "tools": ["high_risk_tool"],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variableChecks": [
+          {
+            "variableName": "tool_result",
+            "expectedContent": "modified_value"
+          },
+          {
+            "variableName": "final_result",
+            "expectedContent": "modified_value"
+          }
+        ]
+      },
+      "notes": "Tests that parameters can be modified during interrupt and the modified values are used in tool execution"
+    },
+    {
+      "name": "test_tool_interrupt_modify_params_explore_v2",
+      "description": "Test parameter modification during interrupt - explore v2 block",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": true,
+          "test_mode": "interrupt_modify_params"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_modify_explore_v2.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error", "original_value"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variableChecks": [
+          {
+            "variableName": "explore_result",
+            "expectedContent": "modified_value"
+          }
+        ]
+      },
+      "notes": "Tests parameter modification in explore v2 block - verifies LLM sees modified parameters"
+    },
+    {
+      "name": "test_tool_interrupt_multi_step_explore",
+      "description": "Test multi-step explore with interrupt and LLM continuation",
+      "enabled": true,
+      "timeout": 60,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": true,
+          "test_mode": "interrupt_resume"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_multi_step_explore.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variableChecks": [
+          {
+            "variableName": "explore_result",
+            "expectedContent": "operation"
+          }
+        ]
+      },
+      "notes": "Tests that LLM can continue reasoning after interrupt and resume in explore block"
+    },
+    {
+      "name": "test_tool_interrupt_multi_interrupt_explore",
+      "description": "Test multiple interrupts in explore block with sequential confirmations",
+      "enabled": true,
+      "timeout": 90,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": true,
+          "test_mode": "interrupt_resume"
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_multi_interrupt_explore.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result",
+        "variableChecks": [
+          {
+            "variableName": "explore_result",
+            "expectedContent": "operation"
+          }
+        ]
+      },
+      "notes": "Tests multiple sequential interrupts with LLM continuation between them"
+    }
+  ]
+}
+

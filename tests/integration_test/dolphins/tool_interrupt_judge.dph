@@ -1,0 +1,14 @@
+'''
+Test judge block with tool interrupt
+This script tests judge block tool selection with interrupt mechanism
+''' -> system_prompt
+
+'''Use the appropriate tool to perform a high risk operation with param="test_value"''' -> query_judge
+
+/judge/(
+    tools=["high_risk_tool", "safe_tool"],
+    system_prompt=$system_prompt
+) $query_judge -> judge_result
+
+'''Final result: {judge_result}''' -> final_result
+
