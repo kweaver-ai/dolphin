@@ -249,7 +249,6 @@ class LLMModelFactory(LLM):
             finish_reason = None
             # Use ToolCallsParser to handle tool calls parsing
             tool_parser = ToolCallsParser()
-
             timeout = aiohttp.ClientTimeout(
                 total=1800,  # Disable overall timeout (use with caution)
                 sock_connect=30,  # Keep connection timeout
