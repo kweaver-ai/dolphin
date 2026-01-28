@@ -1347,6 +1347,15 @@ class ConsoleUI:
             elif v is None:
                 val_display = f"{Theme.NULL_VALUE}null{Theme.RESET}"
                 lines.append(f"  {Theme.PARAM_KEY}{display_key}{Theme.RESET}:{padding} {val_display}")
+            # Special case for tasks list in PlanSkillkit
+            elif key_lower == "tasks" and isinstance(v, list) and v and isinstance(v[0], dict):
+                lines.append(f"  {Theme.PARAM_KEY}{display_key}{Theme.RESET}:{padding}")
+                for i, task in enumerate(v[:10]):
+                    task_id = task.get("id", f"task_{i+1}")
+                    task_name = task.get("name", "Unnamed Task")
+                    lines.append(f"    {Theme.MUTED}•{Theme.RESET} [{Theme.SUCCESS}{task_id}{Theme.RESET}] {Theme.PARAM_VALUE}{task_name}{Theme.RESET}")
+                if len(v) > 10:
+                    lines.append(f"    {self._format_hidden_lines_hint(len(v) - 10, prefix=' ')}")
             else:
                 # Complex types: use existing json highlighter
                 val_display = self._highlight_json(v, indent=0, max_depth=1)
@@ -2250,7 +2259,7 @@ class ConsoleUI:
                 print(f"     {Theme.MUTED}… +{len(details) - 10} more{Theme.RESET}")
 
     # ─────────────────────────────────────────────────────────────
-    # Plan-Specific Renderer (Unique Style for plan_act)
+    # Plan Renderer (Codex-style)
     # ─────────────────────────────────────────────────────────────
     
     def _get_visual_width(self, text: str) -> int:
@@ -2275,7 +2284,7 @@ class ConsoleUI:
         return width
 
     # ─────────────────────────────────────────────────────────────
-    # Plan-Specific Renderer (Unique Style for plan_act)
+    # Plan Renderer (Codex-style)
     # ─────────────────────────────────────────────────────────────
     
     def plan_update(
@@ -2289,10 +2298,10 @@ class ConsoleUI:
         verbose: Optional[bool] = None
     ) -> None:
         """
-        Render a complete plan update in a unique style for plan_act.
+        Render a complete plan update in a plan-focused visual style.
         
-        This is a specialized renderer that replaces the generic skill_call box
-        with a distinctive plan-focused visual design.
+        This renderer is intended for plan orchestration tools (e.g., plan_skillkit)
+        and can be used by callers who want a dedicated plan visualization.
         
         Args:
             tasks: List of tasks with 'content', 'status'
@@ -2756,10 +2765,15 @@ if __name__ == "__main__":
     
     # Demo skill call
     ui.skill_call_start(
-        "_plan_act",
+        "_plan_tasks",
         {
-            "planningMode": "create",
-            "taskList": "1. Load Excel file\n2. Analyze structure\n3. Generate insights"
+            "exec_mode": "seq",
+            "max_concurrency": 3,
+            "tasks": [
+                {"id": "task_1", "name": "Load Excel file", "prompt": "Load the Excel file"},
+                {"id": "task_2", "name": "Analyze structure", "prompt": "Analyze the file structure"},
+                {"id": "task_3", "name": "Generate insights", "prompt": "Generate key insights"},
+            ],
         }
     )
     
@@ -2767,11 +2781,15 @@ if __name__ == "__main__":
     time.sleep(0.5)
     
     ui.skill_call_end(
-        "_plan_act",
+        "_plan_tasks",
         {
             "status": "success",
-            "tasks": ["Task 1", "Task 2", "Task 3"],
-            "nextStep": "Execute Task 1"
+            "tasks": [
+                {"id": "task_1", "name": "Load Excel file"},
+                {"id": "task_2", "name": "Analyze structure"},
+                {"id": "task_3", "name": "Generate insights"},
+            ],
+            "next_step": "Execute task_1",
         },
         duration_ms=156.3
     )

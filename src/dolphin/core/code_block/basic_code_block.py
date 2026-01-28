@@ -90,8 +90,12 @@ class BasicCodeBlock:
         self.recorder: Optional[Recorder] = None
         # tool_choice support (auto|none|required|provider-specific)
         self.tool_choice: Optional[str] = None
-        # Whether to enable skill deduplication (used only in explore blocks, enabled by default)
-        self.enable_skill_deduplicator: bool = True
+        # Whether to enable skill deduplication (used only in explore blocks)
+        # Default is False to avoid incorrectly blocking legitimate repeated detection/polling tool calls.
+        # Recent observations show that deduplication can prematurely stop valid polling scenarios
+        # (e.g., repeatedly checking task status until completion).
+        # Set to True explicitly via /explore/(enable_skill_deduplicator=true) when needed.
+        self.enable_skill_deduplicator: bool = False
         self.skills = None
         self.system_prompt = ""
 
@@ -114,6 +118,26 @@ class BasicCodeBlock:
             # This ensures context retention strategies work correctly
             if context:
                 context.set_skillkit_hook(self.skillkit_hook)
+
+    @staticmethod
+    def _normalize_bool_param(value: Any, default: bool) -> bool:
+        """Normalize boolean-like params from DPH parsing.
+
+        DPH params may be parsed as strings such as "true"/"false".
+        """
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "n", "off"}:
+                return False
+        return default
 
     def validate(self, content):
         """Verify the correctness of the content
@@ -658,11 +682,11 @@ class BasicCodeBlock:
         self._validate_skills()
 
         self.ttc_mode = params_dict.get("ttc_mode", None)
-        self.no_cache = params_dict.get("no_cache", False)
+        self.no_cache = self._normalize_bool_param(params_dict.get("no_cache", False), False)
         self.flags = params_dict.get("flags", "")
         # 是否启用技能调用去重（仅 explore 块会实际使用该参数）
-        self.enable_skill_deduplicator = params_dict.get(
-            "enable_skill_deduplicator", True
+        self.enable_skill_deduplicator = self._normalize_bool_param(
+            params_dict.get("enable_skill_deduplicator", False), False
         )
 
         # 处理输出格式参数

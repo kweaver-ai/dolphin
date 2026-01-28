@@ -1,6 +1,7 @@
 import asyncio
 import os
 import json
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
 
@@ -103,6 +104,18 @@ class Context:
 
         # User interrupt event (injected by Agent layer for cooperative cancellation)
         self._interrupt_event: Optional[asyncio.Event] = None
+
+        # Plan Mode support (unified architecture)
+        self._plan_enabled: bool = False
+        self._plan_id: Optional[str] = None
+        self.task_registry: Optional["TaskRegistry"] = None
+
+        # Nesting level tracking (to prevent infinite recursion in plan mode)
+        # Incremented when fork() is called
+        self._nesting_level: int = 0
+
+        # Output event buffer (for UI/SDK consumption)
+        self._output_events: List[Dict[str, Any]] = []
 
     def set_skillkit_hook(self, skillkit_hook: "SkillkitHook"):
         """Set skillkit_hook"""
@@ -471,7 +484,7 @@ class Context:
         return result_skillset
 
     def _inject_detail_skill_if_needed(self, skillset: Skillset):
-        """Auto-inject _get_result_detail if any skill uses omitting modes (SUMMARY/REFERENCE)"""
+        """Auto-inject _get_cached_result_detail if any skill uses omitting modes (SUMMARY/REFERENCE)"""
         try:
             from dolphin.core.skill.context_retention import ContextRetentionMode
             from dolphin.lib.skillkits.system_skillkit import SystemFunctions
@@ -494,16 +507,16 @@ class Context:
         if should_inject:
             # Check if already exists in skillset
             has_detail_skill = any(
-                "_get_result_detail" in s.get_function_name() 
+                "_get_cached_result_detail" in s.get_function_name()
                 for s in skills
             )
             
             if not has_detail_skill:
                 # Try to get the skill from SystemFunctions
                 # We try different name variations just in case
-                detail_skill = SystemFunctions.getSkill("_get_result_detail")
+                detail_skill = SystemFunctions.getSkill("_get_cached_result_detail")
                 if not detail_skill:
-                    detail_skill = SystemFunctions.getSkill("system_functions._get_result_detail")
+                    detail_skill = SystemFunctions.getSkill("system_functions._get_cached_result_detail")
                 
                 # If still not found (e.g. SystemFunctions not initialized with it), we can pick it manually if possible
                 # But typically SystemFunctions singleton has it.
@@ -512,7 +525,7 @@ class Context:
                 else:
                     # Fallback: look through SystemFunctions.getSkills() manually
                     for s in SystemFunctions.getSkills():
-                        if "_get_result_detail" in s.get_function_name():
+                        if "_get_cached_result_detail" in s.get_function_name():
                             skillset.addSkill(s)
                             break
 
@@ -1425,6 +1438,10 @@ class Context:
             "session_id": self.session_id,
             "cur_agent": self.cur_agent.getName() if self.cur_agent else None,
             "max_answer_len": self.max_answer_len,
+            "plan_enabled": self._plan_enabled,
+            "plan_id": self._plan_id,
+            "task_registry": self.task_registry.to_dict() if self.task_registry else None,
+            "nesting_level": self._nesting_level,
         }
 
         # Export skill set status
@@ -1522,6 +1539,19 @@ class Context:
                 "max_answer_len", MAX_ANSWER_CONTENT_LENGTH
             )
 
+            # Restore plan state
+            self._plan_enabled = runtime_state.get("plan_enabled", False)
+            self._plan_id = runtime_state.get("plan_id")
+            
+            task_registry_data = runtime_state.get("task_registry")
+            if task_registry_data:
+                from dolphin.core.task_registry import TaskRegistry
+                self.task_registry = TaskRegistry.from_dict(task_registry_data)
+            else:
+                self.task_registry = None
+
+            self._nesting_level = runtime_state.get("nesting_level", 0)
+
             # Resume the current agent (to be handled in the calling function above)
             # The restoration of self.cur_agent requires external coordination
 
@@ -1581,3 +1611,136 @@ class Context:
         """Clear the interrupt status (called when resuming execution)."""
         if self._interrupt_event is not None:
             self._interrupt_event.clear()
+
+    # === Output Events API ===
+
+    def write_output(self, event_type: "str | OutputEventType", data: Dict[str, Any]) -> None:
+        """Record an output event for UI/SDK consumers.
+
+        Args:
+            event_type: Event type (OutputEventType enum or string for backward compatibility)
+            data: Event payload data
+
+        Notes:
+            - This is an in-memory buffer only (process-local).
+            - Consumers can call drain_output_events() to fetch and clear.
+            - Prefer using OutputEventType enum for type safety.
+        """
+        from dolphin.core.task_registry import OutputEventType
+
+        # Convert enum to string for backward compatibility
+        event_type_str = event_type.value if isinstance(event_type, OutputEventType) else event_type
+
+        event = {
+            "event_type": event_type_str,
+            "data": data,
+            "timestamp_ms": int(time.time() * 1000),
+        }
+        self._output_events.append(event)
+
+    def drain_output_events(self) -> List[Dict[str, Any]]:
+        """Drain and clear buffered output events."""
+        events = self._output_events
+        self._output_events = []
+        return events
+
+    # === Plan Mode API ===
+
+    async def enable_plan(self, plan_id: Optional[str] = None) -> None:
+        """Enable plan mode (lazy initialization).
+
+        This method can be called multiple times for replan scenarios.
+
+        Args:
+            plan_id: Optional plan identifier (auto-generated if not provided)
+
+        Behavior:
+            - First call: Creates TaskRegistry
+            - Subsequent calls (replan): Generates new plan_id, resets TaskRegistry
+        """
+        import uuid
+        from dolphin.core.task_registry import TaskRegistry
+
+        if not self._plan_enabled:
+            self._plan_enabled = True
+            self.task_registry = TaskRegistry()
+            logger.info("Plan mode enabled")
+        else:
+            # Replan: cancel running tasks and reset registry
+            if self.task_registry:
+                cancelled = await self.task_registry.cancel_all_running()
+                if cancelled > 0:
+                    logger.info(f"Replan: cancelled {cancelled} running tasks")
+                await self.task_registry.reset()
+            logger.info("Plan mode replan triggered")
+
+        self._plan_id = plan_id or str(uuid.uuid4())
+        logger.debug(f"Plan ID: {self._plan_id}")
+
+    async def disable_plan(self) -> None:
+        """Disable plan mode and cleanup resources."""
+        if self.task_registry:
+            await self.task_registry.cancel_all_running()
+            self.task_registry = None
+        self._plan_enabled = False
+        self._plan_id = None
+        logger.info("Plan mode disabled")
+
+    def is_plan_enabled(self) -> bool:
+        """Check if plan mode is enabled.
+
+        Returns:
+            True if plan mode is enabled, False otherwise
+        """
+        return self._plan_enabled
+
+    def has_active_plan(self) -> bool:
+        """Check if there is an active plan with non-terminal tasks.
+
+        Returns:
+            True if plan is enabled, has tasks, and not all tasks are done
+        """
+        if not self._plan_enabled:
+            return False
+        if not self.task_registry or not self.task_registry.has_tasks():
+            return False
+        return not self.task_registry.is_all_done()
+
+    def get_plan_id(self) -> Optional[str]:
+        """Get the current plan ID.
+
+        Returns:
+            Plan ID string, or None if plan mode is not enabled
+        """
+        return self._plan_id
+
+    def fork(self, task_id: str) -> "COWContext":
+        """Create a Copy-On-Write child context for subtask isolation.
+
+        Args:
+            task_id: Task identifier for the child context
+
+        Returns:
+            COWContext instance that isolates writes
+
+        Raises:
+            RuntimeError: If nesting level exceeds maximum allowed depth (3 levels)
+
+        Note:
+            Maximum nesting depth is enforced to prevent memory overflow from
+            deeply nested subtasks (e.g., subtask creates subtask creates subtask...).
+        """
+        MAX_NESTING_LEVEL = 3
+
+        if self._nesting_level >= MAX_NESTING_LEVEL:
+            raise RuntimeError(
+                f"Maximum subtask nesting depth ({MAX_NESTING_LEVEL}) exceeded. "
+                f"Current level: {self._nesting_level}. "
+                "Deeply nested subtasks can cause memory overflow. "
+                "Consider flattening your task structure or breaking it into sequential steps."
+            )
+
+        from dolphin.core.context.cow_context import COWContext
+        child = COWContext(self, task_id)
+        child._nesting_level = self._nesting_level + 1
+        return child

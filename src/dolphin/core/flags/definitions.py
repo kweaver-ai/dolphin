@@ -16,13 +16,13 @@ Scope: Executor, DebugController
 """
 
 # =========== Disable LLM Cache ===========
-DISABLE_LLM_CACHE = "disable_llm_cache"
+DISABLE_LLM_CACHE = "llm_cache"
 """Disable LLM cache
 Scope: LLMClient
 """
 
 # =========== Multiple Tool Calls Support ===========
-ENABLE_PARALLEL_TOOL_CALLS = "enable_parallel_tool_calls"
+ENABLE_PARALLEL_TOOL_CALLS = "parallel_tool_calls"
 """Enable multiple tool calls support
 
 When enabled:
