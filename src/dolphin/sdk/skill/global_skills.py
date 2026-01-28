@@ -100,9 +100,7 @@ class GlobalSkills:
                     status.update(f"[bold blue]Loading skillkit:[/][white] {entry_point.name}[/]")
                     try:
                         # Check if this skill should be loaded based on config
-                        if not self.globalConfig.skill_config.should_load_skill(
-                            entry_point.name
-                        ):
+                        if not self.globalConfig.skill_config.should_load_skill(entry_point.name):
                             logger.debug(f"Skipping disabled skillkit: {entry_point.name}")
                             continue
 
@@ -139,9 +137,11 @@ class GlobalSkills:
                         )
 
                     except Exception as e:
+                        import traceback
                         logger.error(
                             f"Failed to load skillkit from entry point {entry_point.name}: {str(e)}"
                         )
+                        logger.error(traceback.format_exc())
                         continue
 
             logger.debug(
@@ -158,6 +158,9 @@ class GlobalSkills:
         Load all skillkits from skill/installed directory (fallback method)
         Reuses existing code from DolphinExecutor::set_installed_skills
         """
+        # Load built-in skillkits (fallback for development mode when entry points are not available)
+        self._loadBuiltinSkillkits()
+        
         # Get the path to skill/installed directory
         current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         installed_skills_dir = os.path.join(current_dir, "skill", "installed")
@@ -168,6 +171,43 @@ class GlobalSkills:
             )
             return
         self._loadSkillkitsFromPath(installed_skills_dir, "installed")
+    
+    def _loadBuiltinSkillkits(self):
+        """
+        Load built-in skillkits from dolphin.lib.skillkits.
+        This serves as a fallback for development mode or non-installed environments.
+        """
+        builtin_skillkits = {
+            "plan_skillkit": "dolphin.lib.skillkits.plan_skillkit.PlanSkillkit",
+            "cognitive": "dolphin.lib.skillkits.cognitive_skillkit.CognitiveSkillkit",
+            "env_skillkit": "dolphin.lib.skillkits.env_skillkit.EnvSkillkit",
+        }
+        
+        for skillkit_name, class_path in builtin_skillkits.items():
+            # Check if this skillkit should be loaded
+            if not self.globalConfig.skill_config.should_load_skill(skillkit_name):
+                logger.debug(f"Skipping disabled skillkit: {skillkit_name}")
+                continue
+            
+            try:
+                # Import the skillkit class
+                module_path, class_name = class_path.rsplit(".", 1)
+                module = importlib.import_module(module_path)
+                skillkit_class = getattr(module, class_name)
+                
+                # Create instance
+                skillkit_instance = skillkit_class()
+                
+                # Set global config if supported
+                if hasattr(skillkit_instance, "setGlobalConfig"):
+                    skillkit_instance.setGlobalConfig(self.globalConfig)
+                
+                # Add to installed skillset
+                self.installedSkillset.addSkillkit(skillkit_instance)
+                
+                logger.debug(f"Loaded built-in skillkit: {skillkit_name}")
+            except Exception as e:
+                logger.error(f"Failed to load built-in skillkit {skillkit_name}: {str(e)}")
 
     def _get_enabled_system_functions(self) -> Optional[list[str]]:
         """Extract system function configurations from skill_config.enabled_skills"""

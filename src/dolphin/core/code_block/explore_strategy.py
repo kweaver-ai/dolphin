@@ -668,6 +668,7 @@ class ToolCallStrategy(ExploreStrategy):
                     f"Tool call {info.name} (id={info.id}) skipped: "
                     f"Stream ended but JSON arguments incomplete or invalid. "
                     f"Raw arguments: '{info.raw_arguments}'"
+                    f"finish_reason: {stream_item.finish_reason}"
                 )
         
         return result

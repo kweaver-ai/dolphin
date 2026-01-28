@@ -21,6 +21,7 @@ system_functions._grep          -> _grep
 system_functions._extract_code  -> _extract_code
 system_functions._write_jsonl   -> _write_jsonl
 system_functions._sleep         -> _sleep
+system_functions._get_cached_result_detail -> _get_cached_result_detail
 
 Usage example:
 skill:
@@ -416,60 +417,132 @@ class SystemFunctionsSkillKit(Skillkit):
 
         return f"Slept for {actual_duration:.2f} seconds"
 
-    def _get_result_detail(
+    def _get_cached_result_detail(
         self,
         reference_id: str,
+        scope: str = "auto",
         offset: int = 0,
         limit: int = 2000,
+        format: str = "text",
+        include_meta: bool = False,
         **kwargs,
     ) -> str:
-        """Get detailed content from a previous result.
+        """Get the full details of a cached result (task or skill).
 
-        When tool output is omitted, use this method to fetch full content
-        or a specific range.
+        Use this tool when the output of another tool has been truncated and you are
+        explicitly prompted to call this tool with a specific reference_id.
 
         Args:
-            reference_id: Result reference ID (from previous omitted output)
+            reference_id: The result reference ID (task_id or skill reference_id)
+            scope: "task" | "skill" | "auto" (default: "auto", tries task -> skill)
             offset: Start position (character offset), default 0
-            limit: Maximum characters to return, default 2000
+            limit: Maximum number of characters to return, default 2000
+            format: Output format, V1 supports "text" only
+            include_meta: Whether to append a metadata footer
 
         Returns:
-            Content within the specified range
-            
-        Note:
-            This skill receives the context's skillkit_hook via the 'props' parameter
-            which is injected by the skill execution flow. The hook instance contains
-            the same cache backend where the original results are stored.
+            The detailed content within the specified range.
         """
-        # Get hook from props (injected by skill execution flow)
-        # The props contain the context as 'gvp' (global variable pool)
+        if format != "text":
+            return "Error: INVALID_ARGUMENT (format must be 'text' in V1)."
+
+        if offset < 0 or limit <= 0:
+            return "Error: INVALID_ARGUMENT (offset must be >= 0, limit must be > 0)."
+
+        max_limit = 5000
+        clamped = False
+        if limit > max_limit:
+            limit = max_limit
+            clamped = True
+
+        # Get context from props (injected by skill execution flow)
         props = kwargs.get("props", {})
         context = props.get("gvp", None)  # Note: context is passed as 'gvp' in skill_run()
-        
-        hook = None
-        if context and hasattr(context, "skillkit_hook") and context.skillkit_hook:
-            hook = context.skillkit_hook
+        if context is None:
+            return "Error: context not available. This tool must be called within a running session."
+
+        resolved_scope = scope or "auto"
+        content: str | None = None
+        error_text: str | None = None
+
+        def _try_task() -> tuple[str | None, str | None]:
+            if not hasattr(context, "is_plan_enabled") or not context.is_plan_enabled():
+                return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
+            registry = getattr(context, "task_registry", None)
+            if registry is None:
+                return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
+
+            task = registry.get_task(reference_id)
+            if not task:
+                return None, f"Error: task_id '{reference_id}' not found."
+
+            status = getattr(task, "status", None)
+            status_value = getattr(status, "value", str(status)) if status is not None else "unknown"
+            if status_value != "completed":
+                if status_value == "failed":
+                    err = getattr(task, "error", None) or "Unknown error"
+                    return None, f"Error: task '{reference_id}' failed: {err}"
+                return None, f"Error: task '{reference_id}' is not completed (status: {status_value})."
+
+            output = getattr(task, "output", None)
+            return str(output or "(no output)"), None
+
+        def _try_skill() -> tuple[str | None, str | None]:
+            hook = getattr(context, "skillkit_hook", None)
+            if hook is None:
+                return None, "Error: skillkit_hook not available in context."
+
+            raw = hook.get_raw_result(reference_id)
+            if raw is None:
+                return (
+                    None,
+                    f"Error: reference_id '{reference_id}' not found or expired. The result may have been cleaned up or the reference ID is incorrect.",
+                )
+            return str(raw), None
+
+        if resolved_scope == "task":
+            content, error_text = _try_task()
+        elif resolved_scope == "skill":
+            content, error_text = _try_skill()
+        elif resolved_scope == "auto":
+            # Deterministic: if a task with the same id exists, use task scope and do not fall back.
+            registry = getattr(context, "task_registry", None)
+            if getattr(context, "is_plan_enabled", lambda: False)() and registry and registry.get_task(reference_id):
+                resolved_scope = "task"
+                content, error_text = _try_task()
+            else:
+                resolved_scope = "skill"
+                content, error_text = _try_skill()
         else:
-            # Fallback: Try to get from global reference (not recommended path)
-            # This may not find the result if cache is instance-based
-            from dolphin.lib.skill_results.skillkit_hook import SkillkitHook
-            hook = SkillkitHook()
-        
-        raw_result = hook.get_raw_result(reference_id)
+            return "Error: INVALID_ARGUMENT (scope must be 'task', 'skill', or 'auto')."
 
-        if raw_result is None:
-            return f"Error: reference_id '{reference_id}' not found or expired. The result may have been cleaned up or the reference ID is incorrect."
+        if content is None:
+            return error_text or "Error: NOT_FOUND"
 
-        content = str(raw_result)
         total_length = len(content)
 
         # Get specified range
         result = content[offset : offset + limit]
+        returned = len(result)
 
         # Append meta info to help LLM understand position
-        if offset + limit < total_length:
-            remaining = total_length - offset - limit
+        if offset + returned < total_length:
+            remaining = total_length - offset - returned
             result += f"\n... ({remaining} chars remaining, total {total_length})"
+
+        if clamped:
+            result += f"\n... (limit clamped to {max_limit})"
+
+        if include_meta:
+            next_offset = offset + returned
+            next_offset_str = str(next_offset) if next_offset < total_length else "null"
+            result += "\n\n=== Cached Result Meta ==="
+            result += f"\nscope={resolved_scope}"
+            result += f"\nreference_id={reference_id}"
+            result += f"\noffset={offset}"
+            result += f"\nreturned={returned}"
+            result += f"\nnext_offset={next_offset_str}"
+            result += f"\ntotal={total_length}"
 
         return result
 
@@ -483,7 +556,7 @@ class SystemFunctionsSkillKit(Skillkit):
             SkillFunction(self._extract_code),
             SkillFunction(self._grep),
             SkillFunction(self._sleep),
-            SkillFunction(self._get_result_detail),
+            SkillFunction(self._get_cached_result_detail),
         ]
 
         # If no enable function is specified, return all skills (backward compatibility)

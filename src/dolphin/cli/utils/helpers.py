@@ -115,6 +115,10 @@ def setupFlagsFromArgs(args: Args) -> None:
     
     Args:
         args: Parsed CLI arguments
+        
+    Note:
+        Flags status may be printed after config is loaded in initializeEnvironment()
+        when running in debug/verbose logging modes.
     """
     from dolphin.core import flags
     
@@ -129,7 +133,3 @@ def setupFlagsFromArgs(args: Args) -> None:
             boolValue = bool(flagValue)
         
         flags.set_flag(flagName, boolValue)
-        # Cleaner flag output
-        state = "Enabled" if boolValue else "Disabled"
-        console(f"[Flag] {flagName}: {state}")
-

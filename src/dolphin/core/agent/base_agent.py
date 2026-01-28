@@ -423,8 +423,8 @@ class BaseAgent(ABC):
                     }
                     
                     # For ToolInterrupt, include tool data from frame.error (same as step mode)
-                    if run_result.is_tool_interrupted and self._current_frame and self._current_frame.error:
-                        frame_error = self._current_frame.error
+                    frame_error = getattr(self._current_frame, "error", None) if self._current_frame else None
+                    if run_result.is_tool_interrupted and frame_error:
                         if frame_error.get("error_type") == "ToolInterrupt":
                             interrupt_response["data"] = {
                                 "tool_name": frame_error.get("tool_name", ""),

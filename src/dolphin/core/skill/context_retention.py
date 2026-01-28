@@ -54,7 +54,7 @@ class SummaryContextStrategy(ContextRetentionStrategy):
         # Provide reference_id so LLM can fetch full content if needed
         ref_hint = ""
         if reference_id:
-            ref_hint = f"\n[For full content, call _get_result_detail('{reference_id}')]"
+            ref_hint = f"\n[For full content, call _get_cached_result_detail('{reference_id}', scope='skill')]"
         
         omitted = len(result) - head_chars - tail_chars
         # Ensure we don't have negative omission if rounding puts us over
@@ -114,8 +114,8 @@ class ReferenceContextStrategy(ContextRetentionStrategy):
         hint = config.reference_hint or "Full result stored"
         return (f"[{hint}]\n"
                 f"Original length: {len(result)} chars\n"
-                f"Get full content: _get_result_detail('{reference_id}')\n"
-                f"Get range: _get_result_detail('{reference_id}', offset=0, limit=2000)")
+                f"Get full content: _get_cached_result_detail('{reference_id}', scope='skill')\n"
+                f"Get range: _get_cached_result_detail('{reference_id}', scope='skill', offset=0, limit=2000)")
 
 
 # Strategy mapping

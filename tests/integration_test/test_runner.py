@@ -598,7 +598,7 @@ class IntegrationTestRunner:
             for key, value in testCase.parameters.variables.items():
                 # Check if this is a feature flag (starts with enable_ or disable_)
                 if key.startswith("enable_") or key.startswith("disable_"):
-                    # Convert variable name to flag name (remove enable_/disable_ prefix and lowercase)
+                    # Convert variable name to internal flag name (e.g. enable_EXPLORE_BLOCK_V2 -> explore_block_v2)
                     flag_name = key.replace("enable_", "").replace("disable_", "").lower()
                     flag_overrides[flag_name] = value
                 else:
