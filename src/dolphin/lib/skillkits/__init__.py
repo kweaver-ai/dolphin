@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from dolphin.lib.skillkits.memory_skillkit import MemorySkillkit
     from dolphin.lib.skillkits.mcp_skillkit import MCPSkillkit
     from dolphin.lib.skillkits.ontology_skillkit import OntologySkillkit
-    from dolphin.lib.skillkits.plan_act_skillkit import PlanActSkillkit
     from dolphin.lib.skillkits.plan_skillkit import PlanSkillkit
     from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
     from dolphin.lib.skillkits.vm_skillkit import VMSkillkit
@@ -25,7 +24,6 @@ _module_lookup = {
     "MemorySkillkit": "dolphin.lib.skillkits.memory_skillkit",
     "MCPSkillkit": "dolphin.lib.skillkits.mcp_skillkit",
     "OntologySkillkit": "dolphin.lib.skillkits.ontology_skillkit",
-    "PlanActSkillkit": "dolphin.lib.skillkits.plan_act_skillkit",
     "PlanSkillkit": "dolphin.lib.skillkits.plan_skillkit",
     "CognitiveSkillkit": "dolphin.lib.skillkits.cognitive_skillkit",
     "VMSkillkit": "dolphin.lib.skillkits.vm_skillkit",
