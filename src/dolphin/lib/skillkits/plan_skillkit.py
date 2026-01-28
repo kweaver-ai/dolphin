@@ -427,7 +427,7 @@ class PlanSkillkit(Skillkit):
         return f"Task '{task_id}' cancellation requested (status will update shortly)"
 
     async def _retry_task(self, task_id: str, **kwargs) -> str:
-        """Retry a failed or cancelled task.
+        """Retry a failed task.
 
         Args:
             task_id: Task identifier
@@ -444,7 +444,7 @@ class PlanSkillkit(Skillkit):
         if not task:
             raise RuntimeError(f"Task '{task_id}' not found")
 
-        if task.status not in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
+        if task.status != TaskStatus.FAILED:
             raise RuntimeError(f"Task '{task_id}' cannot be retried (status: {task.status.value})")
 
         # Reset status and restart

@@ -389,6 +389,20 @@ class TestPlanSkillkit:
             await skillkit._retry_task("task_1")
     
     @pytest.mark.asyncio
+    async def test_retry_task_cannot_retry_cancelled(self):
+        """Test _retry_task raises RuntimeError with cancelled task."""
+        context = Context()
+        await context.enable_plan()
+        skillkit = PlanSkillkit(context)
+
+        from dolphin.core.task_registry import Task
+        task = Task(id="task_1", name="Task 1", prompt="Prompt 1", status=TaskStatus.CANCELLED)
+        await context.task_registry.add_task(task)
+
+        with pytest.raises(RuntimeError, match="cannot be retried"):
+            await skillkit._retry_task("task_1")
+    
+    @pytest.mark.asyncio
     async def test_retry_task_success(self):
         """Test _retry_task successfully restarts task."""
         context = Context()
