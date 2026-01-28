@@ -160,12 +160,12 @@ class TestExploreBlockShouldContinueExplore(unittest.TestCase):
         for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
             dedup.add(("_check_progress", {}))
 
-        assert block._should_continue_explore() is True
+        assert asyncio.run(block._should_continue_explore()) is True
 
         for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
             dedup.add(("mock_search", {"query": "q"}))
 
-        assert block._should_continue_explore() is False
+        assert asyncio.run(block._should_continue_explore()) is False
 
 
 class TestExploreBlockToolResponseOnce(unittest.TestCase):

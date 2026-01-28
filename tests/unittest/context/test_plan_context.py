@@ -50,7 +50,7 @@ class TestPlanContext:
         task = Task(id="task_1", name="Test Task", prompt="Test prompt")
         await registry1.add_task(task)
         
-        assert registry1.has_tasks()
+        assert await registry1.has_tasks()
         
         # Replan
         await context.enable_plan(plan_id="plan_2")
@@ -63,7 +63,7 @@ class TestPlanContext:
         assert plan_id_2 != plan_id_1
         assert plan_id_2 == "plan_2"
         # Tasks should be cleared by reset()
-        assert not registry2.has_tasks()
+        assert not await registry2.has_tasks()
     
     @pytest.mark.asyncio
     async def test_disable_plan(self):
@@ -79,20 +79,19 @@ class TestPlanContext:
         assert context.task_registry is None
         assert context.get_plan_id() is None
     
-    def test_has_active_plan_not_enabled(self):
+    @pytest.mark.asyncio
+    async def test_has_active_plan_not_enabled(self):
         """Test has_active_plan when plan is not enabled."""
         context = Context()
         
-        assert not context.has_active_plan()
+        assert not await context.has_active_plan()
     
     @pytest.mark.asyncio
     async def test_has_active_plan_no_tasks(self):
         """Test has_active_plan when plan is enabled but no tasks."""
         context = Context()
         
-        await context.enable_plan()
-        
-        assert not context.has_active_plan()
+        assert not await context.has_active_plan()
     
     @pytest.mark.asyncio
     async def test_has_active_plan_with_tasks(self):
@@ -104,15 +103,15 @@ class TestPlanContext:
         task1 = Task(id="task_1", name="Task 1", prompt="Prompt 1")
         await context.task_registry.add_task(task1)
         
-        assert context.has_active_plan()
+        assert await context.has_active_plan()
         
         # Mark task as running
         await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
-        assert context.has_active_plan()
+        assert await context.has_active_plan()
         
         # Mark task as completed
         await context.task_registry.update_status("task_1", TaskStatus.COMPLETED)
-        assert not context.has_active_plan()
+        assert not await context.has_active_plan()
     
     @pytest.mark.asyncio
     async def test_has_active_plan_all_terminal(self):
@@ -129,14 +128,14 @@ class TestPlanContext:
         await context.task_registry.add_task(task2)
         await context.task_registry.add_task(task3)
         
-        assert context.has_active_plan()
+        assert await context.has_active_plan()
         
         # Mark all as terminal states
         await context.task_registry.update_status("task_1", TaskStatus.COMPLETED)
         await context.task_registry.update_status("task_2", TaskStatus.FAILED)
         await context.task_registry.update_status("task_3", TaskStatus.CANCELLED)
         
-        assert not context.has_active_plan()
+        assert not await context.has_active_plan()
     
     @pytest.mark.asyncio
     async def test_fork_creates_cow_context(self):

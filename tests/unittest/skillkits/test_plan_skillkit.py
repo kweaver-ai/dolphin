@@ -43,15 +43,15 @@ class TestPlanSkillkit:
 
     @pytest.mark.asyncio
     async def test_plan_tasks_in_subtask_context_returns_friendly_error(self):
-        """Test _plan_tasks returns a friendly error in COWContext instead of raising."""
+        """Test _plan_tasks raises RuntimeError in COWContext."""
         parent = Context()
         child = COWContext(parent, "task_1")
         skillkit = PlanSkillkit(child)
 
         tasks = [{"id": "task_1", "name": "Task 1", "prompt": "Do task 1"}]
-        result = await skillkit._plan_tasks(tasks)
 
-        assert "Nested planning is not supported" in result
+        with pytest.raises(RuntimeError, match="Nested planning is not supported"):
+            await skillkit._plan_tasks(tasks)
     
     @pytest.mark.asyncio
     async def test_plan_tasks_enables_plan_mode(self):
@@ -73,7 +73,8 @@ class TestPlanSkillkit:
         
         assert context.is_plan_enabled()
         assert context.task_registry is not None
-        assert len(context.task_registry.get_all_tasks()) == 2
+        all_tasks = await context.task_registry.get_all_tasks()
+        assert len(all_tasks) == 2
         assert "Plan initialized with 2 tasks" in result
     
     @pytest.mark.asyncio
@@ -152,14 +153,12 @@ class TestPlanSkillkit:
     
     @pytest.mark.asyncio
     async def test_check_progress_not_enabled(self):
-        """Test _check_progress when plan is not enabled."""
+        """Test _check_progress raises RuntimeError when plan is not enabled."""
         context = Context()
         skillkit = PlanSkillkit(context)
-        
-        result = await skillkit._check_progress()
-        
-        assert "Error" in result
-        assert "plan is not enabled" in result
+
+        with pytest.raises(RuntimeError, match="Plan is not enabled"):
+            await skillkit._check_progress()
     
     @pytest.mark.asyncio
     async def test_check_progress_with_tasks(self):
@@ -229,43 +228,38 @@ class TestPlanSkillkit:
         assert "✅ All tasks completed!" in second
         assert "=== Task Outputs (Auto) ===" not in second
     
-    def test_get_output_not_enabled(self):
-        """Test _get_task_output when plan is not enabled."""
+    @pytest.mark.asyncio
+    async def test_get_output_not_enabled(self):
+        """Test _get_task_output raises RuntimeError when plan is not enabled."""
         context = Context()
         skillkit = PlanSkillkit(context)
-        
-        result = skillkit._get_task_output(task_id="task_1")
-        
-        assert "Error" in result
-        assert "plan is not enabled" in result
+
+        with pytest.raises(RuntimeError, match="Plan is not enabled"):
+            await skillkit._get_task_output(task_id="task_1")
     
     @pytest.mark.asyncio
     async def test_get_output_task_not_found(self):
-        """Test _get_task_output with non-existent task."""
+        """Test _get_task_output raises RuntimeError with non-existent task."""
         context = Context()
         await context.enable_plan()
         skillkit = PlanSkillkit(context)
-        
-        result = skillkit._get_task_output(task_id="nonexistent")
-        
-        assert "Error" in result
-        assert "not found" in result
+
+        with pytest.raises(RuntimeError, match="not found"):
+            await skillkit._get_task_output(task_id="nonexistent")
     
     @pytest.mark.asyncio
     async def test_get_output_task_not_completed(self):
-        """Test _get_task_output with non-completed task."""
+        """Test _get_task_output raises RuntimeError with non-completed task."""
         context = Context()
         await context.enable_plan()
         skillkit = PlanSkillkit(context)
-        
+
         from dolphin.core.task_registry import Task
         task = Task(id="task_1", name="Task 1", prompt="Prompt 1", status=TaskStatus.RUNNING)
         await context.task_registry.add_task(task)
-        
-        result = skillkit._get_task_output(task_id="task_1")
-        
-        assert "Error" in result
-        assert "not completed" in result
+
+        with pytest.raises(RuntimeError, match="not completed"):
+            await skillkit._get_task_output(task_id="task_1")
     
     @pytest.mark.asyncio
     async def test_get_output_success(self):
@@ -273,7 +267,7 @@ class TestPlanSkillkit:
         context = Context()
         await context.enable_plan()
         skillkit = PlanSkillkit(context)
-        
+
         from dolphin.core.task_registry import Task
         task = Task(
             id="task_1",
@@ -283,9 +277,9 @@ class TestPlanSkillkit:
             answer="Task result"
         )
         await context.task_registry.add_task(task)
-        
-        result = skillkit._get_task_output(task_id="task_1")
-        
+
+        result = await skillkit._get_task_output(task_id="task_1")
+
         assert result == "Task result"
     
     @pytest.mark.asyncio
@@ -305,25 +299,22 @@ class TestPlanSkillkit:
     
     @pytest.mark.asyncio
     async def test_kill_task_not_enabled(self):
-        """Test _kill_task when plan is not enabled."""
+        """Test _kill_task raises RuntimeError when plan is not enabled."""
         context = Context()
         skillkit = PlanSkillkit(context)
-        
-        result = await skillkit._kill_task("task_1")
-        
-        assert "Error" in result
-        assert "plan is not enabled" in result
+
+        with pytest.raises(RuntimeError, match="Plan is not enabled"):
+            await skillkit._kill_task("task_1")
     
     @pytest.mark.asyncio
     async def test_kill_task_not_running(self):
-        """Test _kill_task with non-running task."""
+        """Test _kill_task raises RuntimeError with non-running task."""
         context = Context()
         await context.enable_plan()
         skillkit = PlanSkillkit(context)
-        
-        result = await skillkit._kill_task("task_1")
-        
-        assert "is not running" in result
+
+        with pytest.raises(RuntimeError, match="is not running"):
+            await skillkit._kill_task("task_1")
     
     @pytest.mark.asyncio
     async def test_kill_task_success(self):
@@ -352,8 +343,9 @@ class TestPlanSkillkit:
 
         result = await skillkit._kill_task("task_1")
 
-        assert "terminated" in result
-        assert "task_1" not in context.task_registry.running_asyncio_tasks
+        assert "cancellation requested" in result
+        # Task should still be in running_asyncio_tasks (cleanup happens in task's finally block)
+        assert "task_1" in context.task_registry.running_asyncio_tasks
 
         # Wait for cancellation to propagate
         try:
@@ -365,42 +357,36 @@ class TestPlanSkillkit:
     
     @pytest.mark.asyncio
     async def test_retry_task_not_enabled(self):
-        """Test _retry_task when plan is not enabled."""
+        """Test _retry_task raises RuntimeError when plan is not enabled."""
         context = Context()
         skillkit = PlanSkillkit(context)
-        
-        result = await skillkit._retry_task("task_1")
-        
-        assert "Error" in result
-        assert "plan is not enabled" in result
+
+        with pytest.raises(RuntimeError, match="Plan is not enabled"):
+            await skillkit._retry_task("task_1")
     
     @pytest.mark.asyncio
     async def test_retry_task_not_found(self):
-        """Test _retry_task with non-existent task."""
+        """Test _retry_task raises RuntimeError with non-existent task."""
         context = Context()
         await context.enable_plan()
         skillkit = PlanSkillkit(context)
-        
-        result = await skillkit._retry_task("nonexistent")
-        
-        assert "Error" in result
-        assert "not found" in result
+
+        with pytest.raises(RuntimeError, match="not found"):
+            await skillkit._retry_task("nonexistent")
     
     @pytest.mark.asyncio
     async def test_retry_task_cannot_retry(self):
-        """Test _retry_task with non-failed task."""
+        """Test _retry_task raises RuntimeError with non-failed task."""
         context = Context()
         await context.enable_plan()
         skillkit = PlanSkillkit(context)
-        
+
         from dolphin.core.task_registry import Task
         task = Task(id="task_1", name="Task 1", prompt="Prompt 1", status=TaskStatus.COMPLETED)
         await context.task_registry.add_task(task)
-        
-        result = await skillkit._retry_task("task_1")
-        
-        assert "Error" in result
-        assert "cannot be retried" in result
+
+        with pytest.raises(RuntimeError, match="cannot be retried"):
+            await skillkit._retry_task("task_1")
     
     @pytest.mark.asyncio
     async def test_retry_task_success(self):

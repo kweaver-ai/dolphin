@@ -168,20 +168,23 @@ class TaskRegistry:
             self.tasks[task.id] = task
             logger.debug(f"Task registered: {task.id} ({task.name})")
 
-    def get_task(self, task_id: str) -> Optional[Task]:
-        """Retrieve a task by ID."""
-        return self.tasks.get(task_id)
+    async def get_task(self, task_id: str) -> Optional[Task]:
+        """Retrieve a task by ID (thread-safe)."""
+        async with self._lock:
+            return self.tasks.get(task_id)
 
-    def get_all_tasks(self) -> List[Task]:
-        """Return all tasks."""
-        return list(self.tasks.values())
+    async def get_all_tasks(self) -> List[Task]:
+        """Return all tasks (thread-safe)."""
+        async with self._lock:
+            return list(self.tasks.values())
 
-    def get_pending_tasks(self) -> List[Task]:
-        """Return tasks that are pending."""
-        return [t for t in self.tasks.values() if t.status == TaskStatus.PENDING]
+    async def get_pending_tasks(self) -> List[Task]:
+        """Return tasks that are pending (thread-safe)."""
+        async with self._lock:
+            return [t for t in self.tasks.values() if t.status == TaskStatus.PENDING]
 
-    def get_ready_tasks(self) -> List[Task]:
-        """Return tasks that are ready to be started.
+    async def get_ready_tasks(self) -> List[Task]:
+        """Return tasks that are ready to be started (thread-safe).
 
         Phase 1 (no dependency scheduling):
         - All PENDING tasks are considered ready.
@@ -189,23 +192,28 @@ class TaskRegistry:
         Phase 2 (reserved):
         - Check depends_on and only return tasks whose dependencies are completed.
         """
-        return [task for task in self.tasks.values() if task.status == TaskStatus.PENDING]
+        async with self._lock:
+            return [task for task in self.tasks.values() if task.status == TaskStatus.PENDING]
 
-    def get_running_tasks(self) -> List[Task]:
-        """Return tasks that are running."""
-        return [t for t in self.tasks.values() if t.status == TaskStatus.RUNNING]
+    async def get_running_tasks(self) -> List[Task]:
+        """Return tasks that are running (thread-safe)."""
+        async with self._lock:
+            return [t for t in self.tasks.values() if t.status == TaskStatus.RUNNING]
 
-    def get_completed_tasks(self) -> List[Task]:
-        """Return tasks that are completed."""
-        return [t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED]
+    async def get_completed_tasks(self) -> List[Task]:
+        """Return tasks that are completed (thread-safe)."""
+        async with self._lock:
+            return [t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED]
 
-    def get_failed_tasks(self) -> List[Task]:
-        """Return tasks that have failed."""
-        return [t for t in self.tasks.values() if t.status == TaskStatus.FAILED]
+    async def get_failed_tasks(self) -> List[Task]:
+        """Return tasks that have failed (thread-safe)."""
+        async with self._lock:
+            return [t for t in self.tasks.values() if t.status == TaskStatus.FAILED]
 
-    def has_tasks(self) -> bool:
-        """Return whether any tasks are registered."""
-        return bool(self.tasks)
+    async def has_tasks(self) -> bool:
+        """Return whether any tasks are registered (thread-safe)."""
+        async with self._lock:
+            return bool(self.tasks)
 
     async def reset(self):
         """Reset task state (used for replan).
@@ -232,10 +240,11 @@ class TaskRegistry:
             self.running_asyncio_tasks.clear()
             logger.info("TaskRegistry reset (replan)")
 
-    def is_all_done(self) -> bool:
-        """Return whether all tasks have reached a terminal state."""
-        terminal = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.SKIPPED}
-        return all(task.status in terminal for task in self.tasks.values())
+    async def is_all_done(self) -> bool:
+        """Return whether all tasks have reached a terminal state (thread-safe)."""
+        async with self._lock:
+            terminal = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.SKIPPED}
+            return all(task.status in terminal for task in self.tasks.values())
 
     async def update_status(
         self,
@@ -249,11 +258,24 @@ class TaskRegistry:
             task_id: Task identifier
             status: New status
             **kwargs: Additional fields to update (answer, think, block_answer, error, started_at, etc.)
+
+        Note:
+            Terminal states (COMPLETED, FAILED, CANCELLED, SKIPPED) cannot be transitioned.
+            This prevents race conditions during task cancellation or completion.
         """
         async with self._lock:
             task = self.tasks.get(task_id)
             if not task:
                 logger.warning(f"Cannot update status for unknown task: {task_id}")
+                return
+
+            # Validate state transitions: terminal states cannot be changed
+            # Note: FAILED is excluded from terminal states to allow retries
+            terminal_states = {TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.SKIPPED}
+            if task.status in terminal_states:
+                logger.warning(
+                    f"Cannot transition task {task_id} from terminal state {task.status.value} to {status.value}"
+                )
                 return
 
             task.status = status
@@ -270,15 +292,16 @@ class TaskRegistry:
 
             logger.debug(f"Task {task_id} status updated: {status.value}")
 
-    def get_status_counts(self) -> Dict[str, int]:
-        """Return count per status."""
-        counts = {status.value: 0 for status in TaskStatus}
-        for task in self.tasks.values():
-            counts[task.status.value] += 1
-        return counts
+    async def get_status_counts(self) -> Dict[str, int]:
+        """Return count per status (thread-safe)."""
+        async with self._lock:
+            counts = {status.value: 0 for status in TaskStatus}
+            for task in self.tasks.values():
+                counts[task.status.value] += 1
+            return counts
 
-    def get_progress_signature(self) -> tuple:
-        """Compute a signature representing the current task progress state.
+    async def get_progress_signature(self) -> tuple:
+        """Compute a signature representing the current task progress state (thread-safe).
 
         Returns:
             A tuple of (task_id, status) pairs sorted by task_id.
@@ -293,47 +316,63 @@ class TaskRegistry:
             >>> registry.get_progress_signature()
             (('task_1', 'running'), ('task_2', 'pending'))
         """
-        tasks = self.get_all_tasks()
-        return tuple(
-            (t.id, getattr(t.status, "value", str(t.status)))
-            for t in sorted(tasks, key=lambda x: x.id)
-        )
+        async with self._lock:
+            tasks = list(self.tasks.values())
+            return tuple(
+                (t.id, getattr(t.status, "value", str(t.status)))
+                for t in sorted(tasks, key=lambda x: x.id)
+            )
 
-    def get_all_status(self) -> str:
-        """Return a formatted status summary (for _check_progress).
+    async def get_all_status(self) -> str:
+        """Return a formatted status summary (for _check_progress, thread-safe).
 
         Returns:
             A multi-line string with task status, including error details for failed tasks.
         """
-        lines = []
-        now = time.time()
-        for task in self.tasks.values():
-            if task.status == TaskStatus.RUNNING and task.started_at:
-                duration_str = f"{now - task.started_at:.1f}s+"
-            else:
-                duration_str = f"{task.duration:.1f}s" if task.duration else "N/A"
+        async with self._lock:
+            lines = []
+            now = time.time()
+            for task in self.tasks.values():
+                if task.status == TaskStatus.RUNNING and task.started_at:
+                    duration_str = f"{now - task.started_at:.1f}s+"
+                else:
+                    duration_str = f"{task.duration:.1f}s" if task.duration else "N/A"
 
-            icon = {
-                TaskStatus.PENDING: "⏳",
-                TaskStatus.RUNNING: "🔄",
-                TaskStatus.COMPLETED: "✅",
-                TaskStatus.FAILED: "❌",
-                TaskStatus.CANCELLED: "🚫",
-                TaskStatus.SKIPPED: "⏭️",
-            }.get(task.status, "?")
+                icon_map = {
+                    TaskStatus.PENDING: "⏳",
+                    TaskStatus.RUNNING: "🔄",
+                    TaskStatus.COMPLETED: "✅",
+                    TaskStatus.FAILED: "❌",
+                    TaskStatus.CANCELLED: "🚫",
+                    TaskStatus.SKIPPED: "⏭️",
+                }
+                icon = icon_map.get(task.status, "?")
+                status_label = task.status.value
 
-            base_line = f"{icon} {task.id}: {task.name} [{task.status.value}] ({duration_str})"
+                # Item 3 Optimization: Check if task is in the process of being cancelled
+                if task.status == TaskStatus.RUNNING and task.id in self.running_asyncio_tasks:
+                    asyncio_task = self.running_asyncio_tasks[task.id]
+                    # Check if cancelling (Python 3.11+) or if it's already done but status not updated
+                    is_cancelling = False
+                    if hasattr(asyncio_task, "cancelling"):
+                        is_cancelling = asyncio_task.cancelling() > 0
+                    
+                    if is_cancelling:
+                        icon = "⏳🚫"
+                        status_label = "cancelling..."
 
-            # For failed tasks, include error details to enable self-correction
-            if task.status == TaskStatus.FAILED and task.error:
-                error_preview = task.error[:150]  # Limit error length
-                if len(task.error) > 150:
-                    error_preview += "..."
-                base_line += f"\n    Error: {error_preview}"
+                base_line = f"{icon} {task.id}: {task.name} [{status_label}] ({duration_str})"
 
-            lines.append(base_line)
+                # For failed tasks, include error details to enable self-correction
+                if task.status == TaskStatus.FAILED and task.error:
+                    error_preview = task.error[:150]  # Limit error length
+                    if len(task.error) > 150:
+                        error_preview += "..."
+                    base_line += f"\n    Error: {error_preview}"
 
-        return "\n".join(lines)
+                lines.append(base_line)
+
+            return "\n".join(lines)
 
     async def cancel_all_running(self) -> int:
         """Cancel all running asyncio tasks and update their status.

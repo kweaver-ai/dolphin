@@ -9,14 +9,15 @@ from dolphin.core.task_registry import TaskRegistry, Task, TaskStatus, PlanExecM
 class TestTaskRegistry:
     """Test TaskRegistry functionality."""
 
-    def test_registry_initialization(self):
+    @pytest.mark.asyncio
+    async def test_registry_initialization(self):
         """Test TaskRegistry initialization."""
         registry = TaskRegistry()
         
         assert registry.tasks == {}
         assert registry.exec_mode == PlanExecMode.PARALLEL
         assert registry.max_concurrency == 5
-        assert not registry.has_tasks()
+        assert not await registry.has_tasks()
     
     @pytest.mark.asyncio
     async def test_add_task(self):
@@ -26,14 +27,15 @@ class TestTaskRegistry:
         
         await registry.add_task(task)
         
-        assert registry.has_tasks()
-        assert registry.get_task("task_1") is task
+        assert await registry.has_tasks()
+        assert await registry.get_task("task_1") is task
     
-    def test_get_task_not_found(self):
+    @pytest.mark.asyncio
+    async def test_get_task_not_found(self):
         """Test getting non-existent task returns None."""
         registry = TaskRegistry()
         
-        assert registry.get_task("nonexistent") is None
+        assert await registry.get_task("nonexistent") is None
     
     @pytest.mark.asyncio
     async def test_get_all_tasks(self):
@@ -45,7 +47,7 @@ class TestTaskRegistry:
         await registry.add_task(task1)
         await registry.add_task(task2)
         
-        all_tasks = registry.get_all_tasks()
+        all_tasks = await registry.get_all_tasks()
         assert len(all_tasks) == 2
         assert task1 in all_tasks
         assert task2 in all_tasks
@@ -62,7 +64,7 @@ class TestTaskRegistry:
         await registry.add_task(task2)
         await registry.add_task(task3)
         
-        pending = registry.get_pending_tasks()
+        pending = await registry.get_pending_tasks()
         assert len(pending) == 2
         assert task1 in pending
         assert task3 in pending
@@ -79,7 +81,7 @@ class TestTaskRegistry:
         await registry.add_task(task2)
         await registry.add_task(task3)
         
-        ready = registry.get_ready_tasks()
+        ready = await registry.get_ready_tasks()
         
         # Phase 1: all PENDING tasks are ready
         assert len(ready) == 2
@@ -136,12 +138,12 @@ class TestTaskRegistry:
         registry.exec_mode = PlanExecMode.SEQUENTIAL
         registry.max_concurrency = 10
         
-        assert registry.has_tasks()
+        assert await registry.has_tasks()
         
         await registry.reset()
         
         # Tasks cleared
-        assert not registry.has_tasks()
+        assert not await registry.has_tasks()
         # Config preserved
         assert registry.exec_mode == PlanExecMode.SEQUENTIAL
         assert registry.max_concurrency == 10
@@ -158,16 +160,16 @@ class TestTaskRegistry:
         await registry.add_task(task2)
         await registry.add_task(task3)
         
-        assert not registry.is_all_done()
+        assert not await registry.is_all_done()
         
         await registry.update_status("task_1", TaskStatus.COMPLETED)
-        assert not registry.is_all_done()
+        assert not await registry.is_all_done()
         
         await registry.update_status("task_2", TaskStatus.FAILED)
-        assert not registry.is_all_done()
+        assert not await registry.is_all_done()
         
         await registry.update_status("task_3", TaskStatus.CANCELLED)
-        assert registry.is_all_done()
+        assert await registry.is_all_done()
     
     @pytest.mark.asyncio
     async def test_get_status_counts(self):
@@ -183,7 +185,7 @@ class TestTaskRegistry:
         await registry.add_task(task3)
         await registry.add_task(task4)
         
-        counts = registry.get_status_counts()
+        counts = await registry.get_status_counts()
         
         assert counts["pending"] == 1
         assert counts["running"] == 1
@@ -201,7 +203,7 @@ class TestTaskRegistry:
         await registry.add_task(task1)
         await registry.add_task(task2)
         
-        status = registry.get_all_status()
+        status = await registry.get_all_status()
         
         assert "task_1" in status
         assert "Task 1" in status

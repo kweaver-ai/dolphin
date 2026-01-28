@@ -325,7 +325,7 @@ class ExploreBlock(BasicCodeBlock):
                 has_add = self._write_output_var(ret, has_add)
                 yield ret
 
-            if not self._should_continue_explore():
+            if not await self._should_continue_explore():
                 break
 
     def _write_output_var(
@@ -915,7 +915,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             # If plan mode is active, do NOT stop immediately.
             # Instead, keep exploration running so the agent can poll progress
             # (e.g., via _check_progress / _wait) until tasks reach terminal states.
-            if hasattr(self.context, "has_active_plan") and self.context.has_active_plan():
+            if hasattr(self.context, "has_active_plan") and await self.context.has_active_plan():
                 self.should_stop_exploration = False
                 self.context.debug("No tool call, but plan is active; continuing exploration")
                 # Avoid tight looping while waiting for running tasks to make progress.
@@ -1198,111 +1198,172 @@ Please reconsider your approach and improve your answer based on the feedback ab
             f"error in call {tool_name} tool, error type: {type(e)}, error info: {str(e)}, error trace: {error_trace}"
         )
 
-    def _should_continue_explore(self) -> bool:
+    async def _should_continue_explore(self) -> bool:
         """Check whether to continue the next exploration.
 
-        Termination conditions:
+        Termination conditions (Early Return pattern):
         1. Maximum number of tool calls has been reached
-        2. Number of repeated tool calls exceeds limit
-        3. No tool call occurred once
-
-        Hard constraint (Plan Mode):
-        - If plan mode is active with non-terminal tasks, MUST continue exploration.
-        - Plan mode still enforces MAX_SKILL_CALL_TIMES to avoid infinite loops.
+        2. Plan mode has special continuation logic
+        3. Number of repeated tool calls exceeds limit
+        4. No tool call occurred once
         """
-        # 1. If the maximum number of calls has been reached, stop exploring
+        # 1. Early return: max skill calls reached
         if self.times >= MAX_SKILL_CALL_TIMES:
             return False
 
-        # Hard constraint: Plan mode with active tasks must continue UNLESS agent explicitly wants to stop.
-        # Note: This is intentionally checked after MAX_SKILL_CALL_TIMES.
-        if hasattr(self.context, "has_active_plan") and self.context.has_active_plan():
-            # Import plan tools from constants to avoid duplication
-            from dolphin.core.common.constants import PLAN_ORCHESTRATION_TOOLS
+        # 2. Plan mode has special logic - delegate to separate method
+        if hasattr(self.context, "has_active_plan") and await self.context.has_active_plan():
+            return await self._should_continue_explore_in_plan_mode()
 
-            # Check if ANY tool in current round was a plan tool (handles parallel tool calls)
-            used_plan_tool = any(
-                tool_name in PLAN_ORCHESTRATION_TOOLS
-                for tool_name in self._current_round_tools
-            ) if self._current_round_tools else False
+        # 3. Early return: repeated calls exceeding limit
+        if self._has_exceeded_duplicate_limit():
+            return False
 
-            # Check for task progress using TaskRegistry's signature
-            registry = getattr(self.context, "task_registry", None)
-            has_progress = False
-            if registry is not None:
-                signature = registry.get_progress_signature()
-                has_progress = (self._plan_last_signature is None) or (signature != self._plan_last_signature)
-
-            # Exception: If agent explicitly stopped (no tool call in last round), check if we should continue
-            # to avoid infinite loops where agent keeps giving the same non-tool response
-            if self.should_stop_exploration:
-                # Only continue if there is actual task progress or meaningful plan tool usage
-                # If agent stopped without progress, it's likely stuck in a loop - force termination
-                if not has_progress and not used_plan_tool:
-                    # No progress and no plan tool - definitely stuck
-                    logger.warning(
-                        "Plan mode: Agent stopped exploration without task progress or plan tool usage. "
-                        "Terminating to prevent infinite loop."
-                    )
-                    return False
-
-                # Even with plan tool, if there's no progress for multiple rounds, stop
-                if not has_progress and self._plan_silent_rounds >= 2:
-                    logger.warning(
-                        f"Plan mode: Agent stopped with plan tool but no progress for "
-                        f"{self._plan_silent_rounds} rounds. Terminating to prevent infinite loop."
-                    )
-                    return False
-
-            # Plan silent rounds guard:
-            # - Only count rounds when there is no task status progress AND the agent is not using
-            #   plan-related tools (e.g., _wait / _check_progress).
-            if self.plan_silent_max_rounds and self.plan_silent_max_rounds > 0:
-                if registry is not None:
-                    if has_progress or used_plan_tool:
-                        self._plan_silent_rounds = 0
-                    else:
-                        self._plan_silent_rounds += 1
-
-                    self._plan_last_signature = signature
-
-                    if self._plan_silent_rounds >= self.plan_silent_max_rounds:
-                        raise ToolInterrupt(
-                            "Plan mode terminated: no task status progress observed for too many rounds. "
-                            "Use _wait() or _check_progress() instead of repeatedly calling unrelated tools."
-                        )
-
-            # Only continue if there is actual progress or valid tool usage in this round
-            # This prevents infinite loops when LLM repeats the same response without new information
-            if self.should_stop_exploration and not has_progress:
-                logger.warning(
-                    "Plan mode: Stopping exploration - no tool calls and no task progress detected. "
-                    "This prevents infinite loops from repeated LLM responses."
-                )
-                return False
-
-            return True
-
-        # 2. Check for repeated calls exceeding the limit
-        deduplicator = self.strategy.get_deduplicator()
-        if hasattr(deduplicator, 'skillcalls') and deduplicator.skillcalls:
-            # Ignore polling-style tools that are expected to be invoked repeatedly.
-            ignored_tools = getattr(deduplicator, "_always_allow_duplicate_skills", set()) or set()
-            counts = []
-            for call_key, count in deduplicator.skillcalls.items():
-                tool_name = str(call_key).split(":", 1)[0]
-                if tool_name in ignored_tools:
-                    continue
-                counts.append(count)
-
-            if counts and max(counts) >= DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT:
-                return False
-
-        # 3. Stop exploring when there is no tool call.
+        # 4. Early return: no tool call
         if self.should_stop_exploration:
             return False
 
         return True
+
+    async def _should_continue_explore_in_plan_mode(self) -> bool:
+        """Check whether to continue exploration in plan mode.
+
+        Plan mode has special continuation logic:
+        - Must continue if tasks are active (unless max attempts reached)
+        - Tracks progress via TaskRegistry signature
+        - Guards against silent rounds (no progress for too long)
+        - Prevents infinite loops when agent stops without progress
+
+        Returns:
+            True if exploration should continue, False otherwise
+        """
+        from dolphin.core.common.constants import PLAN_ORCHESTRATION_TOOLS
+
+        # Check if current round used any plan orchestration tool
+        used_plan_tool = self._used_plan_tool_this_round()
+
+        # Check for actual task progress and get current signature
+        registry = getattr(self.context, "task_registry", None)
+        has_progress, current_signature = await self._check_plan_progress_with_signature(registry)
+
+        # Early return: agent stopped without progress or plan tool usage
+        if self.should_stop_exploration:
+            if not has_progress and not used_plan_tool:
+                logger.warning(
+                    "Plan mode: Agent stopped without task progress or plan tool usage. "
+                    "Terminating to prevent infinite loop."
+                )
+                return False
+
+            if not has_progress and self._plan_silent_rounds >= 2:
+                logger.warning(
+                    f"Plan mode: Agent stopped with plan tool but no progress for "
+                    f"{self._plan_silent_rounds} rounds. Terminating to prevent infinite loop."
+                )
+                return False
+
+        # Update silent rounds tracking and check limit (also updates signature)
+        self._update_plan_silent_rounds(current_signature, has_progress, used_plan_tool)
+
+        # Early return: no progress and agent wants to stop
+        if self.should_stop_exploration and not has_progress:
+            logger.warning(
+                "Plan mode: Stopping - no tool calls and no task progress. "
+                "Prevents infinite loops from repeated responses."
+            )
+            return False
+
+        return True
+
+    def _used_plan_tool_this_round(self) -> bool:
+        """Check if any plan orchestration tool was used in current round."""
+        from dolphin.core.common.constants import PLAN_ORCHESTRATION_TOOLS
+
+        if not self._current_round_tools:
+            return False
+
+        return any(
+            tool_name in PLAN_ORCHESTRATION_TOOLS
+            for tool_name in self._current_round_tools
+        )
+
+    async def _check_plan_progress_with_signature(self, registry) -> tuple[bool, tuple]:
+        """Check if tasks have made progress since last round.
+
+        Args:
+            registry: TaskRegistry instance
+
+        Returns:
+            Tuple of (has_progress, current_signature)
+        """
+        if registry is None:
+            return False, ()
+
+        signature = await registry.get_progress_signature()
+        has_progress = (
+            self._plan_last_signature is None
+            or signature != self._plan_last_signature
+        )
+        return has_progress, signature
+
+    def _update_plan_silent_rounds(
+        self, current_signature: tuple, has_progress: bool, used_plan_tool: bool
+    ) -> None:
+        """Update silent rounds counter and check threshold.
+
+        Silent rounds are rounds where:
+        - No task status progress AND
+        - No plan orchestration tools used
+
+        Args:
+            current_signature: Current task progress signature
+            has_progress: Whether progress was detected this round
+            used_plan_tool: Whether plan orchestration tool was used
+
+        Raises:
+            ToolInterrupt: If silent rounds exceed threshold
+        """
+        if not self.plan_silent_max_rounds or self.plan_silent_max_rounds <= 0:
+            return
+
+        # Reset or increment silent rounds counter
+        if has_progress or used_plan_tool:
+            self._plan_silent_rounds = 0
+        else:
+            self._plan_silent_rounds += 1
+
+        # Update last signature for next round comparison
+        self._plan_last_signature = current_signature
+
+        if self._plan_silent_rounds >= self.plan_silent_max_rounds:
+            raise ToolInterrupt(
+                "Plan mode terminated: no task status progress for too many rounds. "
+                "Use _wait() or _check_progress() instead of repeatedly calling unrelated tools."
+            )
+
+    def _has_exceeded_duplicate_limit(self) -> bool:
+        """Check if repeated tool calls have exceeded the limit.
+
+        Returns:
+            True if duplicate limit exceeded, False otherwise
+        """
+        deduplicator = self.strategy.get_deduplicator()
+        if not hasattr(deduplicator, 'skillcalls') or not deduplicator.skillcalls:
+            return False
+
+        # Ignore polling-style tools
+        ignored_tools = getattr(
+            deduplicator, "_always_allow_duplicate_skills", set()
+        ) or set()
+
+        counts = []
+        for call_key, count in deduplicator.skillcalls.items():
+            tool_name = str(call_key).split(":", 1)[0]
+            if tool_name in ignored_tools:
+                continue
+            counts.append(count)
+
+        return counts and max(counts) >= DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT
 
     def _process_skill_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
         """Handle skill results using skillkit_hook"""
@@ -1431,7 +1492,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             async for ret in self._explore_once(no_cache=True):
                 yield ret
 
-            if not self._should_continue_explore():
+            if not await self._should_continue_explore():
                 break
 
         # 6. Cleanup

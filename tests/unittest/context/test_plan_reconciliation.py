@@ -34,7 +34,7 @@ class TestPlanReconciliation:
         # At this point, task_1 is RUNNING in registry, but running_asyncio_tasks is empty.
         # Note: tasks are now managed in TaskRegistry.running_asyncio_tasks
         assert "task_1" not in new_context.task_registry.running_asyncio_tasks
-        assert new_context.task_registry.get_task("task_1").status == TaskStatus.RUNNING
+        assert (await new_context.task_registry.get_task("task_1")).status == TaskStatus.RUNNING
 
         # Call _check_progress which should trigger reconciliation
         # Note: we need to mock or ensure _spawn_task doesn't actually try to run an ExploreBlock

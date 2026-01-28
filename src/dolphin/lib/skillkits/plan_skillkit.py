@@ -110,7 +110,7 @@ class PlanSkillkit(Skillkit):
         # Note: context should be injected by ExploreBlock when skillkit is used
         context = self._get_runtime_context()
         if not context:
-            return "Error: PlanSkillkit requires context. Please ensure it's properly initialized."
+            raise RuntimeError("PlanSkillkit requires context. Please ensure it's properly initialized.")
 
         # Disallow nested planning inside subtask contexts.
         # Subtasks should not orchestrate further plans; they should focus on executing their own prompts.
@@ -118,7 +118,10 @@ class PlanSkillkit(Skillkit):
             from dolphin.core.context.cow_context import COWContext
 
             if isinstance(context, COWContext):
-                return "Error: Nested planning is not supported"
+                raise RuntimeError("Nested planning is not supported")
+        except RuntimeError:
+            # Re-raise our own RuntimeError
+            raise
         except Exception:
             # Fail-open: if the runtime type check fails for any reason, proceed with normal behavior.
             pass
@@ -181,13 +184,14 @@ class PlanSkillkit(Skillkit):
         registry.max_concurrency = self.max_concurrency
 
         # Emit plan_created event
+        all_tasks = await registry.get_all_tasks()
         self._context.write_output("plan_created", {
             "plan_id": self._context.get_plan_id(),
             "exec_mode": current_exec_mode.value,
             "max_concurrency": self.max_concurrency,
             "tasks": [
                 {"id": t.id, "name": t.name, "status": t.status.value}
-                for t in registry.get_all_tasks()
+                for t in all_tasks
             ],
         })
 
@@ -196,12 +200,12 @@ class PlanSkillkit(Skillkit):
         
         # Start tasks
         if current_exec_mode == PlanExecMode.PARALLEL:
-            ready_tasks = self._select_ready_tasks(limit=self.max_concurrency)
+            ready_tasks = await self._select_ready_tasks(limit=self.max_concurrency)
             for task_id in ready_tasks:
                 await self._spawn_task(task_id)
             return f"Plan initialized with {len(tasks)} tasks (parallel mode, max_concurrency={self.max_concurrency}):\n\n{task_summary}"
         else:
-            ready = self._select_ready_tasks(limit=1)
+            ready = await self._select_ready_tasks(limit=1)
             if ready:
                 await self._spawn_task(ready[0])
             return f"Plan initialized with {len(tasks)} tasks (sequential mode):\n\n{task_summary}"
@@ -213,13 +217,13 @@ class PlanSkillkit(Skillkit):
             A formatted status summary with next-step guidance.
         """
         if not self._context.is_plan_enabled():
-            return "Error: plan is not enabled. Please call _plan_tasks first."
+            raise RuntimeError("Plan is not enabled. Please call _plan_tasks first.")
 
         # Reuse ExploreBlock interrupt mechanism
         self._context.check_user_interrupt()
 
         registry = self._context.task_registry
-        status_text = registry.get_all_status()
+        status_text = await registry.get_all_status()
 
         # Check for busy-waiting (same status polled too frequently)
         now = time.time()
@@ -228,7 +232,7 @@ class PlanSkillkit(Skillkit):
 
         # Item 5: Polling Throttling (Debounce / Guidance)
         throttle_warning = ""
-        if is_same_status and not registry.is_all_done():
+        if is_same_status and not await registry.is_all_done():
             if interval < 2.0:
                 # Hard limit: return early to prevent busy-waiting
                 self._last_poll_time = now
@@ -249,26 +253,27 @@ class PlanSkillkit(Skillkit):
         self._last_poll_time = now
 
         # Summary stats
-        counts = registry.get_status_counts()
+        counts = await registry.get_status_counts()
         stats = f"{counts['completed']} completed, {counts['running']} running, {counts['failed']} failed"
 
         # Reconciliation: if tasks are marked RUNNING but no asyncio task exists,
         # they were probably lost during a snapshot/restore or process restart.
         # We auto-restart them to prevent the plan from stalling.
-        # Use lock to prevent race conditions with task cleanup in _spawn_task's finally block
         reconciled = []
-        async with registry._lock:
-            running_tasks = registry.get_running_tasks()
-            for t in running_tasks:
-                if t.id not in registry.running_asyncio_tasks:
-                    logger.warning(
-                        f"[PlanSkillkit] Reconciliation: Task {t.id} is RUNNING in registry but has no asyncio task. "
-                        "Restarting task."
-                    )
-                    # Note: _spawn_task creates the task entry in running_asyncio_tasks
-                    # We call it within the lock to prevent double-spawning
-                    await self._spawn_task(t.id)
-                    reconciled.append(t.id)
+        running_tasks = await registry.get_running_tasks()
+        for t in running_tasks:
+            # Check without lock first (fast path)
+            if t.id not in registry.running_asyncio_tasks:
+                # Double-check with lock to prevent race
+                async with registry._lock:
+                    if t.id not in registry.running_asyncio_tasks:
+                        logger.warning(
+                            f"[PlanSkillkit] Reconciliation: Task {t.id} is RUNNING in registry but has no asyncio task. "
+                            "Restarting task."
+                        )
+                        # Note: _spawn_task creates the task entry in running_asyncio_tasks
+                        await self._spawn_task(t.id)
+                        reconciled.append(t.id)
 
         result = f"Task Status:\n{status_text}\n\nSummary: {stats}{throttle_warning}"
         if reconciled:
@@ -282,7 +287,7 @@ class PlanSkillkit(Skillkit):
             pending_count = counts.get("pending", 0)
             if running_count == 0 and pending_count > 0:
                 # Find the next ready task and start it
-                ready_tasks = self._select_ready_tasks(limit=1)
+                ready_tasks = await self._select_ready_tasks(limit=1)
                 if ready_tasks:
                     logger.warning(
                         f"Sequential mode: No running tasks but {pending_count} pending. "
@@ -296,7 +301,7 @@ class PlanSkillkit(Skillkit):
 
         # Add guidance when plan reaches a terminal state.
         # Also auto-inject task outputs once per plan_id to help the LLM synthesize a final answer
-        if registry.is_all_done() and counts["completed"] > 0:
+        if await registry.is_all_done() and counts["completed"] > 0:
             result += "\n\n✅ All tasks completed! Next steps:\n"
             result += "Synthesize the results into a comprehensive response for the user"
 
@@ -308,7 +313,7 @@ class PlanSkillkit(Skillkit):
                     injected = injected.strip().lower() == "true"
 
                 if not injected:
-                    outputs = self._get_task_output(task_id="all")
+                    outputs = await self._get_task_output(task_id="all")
                     max_len = int(self._context.get_max_answer_len() or 0) or 10000
                     if len(outputs) > max_len:
                         outputs = outputs[:max_len] + f"(... too long, truncated to {max_len})"
@@ -317,29 +322,29 @@ class PlanSkillkit(Skillkit):
                     result += outputs
                     result += "\n\nPlease synthesize all task outputs into the final answer."
                     self._context.set_variable(injected_var, True)
-        elif not registry.is_all_done():
+        elif not await registry.is_all_done():
             # Suggest using _wait tool if tasks are still running
             result += "\n\n💡 Tip: Some tasks are still running. If you have no other tasks to perform, use the `_wait(seconds=10)` tool to wait for progress instead of polling `_check_progress` repeatedly."
 
         return result
 
-    def _get_task_output(self, task_id: str = "all", **kwargs) -> str:
+    async def _get_task_output(self, task_id: str = "all", **kwargs) -> str:
         """Get the execution results of completed subtasks.
 
         Args:
-            task_id: The ID of the task to retrieve. Defaults to "all", which returns 
+            task_id: The ID of the task to retrieve. Defaults to "all", which returns
                     a summary of status and outputs for all tasks.
 
         Returns:
             The output of the task or a compiled summary.
         """
         if not self._context.is_plan_enabled():
-            return "Error: plan is not enabled"
+            raise RuntimeError("Plan is not enabled")
 
         registry = self._context.task_registry
-        
+
         if task_id == "all":
-            all_tasks = registry.get_all_tasks()
+            all_tasks = await registry.get_all_tasks()
             if not all_tasks:
                 return "No tasks found"
 
@@ -361,12 +366,12 @@ class PlanSkillkit(Skillkit):
             return "\n".join(outputs)
         
         else:
-            task = registry.get_task(task_id)
+            task = await registry.get_task(task_id)
             if not task:
-                return f"Error: task '{task_id}' not found"
+                raise RuntimeError(f"Task '{task_id}' not found")
 
             if task.status != TaskStatus.COMPLETED:
-                return f"Error: task '{task_id}' is not completed (status: {task.status.value})"
+                raise RuntimeError(f"Task '{task_id}' is not completed (status: {task.status.value})")
 
             logger.debug(f"[_get_task_output] task_id={task_id}, answer type={type(task.answer)}, length={len(task.answer or '')}")
             return task.answer or "(no output)"
@@ -390,6 +395,10 @@ class PlanSkillkit(Skillkit):
     async def _kill_task(self, task_id: str, **kwargs) -> str:
         """Terminate a running task.
 
+        This method only sends the cancellation signal to the asyncio task.
+        The task's exception handler (in _spawn_task's run_task) is responsible
+        for updating the registry status to prevent race conditions.
+
         Args:
             task_id: Task identifier
 
@@ -397,32 +406,25 @@ class PlanSkillkit(Skillkit):
             Confirmation or error message
         """
         if not self._context.is_plan_enabled():
-            return "Error: plan is not enabled"
+            raise RuntimeError("Plan is not enabled")
 
         registry = self._context.task_registry
 
-        # Use lock to prevent race conditions with task completion in _spawn_task's finally block
+        # Use lock to safely check and cancel the task
         async with registry._lock:
             if task_id in registry.running_asyncio_tasks:
                 asyncio_task = registry.running_asyncio_tasks[task_id]
+                # Only send cancel signal; status update will be handled by the task's exception handler
                 asyncio_task.cancel()
-                registry.running_asyncio_tasks.pop(task_id, None)
-
-                # Update status outside the task handle cleanup to allow update_status to acquire lock
-                # Note: This is safe because we've already removed the task from running_asyncio_tasks
             else:
-                return f"Task '{task_id}' is not running"
+                raise RuntimeError(f"Task '{task_id}' is not running")
 
-        # Update status outside the lock to avoid deadlock (update_status also acquires the lock)
-        await registry.update_status(task_id, TaskStatus.CANCELLED)
-
-        self._context.write_output("plan_task_update", {
-            "plan_id": self._context.get_plan_id(),
-            "task_id": task_id,
-            "status": "cancelled",
-        })
-
-        return f"Task '{task_id}' terminated"
+        # Note: Status update and cleanup are handled by the task's CancelledError handler
+        # in _spawn_task's run_task() to avoid race conditions.
+        # Yield control to allow the cancellation to propagate to the task.
+        await asyncio.sleep(0)
+        
+        return f"Task '{task_id}' cancellation requested (status will update shortly)"
 
     async def _retry_task(self, task_id: str, **kwargs) -> str:
         """Retry a failed or cancelled task.
@@ -434,16 +436,16 @@ class PlanSkillkit(Skillkit):
             Confirmation or error message
         """
         if not self._context.is_plan_enabled():
-            return "Error: plan is not enabled"
+            raise RuntimeError("Plan is not enabled")
 
         registry = self._context.task_registry
-        task = registry.get_task(task_id)
+        task = await registry.get_task(task_id)
 
         if not task:
-            return f"Error: task '{task_id}' not found"
+            raise RuntimeError(f"Task '{task_id}' not found")
 
         if task.status not in [TaskStatus.FAILED, TaskStatus.CANCELLED]:
-            return f"Error: task '{task_id}' cannot be retried (status: {task.status.value})"
+            raise RuntimeError(f"Task '{task_id}' cannot be retried (status: {task.status.value})")
 
         # Reset status and restart
         await registry.update_status(task_id, TaskStatus.PENDING, error=None)
@@ -499,7 +501,7 @@ class PlanSkillkit(Skillkit):
         from dolphin.core.code_block.explore_block import ExploreBlock
 
         registry = self._context.task_registry
-        task = registry.get_task(task_id)
+        task = await registry.get_task(task_id)
 
         # Capture plan_id at spawn time to prevent cleanup race conditions
         spawn_plan_id = self._context.get_plan_id()
@@ -582,12 +584,12 @@ class PlanSkillkit(Skillkit):
                 # we rely on the orchestrator calling _check_progress(), which has a
                 # recovery mechanism to kickstart the next task if the chain is stalled.
                 if registry.exec_mode == PlanExecMode.SEQUENTIAL:
-                    ready = self._select_ready_tasks(limit=1)
+                    ready = await self._select_ready_tasks(limit=1)
                     if ready:
                         await self._spawn_task(ready[0])
 
             except asyncio.CancelledError:
-                task_obj = registry.get_task(task_id)
+                task_obj = await registry.get_task(task_id)
                 started_at = task_obj.started_at if task_obj else None
                 duration = (time.time() - started_at) if started_at else None
                 await registry.update_status(task_id, TaskStatus.CANCELLED, duration=duration)
@@ -666,7 +668,7 @@ class PlanSkillkit(Skillkit):
             # No tools specified - inherit from COWContext (already filtered)
             return f"/explore/() {prompt} -> result"
 
-    def _select_ready_tasks(self, limit: int) -> List[str]:
+    async def _select_ready_tasks(self, limit: int) -> List[str]:
         """Select runnable tasks based on dependency readiness.
 
         Args:
@@ -676,7 +678,8 @@ class PlanSkillkit(Skillkit):
             List of task IDs
         """
         registry = self._context.task_registry
-        return [t.id for t in registry.get_ready_tasks()][:limit]
+        ready_tasks = await registry.get_ready_tasks()
+        return [t.id for t in ready_tasks][:limit]
 
     def _validate_tasks(self, tasks: List[Dict[str, Any]]) -> List[str]:
         """Validate task list.

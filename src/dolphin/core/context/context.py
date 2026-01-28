@@ -1694,7 +1694,7 @@ class Context:
         """
         return self._plan_enabled
 
-    def has_active_plan(self) -> bool:
+    async def has_active_plan(self) -> bool:
         """Check if there is an active plan with non-terminal tasks.
 
         Returns:
@@ -1702,9 +1702,9 @@ class Context:
         """
         if not self._plan_enabled:
             return False
-        if not self.task_registry or not self.task_registry.has_tasks():
+        if not self.task_registry or not await self.task_registry.has_tasks():
             return False
-        return not self.task_registry.is_all_done()
+        return not await self.task_registry.is_all_done()
 
     def get_plan_id(self) -> Optional[str]:
         """Get the current plan ID.

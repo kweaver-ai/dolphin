@@ -146,4 +146,4 @@ class TestCOWContext:
         assert child.get_plan_id() == "test_plan"
         # Subtask contexts must not be plan-enabled
         assert child.is_plan_enabled() is False
-        assert child.has_active_plan() is False
+        assert await child.has_active_plan() is False

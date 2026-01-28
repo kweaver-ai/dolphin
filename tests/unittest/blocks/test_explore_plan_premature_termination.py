@@ -80,13 +80,13 @@ class TestExplorePlanPrematureTermination:
         explore = ExploreBlock(context=context_with_plan)
 
         # Verify plan is active (has non-terminal tasks)
-        assert context_with_plan.has_active_plan() is True, (
+        assert await context_with_plan.has_active_plan() is True, (
             "Plan should be active with 1 running task"
         )
 
         # Verify explore should continue despite should_stop_exploration flag
         explore.should_stop_exploration = True
-        assert explore._should_continue_explore() is True, (
+        assert await explore._should_continue_explore() is True, (
             "ExploreBlock should continue when plan has active tasks"
         )
 
@@ -94,12 +94,12 @@ class TestExplorePlanPrematureTermination:
         await context_with_plan.task_registry.update_status("task_1", TaskStatus.COMPLETED)
 
         # Verify plan is no longer active
-        assert context_with_plan.has_active_plan() is False, (
+        assert await context_with_plan.has_active_plan() is False, (
             "Plan should not be active when all tasks are completed"
         )
 
         # Verify explore can now terminate
-        assert explore._should_continue_explore() is False, (
+        assert await explore._should_continue_explore() is False, (
             "ExploreBlock should terminate when plan has no active tasks"
         )
 
@@ -120,8 +120,8 @@ class TestExplorePlanPrematureTermination:
         explore.should_stop_exploration = True
 
         # CRITICAL: _should_continue_explore should return True due to active plan
-        assert context_with_plan.has_active_plan() is True, "Plan should be active"
-        assert explore._should_continue_explore() is True, (
+        assert await context_with_plan.has_active_plan() is True, "Plan should be active"
+        assert await explore._should_continue_explore() is True, (
             "ExploreBlock should continue when plan has running tasks, "
             "even if should_stop_exploration is True"
         )
@@ -169,7 +169,7 @@ class TestExplorePlanPrematureTermination:
 
             # And _should_continue_explore should still return True
             # because plan is active
-            assert explore._should_continue_explore() is True, (
+            assert await explore._should_continue_explore() is True, (
                 "Plan constraint should keep exploration running"
             )
 
@@ -205,10 +205,10 @@ class TestExplorePlanPrematureTermination:
                 pass
 
             # Now plan is not active (all tasks done)
-            assert context_with_plan.has_active_plan() is False
+            assert await context_with_plan.has_active_plan() is False
 
             # So _should_continue_explore should return False
-            assert explore._should_continue_explore() is False, (
+            assert await explore._should_continue_explore() is False, (
                 "Explore should terminate when all tasks are done"
             )
 

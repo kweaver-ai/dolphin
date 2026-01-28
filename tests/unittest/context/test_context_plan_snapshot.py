@@ -38,15 +38,14 @@ class TestContextPlanSnapshot:
         # 2. Plan ID should match
         assert new_context.get_plan_id() == plan_id, f"Plan ID mismatch: expected {plan_id}, got {new_context.get_plan_id()}"
         # 3. Task registry should exist and have tasks
-        assert new_context.task_registry is not None, "TaskRegistry should be restored"
-        assert new_context.task_registry.has_tasks(), "Restored TaskRegistry should have tasks"
+        assert await new_context.task_registry.has_tasks(), "Restored TaskRegistry should have tasks"
         
         # 4. Verify specific tasks
-        restored_task1 = new_context.task_registry.get_task("task_1")
+        restored_task1 = await new_context.task_registry.get_task("task_1")
         assert restored_task1 is not None
         assert restored_task1.status == TaskStatus.COMPLETED
         assert restored_task1.answer == "Answer 1"
         
-        restored_task2 = new_context.task_registry.get_task("task_2")
+        restored_task2 = await new_context.task_registry.get_task("task_2")
         assert restored_task2 is not None
         assert restored_task2.status == TaskStatus.RUNNING

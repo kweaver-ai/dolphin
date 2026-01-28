@@ -174,20 +174,21 @@ class COWContext(Context):
         sentinel = object()
         local_value = self.variable_pool.get_var_value(key, sentinel)
         if local_value is not sentinel:
-            return self._safe_copy_if_mutable(local_value)
+            return self._safe_copy_if_mutable(local_value, key)
         # Check writes dict (explicit set_variable() calls)
         if key in self.writes:
-            return self._safe_copy_if_mutable(self.writes[key])
+            return self._safe_copy_if_mutable(self.writes[key], key)
         # Fall back to parent context (keeps compatibility logic such as flags).
         parent_value = self.parent.get_var_value(key, default_value)
-        return self._safe_copy_if_mutable(parent_value)
+        return self._safe_copy_if_mutable(parent_value, key)
 
     @staticmethod
-    def _safe_copy_if_mutable(value: Any) -> Any:
+    def _safe_copy_if_mutable(value: Any, key: str) -> Any:
         """Deep copy mutable container types to prevent accidental mutation.
 
         Args:
             value: Variable value
+            key: Variable key (for error reporting)
 
         Returns:
             Deep copy if value is a mutable container (list/dict/set or custom object),
@@ -202,8 +203,8 @@ class COWContext(Context):
         """
         if value is None:
             return None
-        
-        # Immutable types: return as-is
+
+        # Fast path for immutable primitives: return as-is
         if isinstance(value, (str, int, float, bool, bytes)):
             return value
 
@@ -211,14 +212,16 @@ class COWContext(Context):
         try:
             return copy.deepcopy(value)
         except Exception as e:
-            # Item 3: Fail-open fallback for non-deepcopyable objects.
-            # If an object cannot be deep-copied, we return the original. 
-            # This risks leaking mutations to the parent, but prevents a hard crash.
-            logger.debug(
-                f"Object of type {type(value).__name__} is not deep-copyable, "
-                f"falling back to original reference. Isolation not guaranteed. Error: {e}"
+            # Item 3: Fail-fast for non-deepcopyable objects to ensure isolation.
+            logger.warning(
+                f"Isolation failure for variable '{key}': Object of type {type(value).__name__} is not deepcopyable. "
+                "Explicitly raising TypeError to prevent silent parent context corruption."
             )
-            return value
+            raise TypeError(
+                f"Cannot safely isolate variable '{key}': "
+                f"Object of type {type(value).__name__} is not deepcopyable. "
+                "Ensure task variables are serializable (e.g., data classes, dicts, primitives)."
+            ) from e
 
     def get_var_value(self, key: str, default_value: Any = None) -> Any:
         """Get variable value (alias for get_variable for Context compatibility).
