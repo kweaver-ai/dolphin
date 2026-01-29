@@ -111,14 +111,16 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
     def __init__(self):
         self.skillcalls: Dict[str, int] = {}
         self.call_results: Dict[str, str] = {}
-        # Cache call_key to avoid duplicate serialization
-        self._call_key_cache: Dict[int, str] = {}
+        # Import polling tools from constants to avoid hardcoding.
+        # These tools are expected to be called repeatedly (polling-style).
+        # Do NOT count these towards duplicate-call termination.
+        from dolphin.core.common.constants import POLLING_TOOLS
+        self._always_allow_duplicate_skills = POLLING_TOOLS
 
     def clear(self):
         """Clear all records"""
         self.skillcalls.clear()
         self.call_results.clear()
-        self._call_key_cache.clear()
 
     def get_history(self) -> list:
         """Get the history of all recorded skill calls.
@@ -153,11 +155,6 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
 
                 Uses the normalized JSON string of the skill name and arguments as the unique identifier.
         """
-        # Use object id as cache key
-        cache_key = id(skill_call)
-        if cache_key in self._call_key_cache:
-            return self._call_key_cache[cache_key]
-
         skill_name, arguments = self._extract_skill_info(skill_call)
 
         # Normalized parameters: sorting keys, ensuring consistency
@@ -175,7 +172,6 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
             normalized_args = str(arguments).strip()
 
         call_key = f"{skill_name}:{normalized_args}"
-        self._call_key_cache[cache_key] = call_key
         return call_key
 
     def _extract_skill_info(self, skill_call: Any) -> Tuple[str, Any]:
@@ -200,7 +196,29 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
             skill_name = str(skill_call)
             arguments = {}
 
-        return skill_name, arguments
+        return skill_name, self._normalize_arguments(arguments)
+
+    @staticmethod
+    def _normalize_arguments(arguments: Any) -> Any:
+        """Normalize arguments to improve deduplication stability.
+
+        Some callers may pass JSON strings (e.g., "{}") instead of dicts.
+        This method converts JSON strings into Python objects when possible.
+        """
+        if arguments is None:
+            return {}
+        if isinstance(arguments, str):
+            raw = arguments.strip()
+            if raw == "":
+                return {}
+            # Fast-path common empty payloads.
+            if raw in ("{}", "[]", "null"):
+                return {} if raw != "[]" else []
+            try:
+                return json.loads(raw)
+            except Exception:
+                return raw
+        return arguments
 
     def add(self, skill_call: Any, result: Optional[str] = None):
         """Add skill call record
@@ -247,6 +265,10 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
             bool: Whether retrying is allowed
         """
         skill_name, arguments = self._extract_skill_info(skill_call)
+
+        # Polling tools are expected to be invoked repeatedly.
+        if skill_name in self._always_allow_duplicate_skills:
+            return True
 
         # Calls without arguments are not specially handled
         if not arguments:

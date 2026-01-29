@@ -144,7 +144,31 @@ SEARCH_TIMEOUT = 10  # seconds for search API calls
 
 SEARCH_RETRY_COUNT = 2  # number of retries for failed search API calls
 
-MAX_SKILL_CALL_TIMES = 100
+MAX_SKILL_CALL_TIMES = 500
+
+# Plan orchestration tools (used for task management in plan mode)
+# These tools should be excluded from subtask contexts to prevent infinite recursion.
+PLAN_ORCHESTRATION_TOOLS = frozenset({
+    "_plan_tasks",      # Create and register subtasks
+    "_check_progress",  # Check task execution status
+    "_get_task_output", # Retrieve task results
+    "_wait",            # Wait for a specified duration
+    "_kill_task",       # Cancel a running task
+    "_retry_task",      # Retry a failed task
+})
+
+# Polling tools that are expected to be called repeatedly (excluded from deduplication)
+# These tools are used to check status/wait for async operations and should not trigger
+# duplicate-call termination in ExploreBlock.
+POLLING_TOOLS = frozenset({
+    "_check_progress",  # Plan mode: check task execution status
+    "_wait",            # Plan mode: wait for a specified duration
+})
+
+# Plan mode: maximum consecutive rounds without task status progress.
+# This only applies when an active plan exists and the agent is not using plan-related tools
+# (e.g., _wait / _check_progress). Set to 0 to disable.
+MAX_PLAN_SILENT_ROUNDS = 50
 
 # Compression constants
 MAX_ANSWER_COMPRESSION_LENGTH = 100

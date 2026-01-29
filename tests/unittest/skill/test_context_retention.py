@@ -87,7 +87,7 @@ class TestSummaryContextStrategy:
         result = "A" * 200
         processed = self.strategy.process(result, self.config, reference_id="ref_123")
         assert "ref_123" in processed
-        assert "_get_result_detail" in processed
+        assert "_get_cached_result_detail" in processed
 
     def test_head_tail_preserved(self):
         """Head and tail of content should be preserved."""
@@ -152,7 +152,7 @@ class TestReferenceContextStrategy:
         assert "Custom hint" in processed
         assert "5000" in processed  # Original length
         assert "ref_xyz" in processed
-        assert "_get_result_detail" in processed
+        assert "_get_cached_result_detail" in processed
 
     def test_fallback_to_summary_without_reference(self):
         """Should fallback to summary strategy when no reference_id."""

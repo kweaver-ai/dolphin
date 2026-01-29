@@ -57,3 +57,4 @@ CLAUDE-riper5.md
 # Dev-browser skill
 examples/dev-browser/skills/dev-browser/profiles/
 examples/dev-browser/skills/dev-browser/tmp/
+*.bak

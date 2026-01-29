@@ -1017,6 +1017,17 @@ class GlobalConfig:
 
     @staticmethod
     def from_dict(config_dict: dict, base_dir: str = None) -> "GlobalConfig":
+        # Load and apply flags configuration if present
+        if "flags" in config_dict:
+            from dolphin.core import flags
+            flags_config = config_dict.get("flags", {})
+            for flag_name, flag_value in flags_config.items():
+                try:
+                    flags.set_flag(flag_name, bool(flag_value))
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to set flag '{flag_name}': {e}")
+        
         is_new_config_format = "llms" in config_dict and "default" in config_dict
         if is_new_config_format:
             default_llm = config_dict.get("default")
@@ -1228,6 +1239,30 @@ class GlobalConfig:
         result = {
             "default": self.default_llm,
         }
+        
+        # Add flags configuration
+        from dolphin.core import flags
+        from dolphin.core.flags.definitions import DEFAULT_VALUES
+        import logging
+
+        flags_dict = flags.get_all()
+        non_default_flags = {}
+
+        for name, value in flags_dict.items():
+            if name in DEFAULT_VALUES:
+                # Only include flags that differ from their known defaults
+                if value != DEFAULT_VALUES[name]:
+                    non_default_flags[name] = value
+            else:
+                # Unknown flag (possibly user-defined) - include unconditionally with warning
+                logging.warning(
+                    f"Flag '{name}' is not in DEFAULT_VALUES, serializing unconditionally. "
+                    f"Consider adding it to dolphin.core.flags.definitions."
+                )
+                non_default_flags[name] = value
+
+        if non_default_flags:
+            result["flags"] = non_default_flags
 
         # Add fast_llm (if different from default_llm)
         if self.fast_llm and self.fast_llm != self.default_llm:

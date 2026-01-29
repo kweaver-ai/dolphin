@@ -512,7 +512,7 @@ class TestFeatureFlagIntegration:
     def test_flag_exists(self):
         """Test that the feature flag is defined"""
         assert hasattr(flags, "ENABLE_PARALLEL_TOOL_CALLS")
-        assert flags.ENABLE_PARALLEL_TOOL_CALLS == "enable_parallel_tool_calls"
+        assert flags.ENABLE_PARALLEL_TOOL_CALLS == "parallel_tool_calls"
 
     @patch("dolphin.core.flags.is_enabled")
     def test_has_tool_call_respects_flag(self, mock_is_enabled):

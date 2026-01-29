@@ -82,26 +82,13 @@ search = "dolphin.lib.skillkits.search_skillkit:SearchSkillkit"
 sql = "dolphin.lib.skillkits.sql_skillkit:SQLSkillkit"
 memory = "dolphin.lib.skillkits.memory_skillkit:MemorySkillkit"
 ontology = "dolphin.lib.skillkits.ontology_skillkit:OntologySkillkit"
-plan_act = "dolphin.lib.skillkits.plan_act_skillkit:PlanActSkillkit"
+plan = "dolphin.lib.skillkits.plan_skillkit:PlanSkillkit"
 cognitive = "dolphin.lib.skillkits.cognitive_skillkit:CognitiveSkillkit"
 vm = "dolphin.lib.skillkits.vm_skillkit:VMSkillkit"
 noop = "dolphin.lib.skillkits.noop_skillkit:NoopSkillkit"
 mcp = "dolphin.lib.skillkits.mcp_skillkit:MCPSkillkit"
 resource = "dolphin.lib.skillkits.resource_skillkit:ResourceSkillkit"
-env_skillkit = "dolphin.lib.skillkits.env_skillkit:EnvSkillkit"
-
-# Legacy entry points (for backward compatibility)
-[project.entry-points."DolphinLanguageSDK.skillkits"]
-search = "DolphinLanguageSDK.skill.installed.search_skillkit:SearchSkillkit"
-sql = "DolphinLanguageSDK.skill.installed.sql_skillkit:SQLSkillkit"
-memory = "DolphinLanguageSDK.skill.installed.memory_skillkit:MemorySkillkit"
-ontology = "DolphinLanguageSDK.skill.installed.ontology_skillkit:OntologySkillkit"
-plan_act = "DolphinLanguageSDK.skill.installed.plan_act_skillkit:PlanActSkillkit"
-cognitive = "DolphinLanguageSDK.skill.installed.cognitive_skillkit:CognitiveSkillkit"
-vm = "DolphinLanguageSDK.skill.installed.vm_skillkit:VMSkillkit"
-noop = "DolphinLanguageSDK.skill.installed.noop_skillkit:NoopSkillkit"
-mcp = "DolphinLanguageSDK.skill.installed.mcp_skillkit:MCPSkillkit"
-resource_skillkit = "DolphinLanguageSDK.skill.installed.resource_skillkit:ResourceSkillkit"
+env = "dolphin.lib.skillkits.env_skillkit:EnvSkillkit"
 
 [tool.setuptools.packages.find]
 where = ["src"]

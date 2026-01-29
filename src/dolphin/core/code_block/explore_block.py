@@ -13,6 +13,8 @@ Design document: docs/design/architecture/explore_block_merge.md
 
 from __future__ import annotations
 
+from dolphin.core.task_registry import PlanExecMode
+
 import asyncio
 import json
 import traceback
@@ -42,6 +44,7 @@ from dolphin.core.common.enums import (
 )
 from dolphin.core.common.constants import (
     MAX_SKILL_CALL_TIMES,
+    MAX_PLAN_SILENT_ROUNDS,
     get_msg_duplicate_skill_call,
 )
 from dolphin.core.context.context import Context
@@ -60,6 +63,7 @@ from dolphin.core.code_block.explore_strategy import (
 from dolphin.core.code_block.skill_call_deduplicator import (
     DefaultSkillCallDeduplicator,
 )
+from dolphin.core.skill.skill_matcher import SkillMatcher
 from dolphin.core import flags
 
 logger = get_logger("code_block.explore_block")
@@ -99,11 +103,6 @@ class ExploreBlock(BasicCodeBlock):
         self.mode = "tool_call"
         self.strategy = self._create_strategy()
 
-        # By default, deduplication is controlled by the Block parameter (finally takes effect in execute/continue_exploration)
-        self.enable_skill_deduplicator = getattr(
-            self, "enable_skill_deduplicator", True
-        )
-
         # State Variables
         self.times = 0
         self.should_stop_exploration = False
@@ -113,6 +112,14 @@ class ExploreBlock(BasicCodeBlock):
         # Session-level tool call batch counter for stable ID generation
         # Incremented each time LLM returns tool calls (per batch, not per tool)
         self.session_tool_call_counter = 0
+
+        # Plan mode: guard against excessive "silent" rounds where the agent does not make
+        # meaningful progress on the active plan (e.g., repeatedly calling unrelated tools).
+        self.plan_silent_max_rounds: int = MAX_PLAN_SILENT_ROUNDS
+        self._plan_silent_rounds: int = 0
+        self._plan_last_signature: Optional[tuple] = None
+        self._last_tool_name: Optional[str] = None
+        self._current_round_tools: List[str] = []  # Track all tools called in current round
 
         # Hook-based verify attributes
         self.on_stop: Optional[HookConfig] = None
@@ -153,6 +160,23 @@ class ExploreBlock(BasicCodeBlock):
                 self.mode = parsed_mode
                 self.strategy = self._create_strategy()
 
+        # Handle exec_mode for plan orchestration
+        exec_mode_param = self.params.get("exec_mode")
+        if exec_mode_param:
+            # PlanExecMode.from_str handles validation and mapping (seq/para/etc.)
+            self.params["exec_mode"] = PlanExecMode.from_str(str(exec_mode_param))
+
+        # Optional: override plan silent rounds limit via DPH params.
+        silent_max = self.params.get("plan_silent_max_rounds")
+        if silent_max is not None:
+            try:
+                silent_max_int = int(silent_max)
+                if silent_max_int < 0:
+                    raise ValueError("plan_silent_max_rounds must be >= 0")
+                self.plan_silent_max_rounds = silent_max_int
+            except Exception as e:
+                raise ValueError(f"Invalid plan_silent_max_rounds: {silent_max}") from e
+
     async def execute(
         self,
         content,
@@ -185,6 +209,8 @@ class ExploreBlock(BasicCodeBlock):
         # Save the current skills configuration to context, so it can be inherited during multi-turn conversations.
         if getattr(self, "skills", None):
             self.context.set_last_skills(self.skills)
+            # Inject context to skillkits that support it
+            self._inject_context_to_skillkits()
 
         # Save the current mode configuration to context for inheritance in multi-turn conversations.
         if getattr(self, "mode", None):
@@ -299,7 +325,7 @@ class ExploreBlock(BasicCodeBlock):
                 has_add = self._write_output_var(ret, has_add)
                 yield ret
 
-            if not self._should_continue_explore():
+            if not await self._should_continue_explore():
                 break
 
     def _write_output_var(
@@ -546,6 +572,11 @@ Please reconsider your approach and improve your answer based on the feedback ab
             f"explore[{self.output_var}] messages[{self.context.get_messages().str_summary()}] "
             f"length[{self.context.get_messages().length()}]"
         )
+
+        # Reset tool tracking at the start of each round to prevent stale state
+        # This ensures used_plan_tool detection is accurate in plan silent rounds guard
+        self._last_tool_name = None
+        self._current_round_tools = []  # Clear tools from previous round
 
         # Check if there is a tool call for interruption recovery
         if self._has_pending_tool_call():
@@ -865,7 +896,11 @@ Please reconsider your approach and improve your answer based on the feedback ab
             tool_calls = [single] if single else []
         
         if not tool_calls:
-            # No tool call detected: stop immediately
+            # No tool call detected: terminate normally
+            # Note: Plan mode continuation logic is handled in _should_continue_explore()
+            # which checks has_active_plan() and may inject guidance messages if needed.
+
+            # Normal termination
             # If there is pending content, merge before adding
             if self.pending_content:
                 # Merge pending content and current content
@@ -878,9 +913,18 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 self._append_assistant_message(stream_item.answer)
                 self.context.debug(f"no valid skill call, answer[{stream_item.answer}]")
 
-            # Stop exploration immediately
-            self.should_stop_exploration = True
-            self.context.debug("No tool call, stopping exploration")
+            # If plan mode is active, do NOT stop immediately.
+            # Instead, keep exploration running so the agent can poll progress
+            # (e.g., via _check_progress / _wait) until tasks reach terminal states.
+            if hasattr(self.context, "has_active_plan") and await self.context.has_active_plan():
+                self.should_stop_exploration = False
+                self.context.debug("No tool call, but plan is active; continuing exploration")
+                # Avoid tight looping while waiting for running tasks to make progress.
+                # This small backoff gives subtasks time to update their status.
+                await asyncio.sleep(0.2)
+            else:
+                self.should_stop_exploration = True
+                self.context.debug("No tool call, stopping exploration")
             return
 
         # Reset no-tool-call count (because this round has tool call)
@@ -947,6 +991,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
         """Execute tool call"""
         # Checkpoint: Check user interrupt before executing tool
         self.context.check_user_interrupt()
+        self._last_tool_name = tool_call.name
+        # Track all tools in current round for accurate plan silent rounds detection
+        self._current_round_tools.append(tool_call.name)
 
         intervention_tmp_key = "intervention_explore_block_vars"
 
@@ -1154,33 +1201,172 @@ Please reconsider your approach and improve your answer based on the feedback ab
             f"error in call {tool_name} tool, error type: {type(e)}, error info: {str(e)}, error trace: {error_trace}"
         )
 
-    def _should_continue_explore(self) -> bool:
+    async def _should_continue_explore(self) -> bool:
         """Check whether to continue the next exploration.
 
-        Termination conditions:
+        Termination conditions (Early Return pattern):
         1. Maximum number of tool calls has been reached
-        2. Number of repeated tool calls exceeds limit
-        3. No tool call occurred once
+        2. Plan mode has special continuation logic
+        3. Number of repeated tool calls exceeds limit
+        4. No tool call occurred once
         """
-        # 1. If the maximum number of calls has been reached, stop exploring
+        # 1. Early return: max skill calls reached
         if self.times >= MAX_SKILL_CALL_TIMES:
             return False
 
-        # 2. Check for repeated calls exceeding the limit
-        deduplicator = self.strategy.get_deduplicator()
-        if hasattr(deduplicator, 'skillcalls') and deduplicator.skillcalls:
-            recent_calls = list(deduplicator.skillcalls.values())
-            if (
-                recent_calls
-                and max(recent_calls) >= DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT
-            ):
-                return False
+        # 2. Plan mode has special logic - delegate to separate method
+        if hasattr(self.context, "has_active_plan") and await self.context.has_active_plan():
+            return await self._should_continue_explore_in_plan_mode()
 
-        # 3. Stop exploring when there is no tool call.
+        # 3. Early return: repeated calls exceeding limit
+        if self._has_exceeded_duplicate_limit():
+            return False
+
+        # 4. Early return: no tool call
         if self.should_stop_exploration:
             return False
 
         return True
+
+    async def _should_continue_explore_in_plan_mode(self) -> bool:
+        """Check whether to continue exploration in plan mode.
+
+        Plan mode has special continuation logic:
+        - Must continue if tasks are active (unless max attempts reached)
+        - Tracks progress via TaskRegistry signature
+        - Guards against silent rounds (no progress for too long)
+        - Prevents infinite loops when agent stops without progress
+
+        Returns:
+            True if exploration should continue, False otherwise
+        """
+        from dolphin.core.common.constants import PLAN_ORCHESTRATION_TOOLS
+
+        # Check if current round used any plan orchestration tool
+        used_plan_tool = self._used_plan_tool_this_round()
+
+        # Check for actual task progress and get current signature
+        registry = getattr(self.context, "task_registry", None)
+        has_progress, current_signature = await self._check_plan_progress_with_signature(registry)
+
+        # Early return: agent stopped without progress or plan tool usage
+        if self.should_stop_exploration:
+            if not has_progress and not used_plan_tool:
+                logger.warning(
+                    "Plan mode: Agent stopped without task progress or plan tool usage. "
+                    "Terminating to prevent infinite loop."
+                )
+                return False
+
+            if not has_progress and self._plan_silent_rounds >= 2:
+                logger.warning(
+                    f"Plan mode: Agent stopped with plan tool but no progress for "
+                    f"{self._plan_silent_rounds} rounds. Terminating to prevent infinite loop."
+                )
+                return False
+
+        # Update silent rounds tracking and check limit (also updates signature)
+        self._update_plan_silent_rounds(current_signature, has_progress, used_plan_tool)
+
+        # Early return: no progress and agent wants to stop
+        if self.should_stop_exploration and not has_progress:
+            logger.warning(
+                "Plan mode: Stopping - no tool calls and no task progress. "
+                "Prevents infinite loops from repeated responses."
+            )
+            return False
+
+        return True
+
+    def _used_plan_tool_this_round(self) -> bool:
+        """Check if any plan orchestration tool was used in current round."""
+        from dolphin.core.common.constants import PLAN_ORCHESTRATION_TOOLS
+
+        if not self._current_round_tools:
+            return False
+
+        return any(
+            tool_name in PLAN_ORCHESTRATION_TOOLS
+            for tool_name in self._current_round_tools
+        )
+
+    async def _check_plan_progress_with_signature(self, registry) -> tuple[bool, tuple]:
+        """Check if tasks have made progress since last round.
+
+        Args:
+            registry: TaskRegistry instance
+
+        Returns:
+            Tuple of (has_progress, current_signature)
+        """
+        if registry is None:
+            return False, ()
+
+        signature = await registry.get_progress_signature()
+        has_progress = (
+            self._plan_last_signature is None
+            or signature != self._plan_last_signature
+        )
+        return has_progress, signature
+
+    def _update_plan_silent_rounds(
+        self, current_signature: tuple, has_progress: bool, used_plan_tool: bool
+    ) -> None:
+        """Update silent rounds counter and check threshold.
+
+        Silent rounds are rounds where:
+        - No task status progress AND
+        - No plan orchestration tools used
+
+        Args:
+            current_signature: Current task progress signature
+            has_progress: Whether progress was detected this round
+            used_plan_tool: Whether plan orchestration tool was used
+
+        Raises:
+            ToolInterrupt: If silent rounds exceed threshold
+        """
+        if not self.plan_silent_max_rounds or self.plan_silent_max_rounds <= 0:
+            return
+
+        # Reset or increment silent rounds counter
+        if has_progress or used_plan_tool:
+            self._plan_silent_rounds = 0
+        else:
+            self._plan_silent_rounds += 1
+
+        # Update last signature for next round comparison
+        self._plan_last_signature = current_signature
+
+        if self._plan_silent_rounds >= self.plan_silent_max_rounds:
+            raise ToolInterrupt(
+                "Plan mode terminated: no task status progress for too many rounds. "
+                "Use _wait() or _check_progress() instead of repeatedly calling unrelated tools."
+            )
+
+    def _has_exceeded_duplicate_limit(self) -> bool:
+        """Check if repeated tool calls have exceeded the limit.
+
+        Returns:
+            True if duplicate limit exceeded, False otherwise
+        """
+        deduplicator = self.strategy.get_deduplicator()
+        if not hasattr(deduplicator, 'skillcalls') or not deduplicator.skillcalls:
+            return False
+
+        # Ignore polling-style tools
+        ignored_tools = getattr(
+            deduplicator, "_always_allow_duplicate_skills", set()
+        ) or set()
+
+        counts = []
+        for call_key, count in deduplicator.skillcalls.items():
+            tool_name = str(call_key).split(":", 1)[0]
+            if tool_name in ignored_tools:
+                continue
+            counts.append(count)
+
+        return counts and max(counts) >= DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT
 
     def _process_skill_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
         """Handle skill results using skillkit_hook"""
@@ -1309,7 +1495,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             async for ret in self._explore_once(no_cache=True):
                 yield ret
 
-            if not self._should_continue_explore():
+            if not await self._should_continue_explore():
                 break
 
         # 6. Cleanup
@@ -1356,6 +1542,103 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
         if getattr(self, "skills", None):
             self.context.set_last_skills(self.skills)
+            # Inject context to skillkits that support it
+            self._inject_context_to_skillkits()
+    
+    def _inject_context_to_skillkits(self):
+        """Inject execution context to skillkits that need it (e.g., PlanSkillkit).
+
+        This allows skillkits to access runtime context for operations like
+        task registry management, variable forking, etc.
+        """
+        if not self.skills or not self.context:
+            return
+
+        skill_list = self._resolve_skill_list()
+        if not skill_list:
+            return
+
+        self._inject_to_unique_skillkits(skill_list)
+
+    def _resolve_skill_list(self) -> list:
+        """Convert self.skills to a unified list of SkillFunction objects.
+
+        Returns:
+            List of SkillFunction objects, or empty list if conversion fails
+        """
+        # Case 1: Skillset object with getSkills() method
+        if hasattr(self.skills, 'getSkills'):
+            return self.skills.getSkills()
+
+        # Case 2: String list (e.g., ["plan_skillkit.*", "search.*"])
+        if isinstance(self.skills, list) and self.skills and isinstance(self.skills[0], str):
+            return self._resolve_skill_patterns_to_functions()
+
+        # Case 3: Already a list of SkillFunction objects
+        return self.skills if isinstance(self.skills, list) else []
+
+    def _resolve_skill_patterns_to_functions(self) -> list:
+        """Resolve skill name patterns to SkillFunction objects.
+
+        Returns:
+            List of matched SkillFunction objects
+        """
+        current_skillkit = self.context.get_skillkit()
+        if not current_skillkit:
+            return []
+
+        available_skills = current_skillkit.getSkills()
+        owner_names = SkillMatcher.get_owner_skillkits(available_skills)
+
+        # Match requested patterns against available skills
+        matched_skills = []
+        for pattern in self.skills:
+            for skill in available_skills:
+                if SkillMatcher.match_skill(skill, pattern, owner_names=owner_names):
+                    matched_skills.append(skill)
+
+        return matched_skills
+
+    def _inject_to_unique_skillkits(self, skill_list: list):
+        """Inject context to unique skillkit instances.
+
+        Args:
+            skill_list: List of SkillFunction objects
+
+        Note:
+            Uses skillkit instance ID to avoid duplicate injections
+        """
+        processed_skillkits = set()
+
+        for skill in skill_list:
+            skillkit = self._get_skillkit_from_skill(skill)
+            if not skillkit:
+                continue
+
+            skillkit_id = id(skillkit)
+            if skillkit_id in processed_skillkits:
+                continue
+
+            skillkit.setContext(self.context)
+            processed_skillkits.add(skillkit_id)
+
+    def _get_skillkit_from_skill(self, skill):
+        """Extract skillkit from a skill object if it supports context injection.
+
+        Args:
+            skill: Skill object (typically SkillFunction)
+
+        Returns:
+            Skillkit instance if valid, None otherwise
+        """
+        if not hasattr(skill, 'owner_skillkit'):
+            return None
+
+        skillkit = skill.owner_skillkit
+        if not skillkit or not hasattr(skillkit, 'setContext'):
+            return None
+
+        return skillkit
 
     def _resolve_mode(self, kwargs: dict):
         """Resolve exploration mode from kwargs or inherit from context."""
@@ -1394,12 +1677,50 @@ Please reconsider your approach and improve your answer based on the feedback ab
             tools_format=self.tools_format,
         )
 
+        # Auto-inject Plan orchestration guidance when plan_skillkit is used
+        if self._has_plan_skillkit():
+            plan_guidance = self._get_plan_guidance()
+            if plan_guidance:
+                system_message = system_message + "\n\n" + plan_guidance
+
         if len(system_message.strip()) > 0 and self.context.context_manager:
             self.context.add_bucket(
                 BuildInBucket.SYSTEM.value,
                 system_message,
                 message_role=MessageRole.SYSTEM,
             )
+
+    def _has_plan_skillkit(self) -> bool:
+        """Check if plan_skillkit is included in the current skills."""
+        if not hasattr(self, "skills") or not self.skills:
+            return False
+
+        # Check if skills list contains plan_skillkit pattern
+        if isinstance(self.skills, list):
+            for pattern in self.skills:
+                if isinstance(pattern, str) and "plan_skillkit" in pattern:
+                    return True
+
+        return False
+
+    def _get_plan_guidance(self) -> str:
+        """Get auto-injected guidance for using plan orchestration tools.
+
+        Returns:
+            Multi-line guidance string for plan workflow
+        """
+        return """# Plan Orchestration Workflow
+
+When using plan tools to break down complex tasks:
+
+1. **Create Plan**: Use `_plan_tasks` to define subtasks with id, name, and prompt
+2. **Monitor Progress**: Call `_check_progress` to track task status (provides next-step guidance)
+3. **Retrieve Results**: When all tasks complete:
+   - Use `_get_task_output()` to get all results at once (recommended)
+   - Or use `_get_task_output(task_id)` for a specific task output
+4. **Synthesize**: Combine all outputs into a comprehensive response for the user
+
+Important: Your response is INCOMPLETE if you stop after tasks finish. You MUST retrieve outputs and provide a final synthesized answer."""
 
     def _apply_deduplicator_config(self, kwargs: dict):
         """Apply skill deduplicator configuration."""

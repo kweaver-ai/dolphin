@@ -120,6 +120,54 @@ class TestExploreBlockMode(unittest.TestCase):
         self.assertEqual(block.tools_format, "full")
 
 
+class TestDefaultSkillCallDeduplicator(unittest.TestCase):
+    """DefaultSkillCallDeduplicator behavior tests."""
+
+    def test_allows_repeated_check_progress_calls(self):
+        """_check_progress is a polling tool and should not be treated as duplicate."""
+        dedup = DefaultSkillCallDeduplicator()
+        call = ("_check_progress", {})
+
+        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 2):
+            assert dedup.is_duplicate(call) is False
+            dedup.add(call)
+
+    def test_allows_repeated_wait_calls(self):
+        """_wait is a polling tool and should not be treated as duplicate."""
+        dedup = DefaultSkillCallDeduplicator()
+        call = ("_wait", {"seconds": 5})
+
+        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 2):
+            assert dedup.is_duplicate(call) is False
+            dedup.add(call)
+
+
+class TestExploreBlockShouldContinueExplore(unittest.TestCase):
+    """ExploreBlock._should_continue_explore behavior tests."""
+
+    def test_should_not_stop_on_polling_tool_duplicates(self):
+        """Polling tools should not trigger duplicate-based termination."""
+        context_manager = ContextManager()
+        global_config = GlobalConfig()
+        context = Context(config=global_config, context_manager=context_manager)
+        context._calc_all_skills()
+
+        block = ExploreBlock(context=context)
+        block.times = 0
+        block.should_stop_exploration = False
+
+        dedup = block.strategy.get_deduplicator()
+        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
+            dedup.add(("_check_progress", {}))
+
+        assert asyncio.run(block._should_continue_explore()) is True
+
+        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
+            dedup.add(("mock_search", {"query": "q"}))
+
+        assert asyncio.run(block._should_continue_explore()) is False
+
+
 class TestExploreBlockToolResponseOnce(unittest.TestCase):
     """回归测试：ExploreBlock 成功工具调用不应重复追加 tool response"""
 
@@ -879,6 +927,68 @@ class TestExploreBlockModeConsistency(unittest.TestCase):
         # tools_format 应保持（策略应使用正确的 format）
         self.assertEqual(block.tools_format, "full")
         self.assertEqual(block.strategy.tools_format, "full")
+
+
+class TestExploreBlockDeduplicatorParamParsing(unittest.TestCase):
+    """Test enable_skill_deduplicator param parsing."""
+
+    def setUp(self):
+        from dolphin.core.common.enums import CategoryBlock
+
+        self.CategoryBlock = CategoryBlock
+        self.context_manager = ContextManager()
+        self.global_config = GlobalConfig()
+        self.context = Context(
+            config=self.global_config, context_manager=self.context_manager
+        )
+        self.context._calc_all_skills()
+
+    def test_enable_skill_deduplicator_false_string_is_parsed_as_bool_false(self):
+        """DPH string 'false' should disable the deduplicator."""
+        block = ExploreBlock(context=self.context)
+        content = "/explore/(enable_skill_deduplicator=false) 问题 -> result"
+        block.parse_block_content(
+            content, category=self.CategoryBlock.EXPLORE, replace_variables=False
+        )
+        self.assertIs(block.enable_skill_deduplicator, False)
+
+
+class TestExploreBlockExecModeParsing(unittest.TestCase):
+    """Test exec_mode parameter parsing and validation in ExploreBlock."""
+
+    def setUp(self):
+        from dolphin.core.common.enums import CategoryBlock
+        self.CategoryBlock = CategoryBlock
+        self.context_manager = ContextManager()
+        self.global_config = GlobalConfig()
+        self.context = Context(
+            config=self.global_config, context_manager=self.context_manager
+        )
+        self.context._calc_all_skills()
+
+    def test_exec_mode_seq_parsing(self):
+        """Test 'seq' maps to 'sequential'."""
+        block = ExploreBlock(context=self.context)
+        content = '/explore/(exec_mode="seq") 问题 -> result'
+        block.parse_block_content(content, category=self.CategoryBlock.EXPLORE, replace_variables=False)
+        from dolphin.core.task_registry import PlanExecMode
+        self.assertEqual(block.params.get("exec_mode"), PlanExecMode.SEQUENTIAL)
+
+    def test_exec_mode_para_parsing(self):
+        """Test 'para' maps to 'parallel'."""
+        block = ExploreBlock(context=self.context)
+        content = '/explore/(exec_mode="para") 问题 -> result'
+        block.parse_block_content(content, category=self.CategoryBlock.EXPLORE, replace_variables=False)
+        from dolphin.core.task_registry import PlanExecMode
+        self.assertEqual(block.params.get("exec_mode"), PlanExecMode.PARALLEL)
+
+    def test_exec_mode_invalid_raises_error(self):
+        """Test invalid values raise ValueError."""
+        block = ExploreBlock(context=self.context)
+        content = '/explore/(exec_mode="invalid") 问题 -> result'
+        with self.assertRaises(ValueError) as cm:
+            block.parse_block_content(content, category=self.CategoryBlock.EXPLORE, replace_variables=False)
+        self.assertIn("Invalid execution mode", str(cm.exception))
 
 
 if __name__ == "__main__":
