@@ -88,7 +88,7 @@ class ToolBlock(BasicCodeBlock):
                 if skip_message:
                     self.context.delete_variable("__skip_message__")
                 
-                input_dict = self.context.delete_variable("tool")
+                self.context.delete_variable("tool")
 
                 # If user chose to skip, don't execute the tool
                 if skip_tool:

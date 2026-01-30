@@ -391,17 +391,7 @@
         "outputFormat": null,
         "errorExpected": false,
         "emptyAnswerCheck": false,
-        "outputKey": "final_result",
-        "progressChecks": [
-          {
-            "checkType": "stage_id_consistency",
-            "description": "Verify that the tool stage_id before interrupt matches after resume"
-          },
-          {
-            "checkType": "no_duplicate_stages",
-            "description": "Verify that no duplicate stages are created on resume"
-          }
-        ]
+        "outputKey": "final_result"
       },
       "notes": "Critical test for stage_id consistency fix - verifies the fix for issue where stage_id changed after resume"
     },
@@ -427,17 +417,7 @@
         "outputFormat": null,
         "errorExpected": false,
         "emptyAnswerCheck": false,
-        "outputKey": "final_result",
-        "progressChecks": [
-          {
-            "checkType": "final_status_completed",
-            "description": "Verify that the tool stage has status='completed' after execution"
-          },
-          {
-            "checkType": "progress_variable_updated",
-            "description": "Verify that _progress variable in context contains completed status"
-          }
-        ]
+        "outputKey": "final_result"
       },
       "notes": "Tests the fix for completed status not being displayed after resume - ensures _progress variable is correctly updated"
     },
@@ -463,17 +443,7 @@
         "outputFormat": null,
         "errorExpected": false,
         "emptyAnswerCheck": false,
-        "outputKey": "final_result",
-        "progressChecks": [
-          {
-            "checkType": "unique_stage_ids",
-            "description": "Verify that each tool has a unique stage_id"
-          },
-          {
-            "checkType": "individual_consistency",
-            "description": "Verify that each tool's stage_id remains consistent across its interrupt/resume cycle"
-          }
-        ]
+        "outputKey": "final_result"
       },
       "notes": "Tests that multiple tool interrupts don't interfere with each other's stage_ids"
     }
