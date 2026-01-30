@@ -2,9 +2,11 @@ from dolphin.core.code_block.basic_code_block import BasicCodeBlock
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.common.enums import CategoryBlock, TypeStage
 from dolphin.core.context.context import Context
-from dolphin.core.logging.logger import console
+from dolphin.core.logging.logger import console, get_logger
 from dolphin.core.context.var_output import SourceType
 from typing import Optional, AsyncGenerator, Dict, Any
+
+logger = get_logger()
 
 
 class ToolBlock(BasicCodeBlock):
@@ -52,6 +54,10 @@ class ToolBlock(BasicCodeBlock):
 
                 tool_name = intervention_vars["tool_name"]
                 tool_call_info = intervention_vars["tool_call_info"]
+                
+                # *** FIX: Get saved stage_id for resume ***
+                saved_stage_id = intervention_vars.get("stage_id")
+                
                 self.context.delete_variable("intervention_tool_block_vars")
                 if self.recorder is not None:
                     self.recorder.set_output_var(
@@ -69,7 +75,8 @@ class ToolBlock(BasicCodeBlock):
                 raw_tool_args = input_dict["tool_args"]
                 new_tool_args = {arg["key"]: arg["value"] for arg in raw_tool_args}
 
-                props = {"intervention": False, "gvp": self.context}
+                # *** FIX: Pass saved_stage_id to skill_run ***
+                props = {"intervention": False, "saved_stage_id": saved_stage_id, "gvp": self.context}
                 
                 # *** Handle skip action ***
                 skip_tool = self.context.get_var_value("__skip_tool__")
@@ -81,7 +88,7 @@ class ToolBlock(BasicCodeBlock):
                 if skip_message:
                     self.context.delete_variable("__skip_message__")
                 
-                input_dict = self.context.delete_variable("tool")
+                self.context.delete_variable("tool")
 
                 # If user chose to skip, don't execute the tool
                 if skip_tool:
@@ -140,9 +147,11 @@ class ToolBlock(BasicCodeBlock):
                 # step2: Obtain the tool object and execute the tool call
                 tool_name = tool_call_info["tool_name"]
 
+                # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
                 intervention_vars = {
                     "tool_name": tool_call_info["tool_name"],
                     "tool_call_info": tool_call_info,
+                    "stage_id": None,  # Will be updated by skill_run() after stage creation
                 }
 
                 self.context.set_variable(

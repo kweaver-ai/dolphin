@@ -339,7 +339,7 @@ class TestDolphinAgent:
     def setup_method(self):
         """创建测试用的DPH文件"""
         self.temp_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".dph", delete=False
+            mode="w", suffix=".dph", delete=False, encoding="utf-8"
         )
         self.temp_file.write(
             """
