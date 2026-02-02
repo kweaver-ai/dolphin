@@ -322,6 +322,10 @@ class ExploreBlockV2(BasicCodeBlock):
         raw_tool_args = input_dict["tool_args"]
         function_params_json = {arg["key"]: arg["value"] for arg in raw_tool_args}
         
+        # Get saved stage_id for resume
+        saved_stage_id = intervention_vars.get("stage_id")
+        logger.debug(f"Resuming tool call for {input_dict['tool_name']}, saved_stage_id: {saved_stage_id}")
+        
         # *** FIX: Update the last tool_call message with modified parameters ***
         # This ensures LLM sees the actual parameters used, not the original ones
         messages = self.context.get_messages()
@@ -336,19 +340,21 @@ class ExploreBlockV2(BasicCodeBlock):
                         # Update the arguments with modified parameters
                         import json
                         tool_call.function.arguments = json.dumps(function_params_json, ensure_ascii=False)
-                        logger.debug(f"[FIX] Updated tool_call arguments from original to modified: {function_params_json}")
 
-        (
-            self.recorder.update(
-                stage=TypeStage.SKILL,
-                source_type=SourceType.EXPLORE,
-                skill_name=function_name,
-                skill_type=self.context.get_skill_type(function_name),
-                skill_args=function_params_json,
-            )
-            if self.recorder
-            else None
-        )
+        # *** FIX: Don't call recorder.update() here during resume ***
+        # skill_run() will create the stage with the correct saved_stage_id
+        # Calling update() here would create an extra stage with a new ID
+        # (
+        #     self.recorder.update(
+        #         stage=TypeStage.SKILL,
+        #         source_type=SourceType.EXPLORE,
+        #         skill_name=function_name,
+        #         skill_type=self.context.get_skill_type(function_name),
+        #         skill_args=function_params_json,
+        #     )
+        #     if self.recorder
+        #     else None
+        # )
         
         # *** Handle skip action ***
         skip_tool = self.context.get_var_value("__skip_tool__")
@@ -403,7 +409,7 @@ class ExploreBlockV2(BasicCodeBlock):
         
         # Normal execution (not skipped)
         try:
-            props = {"intervention": False}
+            props = {"intervention": False, "saved_stage_id": saved_stage_id}
             have_answer = False
 
             async for resp in self.skill_run(
@@ -561,7 +567,6 @@ class ExploreBlockV2(BasicCodeBlock):
             return
 
         # Add assistant message containing tool calls
-        logger.debug(f"[DEBUG] Tool call detected, preparing to execute: {stream_item.tool_name}")
         tool_call_id = f"call_{stream_item.tool_name}_{self.times}"
         tool_call_openai_format = [
             {
@@ -588,24 +593,23 @@ class ExploreBlockV2(BasicCodeBlock):
             )
             self.deduplicator_skillcall.add(tool_call)
 
-            logger.debug(f"[DEBUG] Calling _execute_tool_call for: {stream_item.tool_name}")
             async for ret in self._execute_tool_call(stream_item, tool_call_id):
                 yield ret
-            logger.debug(f"[DEBUG] _execute_tool_call completed for: {stream_item.tool_name}")
         else:
             await self._handle_duplicate_tool_call(tool_call, stream_item)
 
     async def _execute_tool_call(self, stream_item, tool_call_id: str):
         """Execute tool call"""
-        logger.debug(f"[DEBUG] _execute_tool_call ENTERED for: {stream_item.tool_name}")
         intervention_tmp_key = "intervention_explore_block_vars"
 
         try:
+            # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
             intervention_vars = {
                 "prompt": self.context.get_messages().get_messages_as_dict(),
                 "tool_name": stream_item.tool_name,
                 "cur_llm_stream_answer": stream_item.answer,
                 "all_answer": stream_item.answer,
+                "stage_id": None,  # Will be updated by skill_run() after stage creation
             }
 
             self.context.set_variable(intervention_tmp_key, intervention_vars)

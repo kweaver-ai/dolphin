@@ -591,7 +591,6 @@ Please reconsider your approach and improve your answer based on the feedback ab
         intervention_tmp_key = "intervention_explore_block_vars"
         has_intervention = intervention_tmp_key in self.context.get_all_variables().keys()
         has_tool = "tool" in self.context.get_all_variables().keys()
-        logger.debug(f"[DEBUG _has_pending_tool_call] has_intervention={has_intervention}, has_tool={has_tool}")
         return has_intervention and has_tool
 
     async def _handle_resumed_tool_call(self):
@@ -628,6 +627,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
         raw_tool_args = input_dict["tool_args"]
         function_params_json = {arg["key"]: arg["value"] for arg in raw_tool_args}
         
+        # Get saved stage_id for resume
+        saved_stage_id = intervention_vars.get("stage_id")
+        
         # *** FIX: Update the last tool_call message with modified parameters ***
         # This ensures LLM sees the actual parameters used, not the original ones
         messages = self.context.get_messages()
@@ -642,7 +644,6 @@ Please reconsider your approach and improve your answer based on the feedback ab
                         # Update the arguments with modified parameters
                         import json
                         tool_call.function.arguments = json.dumps(function_params_json, ensure_ascii=False)
-                        logger.debug(f"[FIX] Updated tool_call arguments from original to modified: {function_params_json}")
 
         if self.recorder:
             self.recorder.update(
@@ -705,7 +706,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         
         # Normal execution (not skipped)
         try:
-            props = {"intervention": False}
+            props = {"intervention": False, "saved_stage_id": saved_stage_id}
             have_answer = False
 
             async for resp in self.skill_run(
@@ -993,11 +994,13 @@ Please reconsider your approach and improve your answer based on the feedback ab
         metadata = None
 
         try:
+            # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
             intervention_vars = {
                 "prompt": self.context.get_messages().get_messages_as_dict(),
                 "tool_name": tool_call.name,
                 "cur_llm_stream_answer": stream_item.answer,
                 "all_answer": stream_item.answer,
+                "stage_id": None,  # Will be updated by skill_run() after stage creation
             }
 
             self.context.set_variable(intervention_tmp_key, intervention_vars)

@@ -354,15 +354,28 @@ class TestEdgeCases(unittest.TestCase):
     """Test edge cases and special scenarios."""
 
     def test_case_sensitivity(self):
-        """fnmatch is case-sensitive by default."""
+        """fnmatch case sensitivity is platform-dependent (case-insensitive on Windows)."""
+        import sys
         self.assertTrue(SkillMatcher.match_skill_name("MyTool", "MyTool"))
-        self.assertFalse(SkillMatcher.match_skill_name("MyTool", "mytool"))
-        self.assertFalse(SkillMatcher.match_skill_name("mytool", "MyTool"))
+        if sys.platform == "win32":
+            # On Windows, fnmatch is case-insensitive
+            self.assertTrue(SkillMatcher.match_skill_name("MyTool", "mytool"))
+            self.assertTrue(SkillMatcher.match_skill_name("mytool", "MyTool"))
+        else:
+            # On Unix-like systems, fnmatch is case-sensitive
+            self.assertFalse(SkillMatcher.match_skill_name("MyTool", "mytool"))
+            self.assertFalse(SkillMatcher.match_skill_name("mytool", "MyTool"))
 
     def test_case_sensitivity_with_wildcard(self):
-        """Case sensitivity should apply to wildcards too."""
+        """Case sensitivity should apply to wildcards too (platform-dependent)."""
+        import sys
         self.assertTrue(SkillMatcher.match_skill_name("MyTool", "My*"))
-        self.assertFalse(SkillMatcher.match_skill_name("MyTool", "my*"))
+        if sys.platform == "win32":
+            # On Windows, fnmatch is case-insensitive
+            self.assertTrue(SkillMatcher.match_skill_name("MyTool", "my*"))
+        else:
+            # On Unix-like systems, fnmatch is case-sensitive
+            self.assertFalse(SkillMatcher.match_skill_name("MyTool", "my*"))
 
     def test_special_characters_underscore_prefix(self):
         """Skills with underscore prefix should match correctly."""

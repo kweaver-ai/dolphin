@@ -368,6 +368,84 @@
         ]
       },
       "notes": "Tests multiple sequential interrupts with LLM continuation between them"
+    },
+    {
+      "name": "test_tool_interrupt_stage_id_consistency",
+      "description": "Test that stage_id remains consistent across interrupt and resume",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": true,
+          "test_mode": "interrupt_resume",
+          "verify_stage_consistency": true
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_resume_single.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error", "stage_id mismatch"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result"
+      },
+      "notes": "Critical test for stage_id consistency fix - verifies the fix for issue where stage_id changed after resume"
+    },
+    {
+      "name": "test_tool_interrupt_completed_status",
+      "description": "Test that tool status changes to completed after resume and execution",
+      "enabled": true,
+      "timeout": 30,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": true,
+          "test_mode": "interrupt_resume",
+          "verify_status_update": true
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_resume_single.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error", "status: processing"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result"
+      },
+      "notes": "Tests the fix for completed status not being displayed after resume - ensures _progress variable is correctly updated"
+    },
+    {
+      "name": "test_tool_interrupt_multi_tools_stage_isolation",
+      "description": "Test that multiple tool interrupts maintain separate stage_ids",
+      "enabled": true,
+      "timeout": 60,
+      "parameters": {
+        "query": "",
+        "history": [],
+        "variables": {
+          "enable_EXPLORE_BLOCK_V2": true,
+          "test_mode": "interrupt_resume",
+          "verify_multi_stage_isolation": true
+        }
+      },
+      "dolphinLangPath": "dolphins/tool_interrupt_resume_multi.dph",
+      "expectedResult": {
+        "contentKeywords": [],
+        "excludeKeywords": ["exception", "error", "stage_id collision"],
+        "tools": [],
+        "outputFormat": null,
+        "errorExpected": false,
+        "emptyAnswerCheck": false,
+        "outputKey": "final_result"
+      },
+      "notes": "Tests that multiple tool interrupts don't interfere with each other's stage_ids"
     }
   ]
 }

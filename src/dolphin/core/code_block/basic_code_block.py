@@ -1162,23 +1162,79 @@ class BasicCodeBlock:
             return
 
         # Create initial SKILL stage to track skill execution start
-        assert self.recorder, "recorder is None"
-        self.recorder.getProgress().add_stage(
-            agent_name=skill_name,
-            stage=TypeStage.SKILL,
-            status=Status.PROCESSING,
-            skill_info=SkillInfo.build(
-                skill_type=SkillType.TOOL,
-                skill_name=skill_name,
-                skill_args=skill_params_json,
-            ),
-            input_content=str(skill_params_json),
-            interrupted=False,
-        )
+        # Only create new stage if this is a new tool call (intervention=True)
+        # For resumed tool calls (intervention=False), update the existing stage using saved_stage_id
+        if props is None:
+            props = {}
+        
+        is_resumed_call = not props.get('intervention', True)
+        saved_stage_id = props.get('saved_stage_id')
+        
+        if not is_resumed_call:
+            # First-time call: create new Stage
+            assert self.recorder, "recorder is None"
+            self.recorder.getProgress().add_stage(
+                agent_name=skill_name,
+                stage=TypeStage.SKILL,
+                status=Status.PROCESSING,
+                skill_info=SkillInfo.build(
+                    skill_type=SkillType.TOOL,
+                    skill_name=skill_name,
+                    skill_args=skill_params_json,
+                ),
+                input_content=str(skill_params_json),
+                interrupted=False,
+            )
+            
+            # ✅ FIX: Save the newly created Stage ID to intervention_vars for potential interrupt
+            # This must be done AFTER creating the stage, not before
+            # Determine the correct intervention_vars key based on source_type
+            progress = self.recorder.getProgress()
+            if len(progress.stages) > 0:
+                new_stage_id = progress.stages[-1].id
+                
+                # Map source_type to intervention_vars key
+                # Priority: judge_block > tool_block (both use SourceType.SKILL) > explore_block
+                var_key = None
+                intervention_vars = None
+                
+                if source_type == SourceType.EXPLORE:
+                    var_key = "intervention_explore_block_vars"
+                    intervention_vars = self.context.get_var_value(var_key)
+                elif source_type == SourceType.SKILL:
+                    # Check judge block first (also uses SourceType.SKILL)
+                    judge_vars = self.context.get_var_value("intervention_judge_block_vars")
+                    if judge_vars is not None:
+                        var_key = "intervention_judge_block_vars"
+                        intervention_vars = judge_vars
+                    else:
+                        var_key = "intervention_tool_block_vars"
+                        intervention_vars = self.context.get_var_value(var_key)
+                
+                # Update the intervention_vars with the correct Stage ID
+                if intervention_vars is not None and var_key is not None:
+                    intervention_vars["stage_id"] = new_stage_id
+                    self.context.set_variable(var_key, intervention_vars)
 
-        # notify app
-        async for result in self.yield_message(answer="", think=""):
-            yield result
+            # notify app
+            async for result in self.yield_message(answer="", think=""):
+                yield result
+        else:
+            # *** FIX: Resumed call - Set _next_stage_id to use saved ID ***
+            # Don't create stage here; let the normal flow handle it
+            # This avoids creating extra stages and ensures consistency
+            assert self.recorder, "recorder is None"
+            
+            if saved_stage_id:
+                # Set _next_stage_id so the next add_stage() call will use this ID
+                progress = self.recorder.getProgress()
+                progress._next_stage_id = saved_stage_id
+                logger.debug(f"Resumed tool call for {skill_name}, set _next_stage_id = {saved_stage_id}")
+            else:
+                logger.debug(f"Resumed tool call for {skill_name}, no saved_stage_id provided")
+            
+            # NOTE: Do NOT call yield_message() in resume branch!
+            # The resumed tool execution will create the stage naturally through recorder.update()
 
         agent_as_skill = self.context.get_agent_skill(skill)
         if agent_as_skill is not None:
@@ -1208,8 +1264,7 @@ class BasicCodeBlock:
         have_answer = False
         cur_agent = self.context.get_cur_agent()
 
-        if props is None:
-            props = {}
+        # props already initialized above, just update it
         props.update({"gvp": self.context})
         try:
             # Check for tool interrupt configuration (ToolInterrupt mechanism)
@@ -1217,10 +1272,8 @@ class BasicCodeBlock:
             # Skip interrupt check if this is a resumed tool call (intervention=False)
             if props.get('intervention', True):
                 interrupt_config = getattr(skill, 'interrupt_config', None)
-                logger.debug(f"[DEBUG skill_run] skill_name={skill_name}, interrupt_config={interrupt_config}, intervention={props.get('intervention', True)}")
                 
                 if interrupt_config and interrupt_config.get('requires_confirmation'):
-                    logger.debug(f"[DEBUG skill_run] Tool {skill_name} requires confirmation, raising ToolInterrupt")
                     # Format confirmation message (support parameter interpolation)
                     message = interrupt_config.get('confirmation_message', 'Tool requires confirmation')
                     if message and skill_params_json:
@@ -1243,8 +1296,6 @@ class BasicCodeBlock:
                         tool_args=tool_args,
                         tool_config=interrupt_config
                     )
-                else:
-                    logger.debug(f"[DEBUG skill_run] Tool {skill_name} does not require confirmation, proceeding with execution")
             
             console_skill_call(
                 skill_name, skill_params_json, verbose=self.context.verbose, skill=skill
@@ -1321,13 +1372,33 @@ class BasicCodeBlock:
             if agent_as_skill is not None:
                 self.context.set_cur_agent(cur_agent)
 
-            yield self.recorder.update(
+            # *** FIX: Update stage status to COMPLETED ***
+            # This updates the stage status and triggers set_variable() to update _progress in context
+            self.recorder.update(
                 item=result,
                 source_type=SourceType.SKILL,
                 skill_name=skill_name,
                 skill_args=skill_params_json,
                 is_completed=True,
             )
+            
+            # *** FIX: Yield completion update in a format that explore_block_v2 recognizes ***
+            # Use a nested structure that matches the check in explore_block_v2.py line 422-427
+            # This prevents explore_block_v2 from calling recorder.update() again
+            if self.context:
+                progress_var = self.context.get_var_value("_progress")
+                completion_data = {
+                    "answer": {
+                        "answer": result.get("output") if isinstance(result, dict) else str(result),
+                        "think": "",
+                    },
+                    "_status": "running",
+                    "_progress": progress_var if progress_var else []
+                }
+                yield completion_data
+            else:
+                yield result
+            
             if agent_as_skill is not None:
                 console_agent_skill_exit(skill_name, verbose=self.context.verbose)
         except ToolInterrupt as e:
@@ -1910,7 +1981,7 @@ class BasicCodeBlock:
                         f"[_load_dynamic_tools] self.skills does not exist on {type(self).__name__}"
                     )
 
-                self.context.debug(f"✓ Dynamically loaded tool: {tool_name}")
+                self.context.debug(f"[OK] Dynamically loaded tool: {tool_name}")
 
             except Exception as e:
                 tool_name = (
@@ -1918,7 +1989,7 @@ class BasicCodeBlock:
                     if isinstance(tool_def, dict)
                     else "unknown"
                 )
-                self.context.error(f"✗ Failed to load dynamic tool {tool_name}: {e}")
+                self.context.error(f"[ERROR] Failed to load dynamic tool {tool_name}: {e}")
                 import traceback
 
                 self.context.debug(f"Error traceback: {traceback.format_exc()}")

@@ -1,10 +1,13 @@
 from enum import Enum
+import logging
 import time
 from typing import List, Optional, TYPE_CHECKING
 import uuid
 
 from dolphin.core.common.enums import Messages, SkillInfo, Status, TypeStage
 from dolphin.core.common.constants import estimate_tokens_from_chars
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from dolphin.core.agent.base_agent import BaseAgent
@@ -292,6 +295,7 @@ class ProgressInstance(RuntimeInstance):
         self.context = context
         self.stages: List[StageInstance] = []
         self.flags = flags
+        self._next_stage_id: Optional[str] = None  # ✅ NEW: for interrupt resume
 
     def add_stage(
         self,
@@ -306,6 +310,7 @@ class ProgressInstance(RuntimeInstance):
         input_content: str = "",
         input_messages: Optional[Messages] = None,
         interrupted: bool = False,
+        stage_id: Optional[str] = None,  # ✅ NEW: support custom stage_id for resume
     ):
         pop_last_stage = False
         if len(self.stages) > 0 and self.stages[-1].llm_empty_answer():
@@ -325,6 +330,15 @@ class ProgressInstance(RuntimeInstance):
             interrupted=interrupted,
             flags=self.flags,
         )
+        
+        # ✅ NEW: Override ID if custom stage_id is provided (for interrupt resume)
+        # Priority: explicit stage_id parameter > _next_stage_id temporary variable
+        if stage_id is not None:
+            stage_instance.id = stage_id
+        elif self._next_stage_id is not None:
+            stage_instance.id = self._next_stage_id
+            self._next_stage_id = None  # Clear after use (one-time only)
+        
         self.add_stage_instance(stage_instance, pop_last_stage)
 
     def add_stage_instance(
@@ -333,6 +347,7 @@ class ProgressInstance(RuntimeInstance):
         stage_instance.set_parent(self)
         if pop_last_stage:
             self.stages.pop()
+        
         self.stages.append(stage_instance)
 
         # Register stage instance to runtime_graph if available
@@ -375,6 +390,22 @@ class ProgressInstance(RuntimeInstance):
 
         # Check if we need to create a new stage (when stage type changes)
         last_stage = self.stages[-1]
+
+        # *** FIX: If _next_stage_id is set and doesn't match last stage, create new stage ***
+        # This handles resume cases where we need to create a stage with a specific ID
+        if self._next_stage_id is not None and self._next_stage_id != last_stage.id:
+            logger.debug(f"_next_stage_id ({self._next_stage_id}) != last_stage.id ({last_stage.id}), creating new stage for resume")
+            self.add_stage(
+                stage=stage if stage is not None else last_stage.stage,
+                answer=answer,
+                think=think,
+                raw_output=raw_output,
+                status=status,
+                skill_info=skill_info,
+                block_answer=block_answer,
+                input_messages=input_messages,
+            )
+            return
 
         # Create new stage if stage type is changing (and it's not None)
         if stage is not None and stage != last_stage.stage:
