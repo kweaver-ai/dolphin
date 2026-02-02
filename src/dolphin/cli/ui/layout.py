@@ -26,7 +26,39 @@ import os
 import sys
 from typing import Optional
 
-from dolphin.cli.ui.console import StatusBar, Theme, set_active_status_bar
+from dolphin.cli.ui.components import StatusBar
+from dolphin.cli.ui.theme import Theme
+from dolphin.cli.ui.state import set_active_status_bar, _stdout_lock, safe_print, safe_write
+
+
+def _draw_separator_unsafe(layout_manager: 'LayoutManager', row: Optional[int] = None) -> None:
+    """Draw separator line without acquiring lock (module-level helper).
+    
+    This is a module-level function to allow calling from both LayoutManager
+    and its instance methods without lock acquisition issues.
+    
+    Args:
+        layout_manager: LayoutManager instance
+        row: Specific row to draw at, or None for default position
+    
+    Note:
+        Caller must hold _stdout_lock before calling this function.
+    """
+    if not layout_manager.enabled:
+        return
+
+    height, width = layout_manager._get_terminal_size()
+    sep_line = row if row is not None else (height - layout_manager._current_bottom_reserve + 1)
+
+    # Draw separator with atomic ANSI sequence
+    output = (
+        f"\0337"                                          # Save cursor (DEC)
+        f"\033[{sep_line};1H"                             # Move to separator line
+        f"\033[K{Theme.BORDER}{'─' * (width)}{Theme.RESET}" # Clear & Draw
+        f"\0338"                                          # Restore cursor (DEC)
+    )
+    safe_write(output)
+    safe_write("", flush=True)
 
 
 def _should_enable_layout() -> bool:
@@ -77,7 +109,7 @@ class LayoutManager:
         layout.show_status("Processing your request...")
 
         # Content prints normally and scrolls
-        print("Some output...")
+        safe_print("Some output...")
 
         # End session
         layout.end_session()
@@ -105,6 +137,19 @@ class LayoutManager:
         self._scroll_region_active = False
         self._session_active = False
         self._original_sigwinch_handler = None
+        
+        # New: Tracking dynamic reserve
+        self._current_bottom_reserve = self.BOTTOM_RESERVE
+        self._plan_panel_height = 0
+        
+        # Resize handling: defer actual processing to prevent race with animation
+        self._resize_pending = False
+        self._pending_height = 0
+        self._pending_width = 0
+        
+        # Note: _stdout_lock is imported from state.py for consistency with
+        # StatusBar and LivePlanCard components. This prevents race conditions
+        # where different locks protect concurrent stdout operations.
 
     def _get_terminal_size(self) -> tuple:
         """Get terminal dimensions.
@@ -120,15 +165,47 @@ class LayoutManager:
             return 24, 80
 
     def _handle_resize(self, signum, frame):
-        """Handle terminal resize event."""
-        if not self.enabled:
+        """Handle terminal resize event.
+        
+        Note: This is called from signal handler context, so we defer
+        actual processing to the next UI operation to prevent interference
+        with LivePlanCard animation thread (avoid cursor save/restore race).
+        """
+        try:
+            if not self.enabled:
+                return
+
+            # Get new size
+            try:
+                height, width = self._get_terminal_size()
+            except Exception:
+                return
+
+            if height == self._terminal_height and width == self._terminal_width:
+                return
+
+            # Defer processing: just set flag and pending dimensions
+            self._resize_pending = True
+            self._pending_height = height
+            self._pending_width = width
+
+        except Exception:
+            # Signal handlers should never raise exceptions
+            # This prevents potential crashes during resize
+            pass
+
+    def _process_pending_resize(self):
+        """Process deferred resize operation.
+        
+        This should be called from UI operations (not signal handler context)
+        to safely update terminal state.
+        """
+        if not self._resize_pending:
             return
 
-        # Get new size
-        try:
-            height, width = self._get_terminal_size()
-        except:
-            return
+        self._resize_pending = False
+        height = self._pending_height
+        width = self._pending_width
 
         if height == self._terminal_height and width == self._terminal_width:
             return
@@ -139,27 +216,28 @@ class LayoutManager:
         self._terminal_height = height
         self._terminal_width = width
 
-        # Re-setup scroll region
+        # Re-setup scroll region with lock protection
         try:
-            scroll_bottom = height - self.BOTTOM_RESERVE
-            if scroll_bottom >= 5:
-                sys.stdout.write(f"\033[1;{scroll_bottom}r")
-                self._scroll_region_active = True
-            else:
-                sys.stdout.write("\033[r")
-                self._scroll_region_active = False
+            with _stdout_lock:
+                scroll_bottom = height - self._current_bottom_reserve
+                if scroll_bottom >= 5:
+                    safe_write(f"\033[1;{scroll_bottom}r")
+                    self._scroll_region_active = True
+                else:
+                    safe_write("\033[r")
+                    self._scroll_region_active = False
+
+                # Update Status Bar if active
+                if self._status_bar:
+                    self._status_bar.fixed_row = height - 1
+
+                # Redraw Separator
+                if self._scroll_region_active:
+                    _draw_separator_unsafe(self)
+                
+                safe_write("", flush=True)
         except:
             pass
-
-        # Update Status Bar if active
-        if self._status_bar:
-            self._status_bar.fixed_row = height - 1
-
-        # Redraw Separator
-        if self._scroll_region_active:
-            self._draw_separator()
-        
-        sys.stdout.flush()
 
     def _setup_scroll_region(self) -> None:
         """Setup ANSI scroll region (top portion of screen)."""
@@ -174,14 +252,15 @@ class LayoutManager:
             self.enabled = False
             return
 
-        # Push existing content up to prevent overlap with fixed region
-        sys.stdout.write("\n" * self.BOTTOM_RESERVE)
-        
-        # Set scroll region: ESC[<top>;<bottom>r
-        sys.stdout.write(f"\033[1;{scroll_bottom}r")
-        # Move cursor to top of scroll region
-        sys.stdout.write("\033[1;1H")
-        sys.stdout.flush()
+        with _stdout_lock:
+            # Push existing content up to prevent overlap with fixed region
+            safe_write("\n" * self.BOTTOM_RESERVE)
+            
+            # Set scroll region: ESC[<top>;<bottom>r
+            safe_write(f"\033[1;{scroll_bottom}r")
+            # Move cursor to top of scroll region
+            safe_write("\033[1;1H")
+            safe_write("", flush=True)
         self._scroll_region_active = True
 
     def _reset_scroll_region(self) -> None:
@@ -192,57 +271,129 @@ class LayoutManager:
         2. Clears the fixed separator and status bar lines (they are now stale)
         3. Positions cursor at a reasonable location for subsequent output
         """
-        if self._scroll_region_active:
-            height = self._terminal_height
-            
+        with _stdout_lock:
+            if self._scroll_region_active:
+                height = self._terminal_height
+                
             # Build a single atomic output sequence
             output_parts = [
                 "\033[r",          # Reset scroll region to full screen
                 "\033[?25h",       # Show cursor
             ]
             
-            # Clear the fixed separator line (was at height-2)
-            sep_line = height - 2
-            if sep_line > 0:
-                output_parts.append(f"\033[{sep_line};1H\033[K")
+            # Clear the entire reserved bottom area
+            for i in range(self._terminal_height - self._current_bottom_reserve, self._terminal_height + 1):
+                if i > 0:
+                    output_parts.append(f"\033[{i};1H\033[K")
             
-            # Clear the fixed status bar line (was at height-1)
-            status_line = height - 1
-            if status_line > 0:
-                output_parts.append(f"\033[{status_line};1H\033[K")
-            
-            # Clear the bottom line too (height)
-            output_parts.append(f"\033[{height};1H\033[K")
-            
-            # Position cursor at what was the scroll region bottom + 1
-            # This is where new output should appear after session ends
-            scroll_bottom = height - self.BOTTOM_RESERVE
-            cursor_row = scroll_bottom + 1
-            if cursor_row > height:
-                cursor_row = height
+            # Position cursor at the end of the previous scroll region
+            cursor_row = self._terminal_height - self._current_bottom_reserve + 1
+            if cursor_row > self._terminal_height:
+                cursor_row = self._terminal_height
             output_parts.append(f"\033[{cursor_row};1H")
             
-            sys.stdout.write("".join(output_parts))
-            sys.stdout.flush()
-            self._scroll_region_active = False
+            safe_write("".join(output_parts))
+            safe_write("", flush=True)
+            
+        self._scroll_region_active = False
+        self._current_bottom_reserve = self.BOTTOM_RESERVE
+        self._plan_panel_height = 0
 
-    def _draw_separator(self) -> None:
-        """Draw separator line between content and status area."""
+    def _draw_separator(self, row: Optional[int] = None) -> None:
+        """Draw separator line at specific or default position."""
         if not self.enabled:
             return
 
-        height, width = self._get_terminal_size()
-        sep_line = height - 2  # Separator at height-2
+        with _stdout_lock:
+            _draw_separator_unsafe(self, row)
 
-        # Draw separator with atomic ANSI sequence
-        output = (
-            f"\0337"                                          # Save cursor (DEC)
-            f"\033[{sep_line};1H"                             # Move to separator line
-            f"\033[K{Theme.BORDER}{'─' * (width)}{Theme.RESET}" # Clear & Draw
-            f"\0338"                                          # Restore cursor (DEC)
-        )
-        sys.stdout.write(output)
-        sys.stdout.flush()
+    def _draw_separator_internal(self, row: Optional[int] = None) -> None:
+        """Internal method - deprecated, use _draw_separator instead."""
+        self._draw_separator(row)
+
+    def update_layout_for_plan(self, active: bool, height: int = 10) -> None:
+        """Dynamically adjust layout to accommodate a Plan Panel.
+
+        Args:
+            active: Whether plan panel is active
+            height: Desired height for the plan panel
+        """
+        # Process any pending resize first (safe context, not signal handler)
+        self._process_pending_resize()
+        
+        if not self.enabled:
+            return
+
+        new_plan_height = height if active else 0
+        if new_plan_height == self._plan_panel_height:
+            return
+
+        old_plan_height = self._plan_panel_height
+        self._plan_panel_height = new_plan_height
+
+        # Reserve = Plan Panel + Separator (1) + Current Reserve
+        self._current_bottom_reserve = self.BOTTOM_RESERVE + self._plan_panel_height
+
+        # Apply new scroll region
+        height_total, _ = self._get_terminal_size()
+        scroll_bottom = height_total - self._current_bottom_reserve
+
+        if scroll_bottom < 5:
+            # Fallback if screen too small
+            self._current_bottom_reserve = self.BOTTOM_RESERVE
+            scroll_bottom = height_total - self._current_bottom_reserve
+
+        with _stdout_lock:
+            # Build the complete atomic sequence for activating plan panel
+            output_parts = []
+
+            # CRITICAL: When activating plan panel (old=0, new>0), push content up first
+            if old_plan_height == 0 and new_plan_height > 0:
+                # Calculate old scroll region
+                old_scroll_bottom = height_total - self.BOTTOM_RESERVE
+
+                # Step 1: Ensure current scroll region is set correctly
+                # (defensive: in case it was changed elsewhere)
+                output_parts.append(f"\033[1;{old_scroll_bottom}r")
+
+                # Step 2: Move to the bottom of current scroll region
+                output_parts.append(f"\033[{old_scroll_bottom};1H")
+
+                # Step 3: Output newlines to push content up
+                # Each newline at the bottom of scroll region triggers a scroll
+                output_parts.append("\n" * new_plan_height)
+
+            # Step 4: Set the new scroll region (with expanded reserve for plan panel)
+            output_parts.append(f"\033[1;{scroll_bottom}r")
+
+            # Step 5: If we just activated the panel, position cursor at bottom of new scroll region
+            # This ensures subsequent output appears in the right place
+            if old_plan_height == 0 and new_plan_height > 0:
+                output_parts.append(f"\033[{scroll_bottom};1H")
+
+            # Execute all commands atomically
+            if output_parts:
+                safe_write("".join(output_parts))
+                safe_write("", flush=True)
+
+            # Draw separator (this handles its own cursor save/restore)
+            _draw_separator_unsafe(self)
+
+    def get_plan_panel_range(self) -> Optional[tuple]:
+        """Get the vertical row range for the plan panel.
+        
+        Returns:
+            Tuple of (start_row, end_row) or None
+        """
+        if not self.enabled or self._plan_panel_height == 0:
+            return None
+            
+        height, _ = self._get_terminal_size()
+        # Separator is at height - reserver + 1
+        # Start is one line below separator
+        start = height - self._current_bottom_reserve + 2
+        end = height - self.BOTTOM_RESERVE
+        return (start, end)
 
     def start_session(self, mode: str, agent_name: str) -> None:
         """Start a new session with the layout.
@@ -279,7 +430,7 @@ class LayoutManager:
         # Reset terminal state
         self._reset_scroll_region()
         
-        # Note: Removed the final print() here - it caused extra blank lines
+        # Note: Removed the final safe_print() here - it caused extra blank lines
         # The _reset_scroll_region already positions cursor properly
 
     def show_status(
@@ -296,6 +447,9 @@ class LayoutManager:
         Returns:
             The StatusBar instance
         """
+        # Process any pending resize first (safe context, not signal handler)
+        self._process_pending_resize()
+        
         # Stop existing status bar
         if self._status_bar:
             self._status_bar.stop(clear=True)
@@ -333,15 +487,17 @@ class LayoutManager:
             set_active_status_bar(None)
             
             if clear and fixed_row is not None:
-                # Clear the status bar row
-                sys.stdout.write("\0337") # Save cursor
-                sys.stdout.write(f"\033[{fixed_row};1H\033[K")
-                sys.stdout.write("\0338") # Restore cursor
-                sys.stdout.flush()
+                with _stdout_lock:
+                    # Clear the status bar row
+                    safe_write("\0337") # Save cursor
+                    safe_write(f"\033[{fixed_row};1H\033[K")
+                    safe_write("\0338") # Restore cursor
+                    safe_write("", flush=True)
             elif clear:
-                # Fallback for inline status bar
-                sys.stdout.write("\r\033[K")
-                sys.stdout.flush()
+                with _stdout_lock:
+                    # Fallback for inline status bar
+                    safe_write("\r\033[K")
+                    safe_write("", flush=True)
 
     def update_status(self, message: str) -> None:
         """Update status bar message.
@@ -349,6 +505,9 @@ class LayoutManager:
         Args:
             message: New status message
         """
+        # Process any pending resize first (safe context, not signal handler)
+        self._process_pending_resize()
+        
         if self._status_bar:
             self._status_bar.update_message(message)
 
@@ -358,11 +517,12 @@ class LayoutManager:
         Shows a formatted prompt indicating execution was interrupted
         and user can provide new input.
         """
-        print()
-        print(f"{Theme.WARNING}{'━' * 40}{Theme.RESET}")
-        print(f"{Theme.WARNING}🛑 Execution interrupted{Theme.RESET}")
-        print(f"{Theme.MUTED}Enter new instructions, or press Enter to continue{Theme.RESET}")
-        print(f"{Theme.WARNING}{'━' * 40}{Theme.RESET}")
+        with _stdout_lock:
+            safe_print()
+            safe_print(f"{Theme.WARNING}{'━' * 40}{Theme.RESET}")
+            safe_print(f"{Theme.WARNING}🛑 Execution interrupted{Theme.RESET}")
+            safe_print(f"{Theme.MUTED}Enter new instructions, or press Enter to continue{Theme.RESET}")
+            safe_print(f"{Theme.WARNING}{'━' * 40}{Theme.RESET}")
 
     def display_completion(self, message: str = "Completed") -> None:
         """Display completion message.
@@ -370,7 +530,8 @@ class LayoutManager:
         Args:
             message: Completion message to display
         """
-        print(f"\n{Theme.SUCCESS}✓ {message}{Theme.RESET}")
+        with _stdout_lock:
+            safe_print(f"\n{Theme.SUCCESS}✓ {message}{Theme.RESET}")
 
     def display_error(self, message: str) -> None:
         """Display error message.
@@ -378,7 +539,8 @@ class LayoutManager:
         Args:
             message: Error message to display
         """
-        print(f"\n{Theme.ERROR}✗ {message}{Theme.RESET}")
+        with _stdout_lock:
+            safe_print(f"\n{Theme.ERROR}✗ {message}{Theme.RESET}")
 
     def display_info(self, message: str) -> None:
         """Display info message.
@@ -386,7 +548,8 @@ class LayoutManager:
         Args:
             message: Info message to display
         """
-        print(f"{Theme.PRIMARY}ℹ {message}{Theme.RESET}")
+        with _stdout_lock:
+            safe_print(f"{Theme.PRIMARY}ℹ {message}{Theme.RESET}")
 
     def display_warning(self, message: str) -> None:
         """Display warning message.
@@ -394,7 +557,8 @@ class LayoutManager:
         Args:
             message: Warning message to display
         """
-        print(f"{Theme.WARNING}⚠ {message}{Theme.RESET}")
+        with _stdout_lock:
+            safe_print(f"{Theme.WARNING}⚠ {message}{Theme.RESET}")
 
     async def get_user_input(self, prompt: str = "> ") -> str:
         """Get user input asynchronously.
@@ -415,8 +579,8 @@ class LayoutManager:
             self._status_bar.stop(clear=True)
 
         # Ensure cursor is visible for input
-        sys.stdout.write("\033[?25h")
-        sys.stdout.flush()
+        safe_write("\033[?25h")
+        safe_write("", flush=True)
 
         try:
             return await prompt_conversation(prompt)

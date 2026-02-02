@@ -1646,13 +1646,20 @@ class Context:
 
     # === Plan Mode API ===
 
-    async def enable_plan(self, plan_id: Optional[str] = None) -> None:
+    async def enable_plan(
+        self,
+        plan_id: Optional[str] = None,
+        cancel_timeout: float = 5.0,
+        cancel_warning_threshold: float = 2.0
+    ) -> None:
         """Enable plan mode (lazy initialization).
 
         This method can be called multiple times for replan scenarios.
 
         Args:
             plan_id: Optional plan identifier (auto-generated if not provided)
+            cancel_timeout: Maximum time to wait for task cancellation (default: 5.0s)
+            cancel_warning_threshold: Threshold to emit early warning to UI (default: 2.0s)
 
         Behavior:
             - First call: Creates TaskRegistry
@@ -1666,12 +1673,70 @@ class Context:
             self.task_registry = TaskRegistry()
             logger.info("Plan mode enabled")
         else:
-            # Replan: cancel running tasks and reset registry
+            # Replan: gracefully cancel running tasks
             if self.task_registry:
-                cancelled = await self.task_registry.cancel_all_running()
-                if cancelled > 0:
-                    logger.info(f"Replan: cancelled {cancelled} running tasks")
-                await self.task_registry.reset()
+                # Send UI event: starting to cancel
+                self.write_output("plan_replan_start", {
+                    "plan_id": self._plan_id,
+                    "message": "Cancelling previous plan tasks...",
+                    "timeout": cancel_timeout,
+                    "warning_threshold": cancel_warning_threshold
+                })
+
+                # Start cancellation with progress tracking
+                cancel_start = time.time()
+                warning_emitted = False
+
+                # Cancel all running tasks (with graceful shutdown)
+                # Use shorter timeout for initial attempt to prevent UI hang
+                initial_timeout = min(cancel_warning_threshold, cancel_timeout)
+                result = await self.task_registry.cancel_all_running(
+                    timeout=initial_timeout,
+                    force=False,
+                )
+
+                elapsed = time.time() - cancel_start
+
+                # If some tasks are still running, emit warning and continue waiting
+                if result["timeout"] > 0 and elapsed < cancel_timeout:
+                    if not warning_emitted:
+                        self.write_output("plan_replan_waiting", {
+                            "plan_id": self._plan_id,
+                            "message": f"Some tasks are taking longer to stop ({elapsed:.1f}s elapsed)...",
+                            "elapsed": elapsed,
+                            "total_timeout": cancel_timeout
+                        })
+                        warning_emitted = True
+
+                    # Continue waiting for remaining tasks
+                    remaining_timeout = cancel_timeout - elapsed
+                    extra_result = await self.task_registry.cancel_all_running(
+                        timeout=remaining_timeout
+                    )
+                    # Merge results
+                    result["cancelled"] += extra_result["cancelled"]
+                    result["timeout"] = extra_result["timeout"]
+                    result["task_ids"] = extra_result["task_ids"]
+
+                if result["cancelled"] > 0:
+                    logger.info(f"Replan: cancelled {result['cancelled']} tasks")
+
+                if result["timeout"] > 0:
+                    logger.warning(
+                        f"Replan: {result['timeout']} tasks did not respond to cancel within {cancel_timeout}s"
+                    )
+
+                # Reset registry (already waited, so no need for timeout again)
+                await self.task_registry.reset(cancel_timeout=0)
+
+                # Send UI event: cancellation complete
+                self.write_output("plan_replan_complete", {
+                    "old_plan_id": self._plan_id,
+                    "cancelled": result["cancelled"],
+                    "timeout": result["timeout"],
+                    "elapsed": time.time() - cancel_start
+                })
+
             logger.info("Plan mode replan triggered")
 
         self._plan_id = plan_id or str(uuid.uuid4())

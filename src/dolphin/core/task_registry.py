@@ -106,12 +106,16 @@ class Task:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Task":
         """Create Task from dictionary."""
+        answer = data.get("answer")
+        if answer is None:
+            # Backward compatibility: historical snapshots may use "output".
+            answer = data.get("output")
         return cls(
             id=data["id"],
             name=data["name"],
             prompt=data["prompt"],
             status=TaskStatus(data["status"]),
-            answer=data.get("answer"),
+            answer=answer,
             think=data.get("think"),
             block_answer=data.get("block_answer"),
             error=data.get("error"),
@@ -141,6 +145,9 @@ class TaskRegistry:
 
         # Runtime handles (not persisted)
         self.running_asyncio_tasks: Dict[str, asyncio.Task] = {}
+        # Tasks currently in complete_task() - prevents reconciliation race
+        # IMPORTANT: Must only be accessed while holding self._lock
+        self._completing_tasks: set = set()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert TaskRegistry to dictionary."""
@@ -215,12 +222,18 @@ class TaskRegistry:
         async with self._lock:
             return bool(self.tasks)
 
-    async def reset(self):
+    async def reset(self, cancel_timeout: float = 5.0) -> None:
         """Reset task state (used for replan).
+
+        This method implements graceful shutdown by first cancelling all running tasks
+        and waiting for them to complete, then clearing all state.
+
+        Args:
+            cancel_timeout: Maximum time to wait for task cancellation (seconds)
 
         Clears:
         - All tasks
-        - Running asyncio task handles (cancels them first)
+        - Running asyncio task handles (after graceful cancellation)
 
         Preserves:
         - exec_mode (will be overwritten by next _plan_tasks call)
@@ -229,16 +242,21 @@ class TaskRegistry:
         Note:
             This is an async method to ensure proper locking for concurrent safety.
         """
-        async with self._lock:
-            # Cancel all running asyncio tasks to prevent background leaks during replan
-            for task_id, asyncio_task in self.running_asyncio_tasks.items():
-                if not asyncio_task.done():
-                    asyncio_task.cancel()
-                    logger.debug(f"Cancelled orphaned task {task_id} during registry reset")
+        # Gracefully cancel all running tasks
+        result = await self.cancel_all_running(timeout=cancel_timeout, force=True)
 
+        if result["timeout"] > 0:
+            logger.warning(
+                f"Reset: {result['timeout']} tasks did not complete within timeout, "
+                f"force cleared anyway: {result['task_ids']}"
+            )
+
+        # Clear all state
+        async with self._lock:
             self.tasks.clear()
-            self.running_asyncio_tasks.clear()
-            logger.info("TaskRegistry reset (replan)")
+            # running_asyncio_tasks already cleared by cancel_all_running()
+
+        logger.info("TaskRegistry reset (replan)")
 
     async def is_all_done(self) -> bool:
         """Return whether all tasks have reached a terminal state (thread-safe)."""
@@ -291,6 +309,76 @@ class TaskRegistry:
                     task.duration = time.time() - task.started_at
 
             logger.debug(f"Task {task_id} status updated: {status.value}")
+
+    async def complete_task(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        asyncio_task: Optional[asyncio.Task] = None,
+        **kwargs
+    ) -> bool:
+        """Atomically complete a task and clean up resources.
+
+        This method encapsulates status update and resource cleanup in a single
+        lock cycle to prevent race conditions during reconciliation.
+
+        Args:
+            task_id: Task identifier
+            status: New terminal status (COMPLETED, FAILED, CANCELLED)
+            asyncio_task: The asyncio.Task handle to remove (optional)
+            **kwargs: Additional fields to update
+
+        Returns:
+            True if task was successfully completed, False otherwise
+
+        Note:
+            This is the preferred method for task completion to ensure atomicity.
+            It updates status, computes duration, and removes from tracking sets
+            all within one lock acquisition.
+        """
+        async with self._lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                logger.warning(f"Cannot complete unknown task: {task_id}")
+                return False
+
+            # Validate: terminal states cannot be changed (except FAILED allows retry)
+            terminal_states = {TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.SKIPPED}
+            if task.status in terminal_states:
+                logger.warning(
+                    f"Task {task_id} already in terminal state {task.status.value}"
+                )
+                return False
+
+            # Mark as completing to prevent race with reconciliation
+            self._completing_tasks.add(task_id)
+
+            try:
+                # Update status
+                task.status = status
+
+                # Update additional fields
+                for key, value in kwargs.items():
+                    if hasattr(task, key):
+                        setattr(task, key, value)
+
+                # Compute duration
+                if task.started_at and not task.duration:
+                    task.duration = time.time() - task.started_at
+
+                # Clean up asyncio task handle (idempotent)
+                if task_id in self.running_asyncio_tasks:
+                    # Only remove if it's the same task object (or if not specified)
+                    existing_task = self.running_asyncio_tasks[task_id]
+                    if asyncio_task is None or existing_task is asyncio_task:
+                        del self.running_asyncio_tasks[task_id]
+
+                logger.debug(f"Task {task_id} atomically completed: {status.value}")
+                return True
+
+            finally:
+                # Always remove from completing set
+                self._completing_tasks.discard(task_id)
 
     async def get_status_counts(self) -> Dict[str, int]:
         """Return count per status (thread-safe)."""
@@ -349,10 +437,9 @@ class TaskRegistry:
                 icon = icon_map.get(task.status, "?")
                 status_label = task.status.value
 
-                # Item 3 Optimization: Check if task is in the process of being cancelled
+                # Show cancelling status if task has pending cancellation (Python 3.11+)
                 if task.status == TaskStatus.RUNNING and task.id in self.running_asyncio_tasks:
                     asyncio_task = self.running_asyncio_tasks[task.id]
-                    # Check if cancelling (Python 3.11+) or if it's already done but status not updated
                     is_cancelling = False
                     if hasattr(asyncio_task, "cancelling"):
                         is_cancelling = asyncio_task.cancelling() > 0
@@ -374,31 +461,91 @@ class TaskRegistry:
 
             return "\n".join(lines)
 
-    async def cancel_all_running(self) -> int:
-        """Cancel all running asyncio tasks and update their status.
+    async def cancel_all_running(
+        self,
+        timeout: float = 5.0,
+        force: bool = True
+    ) -> Dict[str, Any]:
+        """Cancel all running asyncio tasks and wait for completion.
+
+        This implements graceful shutdown with three phases:
+        1. Send cancel signals to all running tasks
+        2. Wait for tasks to complete (with timeout)
+        3. Handle timeout tasks (force cleanup if enabled)
+
+        Args:
+            timeout: Maximum time to wait for tasks to complete (seconds)
+            force: If True, force cleanup even if tasks don't complete within timeout
 
         Returns:
-            Number of tasks cancelled
+            Dict containing:
+            - cancelled: Number of tasks successfully cancelled
+            - timeout: Number of tasks that didn't complete within timeout
+            - task_ids: List of task IDs that timed out
 
         Note:
             This method both cancels the asyncio.Task objects and updates
             the Task status to CANCELLED to keep state synchronized.
         """
+        if not self.running_asyncio_tasks:
+            return {"cancelled": 0, "timeout": 0, "task_ids": []}
+
+        # Phase 1: Send cancellation signals
         async with self._lock:
-            cancelled = 0
+            tasks_to_cancel = []
+            task_id_map = {}  # asyncio.Task -> task_id mapping
+
             for task_id, asyncio_task in list(self.running_asyncio_tasks.items()):
                 if not asyncio_task.done():
                     asyncio_task.cancel()
-                    cancelled += 1
-                    # Update task status to CANCELLED
-                    # This ensures Registry state matches actual execution state
+                    tasks_to_cancel.append(asyncio_task)
+                    task_id_map[asyncio_task] = task_id
+
+                    # Update task status directly (we already hold the lock)
                     task = self.tasks.get(task_id)
-                    if task:
+                    if task and task.status not in {TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.SKIPPED}:
                         task.status = TaskStatus.CANCELLED
-                        # Compute duration if task was started
                         if task.started_at and not task.duration:
                             task.duration = time.time() - task.started_at
-                    logger.debug(f"Cancelled running task: {task_id}")
 
-            self.running_asyncio_tasks.clear()
-            return cancelled
+        if not tasks_to_cancel:
+            async with self._lock:
+                self.running_asyncio_tasks.clear()
+            return {"cancelled": 0, "timeout": 0, "task_ids": []}
+
+        # Phase 2: Wait for tasks to complete (with timeout)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks_to_cancel, return_exceptions=True),
+                timeout=timeout
+            )
+            # All tasks completed
+            async with self._lock:
+                self.running_asyncio_tasks.clear()
+            return {
+                "cancelled": len(tasks_to_cancel),
+                "timeout": 0,
+                "task_ids": []
+            }
+
+        except asyncio.TimeoutError:
+            # Phase 3: Handle timeout tasks
+            timed_out_ids = []
+            async with self._lock:
+                for asyncio_task in tasks_to_cancel:
+                    if not asyncio_task.done():
+                        task_id = task_id_map[asyncio_task]
+                        timed_out_ids.append(task_id)
+                        logger.warning(
+                            f"Task {task_id} did not complete within {timeout}s after cancel"
+                        )
+
+                # Force cleanup (even if tasks haven't completed)
+                if force:
+                    self.running_asyncio_tasks.clear()
+
+            return {
+                "cancelled": len(tasks_to_cancel) - len(timed_out_ids),
+                "timeout": len(timed_out_ids),
+                "task_ids": timed_out_ids
+            }

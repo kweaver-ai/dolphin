@@ -417,7 +417,7 @@ class SystemFunctionsSkillKit(Skillkit):
 
         return f"Slept for {actual_duration:.2f} seconds"
 
-    def _get_cached_result_detail(
+    async def _get_cached_result_detail(
         self,
         reference_id: str,
         scope: str = "auto",
@@ -465,14 +465,14 @@ class SystemFunctionsSkillKit(Skillkit):
         content: str | None = None
         error_text: str | None = None
 
-        def _try_task() -> tuple[str | None, str | None]:
+        async def _try_task() -> tuple[str | None, str | None]:
             if not hasattr(context, "is_plan_enabled") or not context.is_plan_enabled():
                 return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
             registry = getattr(context, "task_registry", None)
             if registry is None:
                 return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
 
-            task = registry.get_task(reference_id)
+            task = await registry.get_task(reference_id)
             if not task:
                 return None, f"Error: task_id '{reference_id}' not found."
 
@@ -484,7 +484,10 @@ class SystemFunctionsSkillKit(Skillkit):
                     return None, f"Error: task '{reference_id}' failed: {err}"
                 return None, f"Error: task '{reference_id}' is not completed (status: {status_value})."
 
-            output = getattr(task, "output", None)
+            output = getattr(task, "answer", None)
+            if output is None:
+                # Backward compatibility: historical Task objects may expose "output".
+                output = getattr(task, "output", None)
             return str(output or "(no output)"), None
 
         def _try_skill() -> tuple[str | None, str | None]:
@@ -501,15 +504,15 @@ class SystemFunctionsSkillKit(Skillkit):
             return str(raw), None
 
         if resolved_scope == "task":
-            content, error_text = _try_task()
+            content, error_text = await _try_task()
         elif resolved_scope == "skill":
             content, error_text = _try_skill()
         elif resolved_scope == "auto":
             # Deterministic: if a task with the same id exists, use task scope and do not fall back.
             registry = getattr(context, "task_registry", None)
-            if getattr(context, "is_plan_enabled", lambda: False)() and registry and registry.get_task(reference_id):
+            if getattr(context, "is_plan_enabled", lambda: False)() and registry and await registry.get_task(reference_id):
                 resolved_scope = "task"
-                content, error_text = _try_task()
+                content, error_text = await _try_task()
             else:
                 resolved_scope = "skill"
                 content, error_text = _try_skill()

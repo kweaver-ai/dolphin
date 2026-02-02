@@ -25,950 +25,19 @@ from enum import Enum
 from typing import Any, Dict, Optional, List
 
 
-# ─────────────────────────────────────────────────────────────
-# Global stdout coordination lock
-# Prevents race conditions between spinner threads and main output
-# ─────────────────────────────────────────────────────────────
-_stdout_lock = threading.RLock()
+# Import migrated components
+from dolphin.cli.ui.theme import Theme, StatusType, BoxStyle
+from dolphin.cli.ui.state import (
+    _stdout_lock,
+    set_active_status_bar,
+    set_active_plan_card,
+    pause_status_bar_context,
+    safe_print,
+    safe_write,
+)
+from dolphin.cli.ui.components import Spinner, StatusBar, LivePlanCard, FixedInputLayout
 
 
-def safe_write(text: str, flush: bool = True) -> None:
-    """Thread-safe stdout write.
-    
-    Use this instead of sys.stdout.write() when outputting text
-    that might conflict with spinner animations.
-    
-    Args:
-        text: Text to write to stdout
-        flush: Whether to flush after writing
-    """
-    with _stdout_lock:
-        sys.stdout.write(text)
-        if flush:
-            sys.stdout.flush()
-
-
-def safe_print(*args, **kwargs) -> None:
-    """Thread-safe print function.
-    
-    Use this instead of print() when outputting text
-    that might conflict with spinner animations.
-    """
-    with _stdout_lock:
-        print(*args, **kwargs)
-
-
-class Theme:
-    """Modern color theme inspired by Codex and Claude Code"""
-    
-    # ANSI escape codes
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    ITALIC = "\033[3m"
-    UNDERLINE = "\033[4m"
-    
-    # Primary colors (muted, modern palette)
-    PRIMARY = "\033[38;5;75m"       # Soft blue
-    SECONDARY = "\033[38;5;183m"    # Soft purple
-    ACCENT = "\033[38;5;216m"       # Peach/coral
-    SUCCESS = "\033[38;5;114m"      # Soft green
-    WARNING = "\033[38;5;221m"      # Soft yellow
-    ERROR = "\033[38;5;210m"        # Soft red
-    
-    # Semantic colors
-    TOOL_NAME = "\033[38;5;75m"     # Bright blue for tool names
-    PARAM_KEY = "\033[38;5;183m"    # Purple for parameter keys
-    PARAM_VALUE = "\033[38;5;223m"  # Warm white for values
-    STRING_VALUE = "\033[38;5;114m" # Green for strings
-    NUMBER_VALUE = "\033[38;5;216m" # Coral for numbers
-    BOOLEAN_VALUE = "\033[38;5;221m"# Yellow for booleans
-    NULL_VALUE = "\033[38;5;245m"   # Gray for null
-    
-    # UI elements
-    BORDER = "\033[38;5;240m"       # Dark gray for borders
-    BORDER_ACCENT = "\033[38;5;75m" # Blue accent for active borders
-    LABEL = "\033[38;5;250m"        # Light gray for labels
-    MUTED = "\033[38;5;245m"        # Muted text
-    
-    # Box drawing characters
-    BOX_TOP_LEFT = "╭"
-    BOX_TOP_RIGHT = "╮"
-    BOX_BOTTOM_LEFT = "╰"
-    BOX_BOTTOM_RIGHT = "╯"
-    BOX_HORIZONTAL = "─"
-    BOX_VERTICAL = "│"
-    BOX_ARROW_RIGHT = "▶"
-    BOX_ARROW_LEFT = "◀"
-    BOX_DOT = "●"
-    BOX_CIRCLE = "○"
-    BOX_CHECK = "✓"
-    BOX_CROSS = "✗"
-    BOX_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    
-    # Heavy box drawing characters for banner border
-    HEAVY_TOP_LEFT = "┏"
-    HEAVY_TOP_RIGHT = "┓"
-    HEAVY_BOTTOM_LEFT = "┗"
-    HEAVY_BOTTOM_RIGHT = "┛"
-    HEAVY_HORIZONTAL = "━"
-    HEAVY_VERTICAL = "┃"
-    
-    # ASCII Art Banner - Large pixel letters with shadow effect
-    # Double-layer hollow design: outer frame (█) + inner hollow (░)
-    # Each letter is 9 chars wide x 6 rows tall
-    # Modern minimalist style with single color
-    BANNER_LETTERS = {
-        'D': [
-            "████████ ",
-            "██░░░░██ ",
-            "██░░  ░█ ",
-            "██░░  ░█ ",
-            "██░░░░██ ",
-            "████████ ",
-        ],
-        'O': [
-            " ██████  ",
-            "██░░░░██ ",
-            "█░░  ░░█ ",
-            "█░░  ░░█ ",
-            "██░░░░██ ",
-            " ██████  ",
-        ],
-        'L': [
-            "██░░     ",
-            "██░░     ",
-            "██░░     ",
-            "██░░     ",
-            "██░░░░░░ ",
-            "████████ ",
-        ],
-        'P': [
-            "████████ ",
-            "██░░░░██ ",
-            "██░░░░██ ",
-            "████████ ",
-            "██░░     ",
-            "██░░     ",
-        ],
-        'H': [
-            "██░░ ░██ ",
-            "██░░ ░██ ",
-            "████████ ",
-            "██░░░░██ ",
-            "██░░ ░██ ",
-            "██░░ ░██ ",
-        ],
-        'I': [
-            "████████ ",
-            " ░░██░░  ",
-            "   ██    ",
-            "   ██    ",
-            " ░░██░░  ",
-            "████████ ",
-        ],
-        'N': [
-            "██░░ ░██ ",
-            "███░ ░██ ",
-            "██░█░░██ ",
-            "██░░█░██ ",
-            "██░ ░███ ",
-            "██░░ ░██ ",
-        ],
-    }
-    
-    # Letter order - single color design (no gradient)
-    BANNER_WORD = "DOLPHIN"
-    # Unified color for hollow design (cyan/teal)
-    BANNER_COLOR = "\033[38;5;80m"
-    # Inner hollow color (darker, creates depth)
-    BANNER_HOLLOW_COLOR = "\033[38;5;238m"
-
-
-class StatusType(Enum):
-    """Status types for visual indicators"""
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCESS = "success"
-    ERROR = "error"
-    SKIPPED = "skipped"
-
-
-@dataclass
-class BoxStyle:
-    """Box drawing style configuration"""
-    width: int = 80
-    padding: int = 1
-    show_border: bool = True
-    border_color: str = Theme.BORDER
-    accent_color: str = Theme.BORDER_ACCENT
-
-
-class Spinner:
-    """Animated spinner for long-running operations.
-    
-    Uses the global _stdout_lock to prevent output conflicts with
-    other threads writing to stdout.
-    """
-    
-    def __init__(self, message: str = "Processing", position_updates: Optional[List[Dict[str, int]]] = None):
-        """
-        Args:
-            message: Text to display alongside the bottom spinner.
-            position_updates: Optional list of relative positions to update synchronously.
-                              Each dict should have 'up' (lines up) and 'col' (column index).
-                              Example: [{'up': 5, 'col': 4}] updates the character 5 lines up at col 4.
-        """
-        self.message = message
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-        self.frame_index = 0
-        self.position_updates = position_updates or []
-        
-    def _animate(self):
-        frames = Theme.BOX_SPINNER_FRAMES
-        while self.running:
-            frame = frames[self.frame_index % len(frames)]
-            
-            # Use global lock to prevent conflicts with main thread output
-            with _stdout_lock:
-                # Build the entire output as a single string for atomic write
-                output_parts = []
-                
-                # 1. Bottom line spinner
-                output_parts.append(f"\r{Theme.PRIMARY}{frame}{Theme.RESET} {Theme.LABEL}{self.message}{Theme.RESET}")
-                
-                # 2. Update remote positions (e.g., Box Header) if any
-                if self.position_updates:
-                    # Save cursor position (DEC sequence \0337 is widely supported)
-                    output_parts.append("\0337")
-                    
-                    for pos in self.position_updates:
-                        lines_up = pos.get('up', 0)
-                        column = pos.get('col', 0)
-                        if lines_up > 0:
-                            # Move up N lines, then move to specific column
-                            # \033[NA (Up), \033[MG (Column M)
-                            output_parts.append(f"\033[{lines_up}A\033[{column}G")
-                            output_parts.append(f"{Theme.PRIMARY}{frame}{Theme.RESET}")
-                    
-                    # Restore cursor position (DEC sequence \0338)
-                    output_parts.append("\0338")
-                
-                # Single atomic write
-                sys.stdout.write("".join(output_parts))
-                sys.stdout.flush()
-            
-            self.frame_index += 1
-            time.sleep(0.08)
-            
-        # Clear the bottom line when done (also protected by lock)
-        with _stdout_lock:
-            sys.stdout.write("\r" + " " * (len(self.message) + 10) + "\r")
-            sys.stdout.flush()
-    
-    def start(self):
-        self.running = True
-        self.thread = threading.Thread(target=self._animate, daemon=True)
-        self.thread.start()
-        
-    def stop(self, success: bool = True):
-        """Stop the spinner and optionally update remote positions with a completion icon."""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=0.5)
-        
-        # Update remote positions with a static completion icon
-        if self.position_updates:
-            # Choose icon based on success status
-            completion_icon = "●" if success else "✗"
-            completion_color = Theme.SUCCESS if success else Theme.ERROR
-            
-            sys.stdout.write("\0337")  # Save cursor
-            for pos in self.position_updates:
-                lines_up = pos.get('up', 0)
-                column = pos.get('col', 0)
-                if lines_up > 0:
-                    sys.stdout.write(f"\033[{lines_up}A\033[{column}G")
-                    sys.stdout.write(f"{completion_color}{completion_icon}{Theme.RESET}")
-            sys.stdout.write("\0338")  # Restore cursor
-            sys.stdout.flush()
-
-
-# ─────────────────────────────────────────────────────────────
-# Global StatusBar Coordination
-# Prevents concurrent animations from conflicting with each other
-# ─────────────────────────────────────────────────────────────
-_active_status_bar: Optional['StatusBar'] = None
-
-
-def _pause_active_status_bar() -> Optional['StatusBar']:
-    """Pause the active status bar if one exists.
-    
-    Uses pause() instead of stop() so the timer continues running.
-    
-    Returns:
-        The paused StatusBar instance (to resume later), or None
-    """
-    global _active_status_bar
-    StatusBar._debug_log(f"_pause_active_status_bar: called, _active_status_bar={_active_status_bar is not None}, running={_active_status_bar.running if _active_status_bar else 'N/A'}")
-    if _active_status_bar and _active_status_bar.running:
-        _active_status_bar.pause()
-        StatusBar._debug_log(f"_pause_active_status_bar: paused StatusBar")
-        return _active_status_bar
-    return None
-
-
-def _resume_status_bar(status_bar: Optional['StatusBar']) -> None:
-    """Resume a previously paused status bar.
-    
-    Args:
-        status_bar: The StatusBar instance to resume
-    """
-    StatusBar._debug_log(f"_resume_status_bar: called, status_bar={status_bar is not None}, running={status_bar.running if status_bar else 'N/A'}")
-    if status_bar and status_bar.running:
-        status_bar.resume()
-        StatusBar._debug_log(f"_resume_status_bar: resumed StatusBar")
-
-
-def set_active_status_bar(status_bar: Optional['StatusBar']) -> None:
-    """Register the active status bar for coordination.
-    
-    Args:
-        status_bar: The StatusBar instance to track
-    """
-    global _active_status_bar
-    _active_status_bar = status_bar
-
-
-from contextlib import contextmanager
-
-@contextmanager  
-def pause_status_bar_context():
-    """Context manager to pause StatusBar during content output.
-    
-    Use this to wrap any code that outputs content to the terminal
-    to prevent StatusBar animation from conflicting with the output.
-    
-    Example:
-        with pause_status_bar_context():
-            print("Some output...")
-    """
-    paused = _pause_active_status_bar()
-    try:
-        yield
-    finally:
-        _resume_status_bar(paused)
-
-
-class LivePlanCard:
-    """
-    Live-updating Plan Card with animated spinner.
-    
-    Uses ANSI cursor control to refresh the entire card area
-    while maintaining the spinner animation.
-    
-    Note: This class coordinates with StatusBar to prevent concurrent
-    animation conflicts. When LivePlanCard starts, it pauses any active
-    StatusBar and resumes it when stopped.
-    """
-    
-    # Color theme (Teal/Cyan)
-    PLAN_PRIMARY = "\033[38;5;44m"
-    PLAN_ACCENT = "\033[38;5;80m"
-    PLAN_MUTED = "\033[38;5;242m"
-    
-    SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    
-    def __init__(self):
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-        self.frame_index = 0
-        self.tasks: List[Dict[str, Any]] = []
-        self.current_task_id: Optional[int] = None
-        self.current_action: Optional[str] = None
-        self.current_task_content: Optional[str] = None
-        self.start_time: float = 0
-        self._lines_printed = 0
-        self._lock = threading.Lock()
-        self._paused_status_bar: Optional['StatusBar'] = None  # Track paused StatusBar
-    
-    def _get_visual_width(self, text: str) -> int:
-        """Calculate visual width handling CJK and ANSI codes."""
-        clean_text = ""
-        skip = False
-        for char in text:
-            if char == "\033":
-                skip = True
-            if not skip:
-                clean_text += char
-            if skip and char == "m":
-                skip = False
-        
-        width = 0
-        for char in clean_text:
-            if unicodedata.east_asian_width(char) in ("W", "F", "A"):
-                width += 2
-            else:
-                width += 1
-        return width
-    
-    def _get_terminal_width(self) -> int:
-        try:
-            import shutil
-            return shutil.get_terminal_size().columns
-        except Exception:
-            return 80
-    
-    def _build_card_lines(self) -> List[str]:
-        """Build all lines of the plan card for rendering."""
-        lines = []
-        
-        width = min(80, self._get_terminal_width() - 8)
-        if width < 40:
-            width = 40
-        
-        total = len(self.tasks)
-        completed = sum(1 for t in self.tasks if t.get("status") in ("completed", "done", "success"))
-        
-        # Header
-        title = "Plan Update"
-        progress = f"{completed}/{total}"
-        header_text = f"  📋 {title}"
-        v_header_w = self._get_visual_width(header_text)
-        v_progress_w = self._get_visual_width(progress)
-        header_padding = width - v_header_w - v_progress_w - 4
-        
-        lines.append(f"{self.PLAN_PRIMARY}{Theme.BOX_TOP_LEFT}{Theme.BOX_HORIZONTAL * width}{Theme.BOX_TOP_RIGHT}{Theme.RESET}")
-        lines.append(f"{self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{Theme.BOLD}{header_text}{Theme.RESET}{' ' * max(0, header_padding)}{self.PLAN_ACCENT}{progress}{Theme.RESET}  {self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
-        lines.append(f"{self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.BOX_HORIZONTAL * width}{Theme.BOX_VERTICAL}{Theme.RESET}")
-        
-        # Task list with animated spinner
-        current_frame = self.SPINNER_FRAMES[self.frame_index % len(self.SPINNER_FRAMES)]
-        
-        for i, task in enumerate(self.tasks):
-            content = task.get("content", task.get("name", f"Task {i+1}"))
-            status = task.get("status", "pending").lower()
-            
-            # Truncate content
-            max_v_content = width - 10
-            v_content = self._get_visual_width(content)
-            if v_content > max_v_content:
-                content = content[:int(max_v_content / 1.5)] + "..."
-            
-            # Determine icon and color
-            is_current = (self.current_task_id is not None and i + 1 == self.current_task_id)
-            
-            if is_current and status in ("pending", "running", "in_progress"):
-                icon, color = current_frame, self.PLAN_PRIMARY
-            elif status in ("completed", "done", "success"):
-                icon, color = "●", Theme.SUCCESS
-            elif status in ("running", "in_progress"):
-                icon, color = current_frame, self.PLAN_PRIMARY
-            else:
-                icon, color = "○", Theme.MUTED
-            
-            if is_current:
-                task_line = f"  {color}{icon}{Theme.RESET} {Theme.BOLD}{content}{Theme.RESET}"
-                indicator = f" {self.PLAN_PRIMARY}←{Theme.RESET}"
-            else:
-                task_line = f"  {color}{icon}{Theme.RESET} {content}"
-                indicator = ""
-            
-            v_line_w = self._get_visual_width(task_line)
-            v_indicator_w = self._get_visual_width(indicator)
-            padding = width - v_line_w - v_indicator_w - 1
-            
-            lines.append(f"{self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{task_line}{indicator}{' ' * max(0, padding)}{self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
-        
-        # Footer with action and elapsed time
-        if self.current_action and self.current_task_id:
-            action_icons = {"create": "📝", "start": "▶", "done": "✓", "pause": "⏸", "skip": "⏭"}
-            action_icon = action_icons.get(self.current_action, "•")
-            
-            lines.append(f"{self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.BOX_HORIZONTAL * width}{Theme.BOX_VERTICAL}{Theme.RESET}")
-            
-            if self.current_task_content:
-                action_text = f"  {action_icon} Task {self.current_task_id}: {self.current_task_content}"
-            else:
-                action_text = f"  {action_icon} Task {self.current_task_id}"
-            
-            v_action_w = self._get_visual_width(action_text)
-            if v_action_w > width - 4:
-                action_text = action_text[:int((width - 6) / 1.5)] + "..."
-                v_action_w = self._get_visual_width(action_text)
-            
-            padding = width - v_action_w - 1
-            lines.append(f"{self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{self.PLAN_ACCENT}{action_text}{Theme.RESET}{' ' * max(0, padding)}{self.PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
-        
-        # Bottom border with timer
-        elapsed = int(time.time() - self.start_time)
-        timer_text = f" {elapsed}s • running "
-        v_timer_w = self._get_visual_width(timer_text)
-        left_len = (width - v_timer_w) // 2
-        right_len = width - v_timer_w - left_len
-        lines.append(f"{self.PLAN_PRIMARY}{Theme.BOX_BOTTOM_LEFT}{Theme.BOX_HORIZONTAL * left_len}{Theme.RESET}{Theme.MUTED}{timer_text}{Theme.RESET}{self.PLAN_PRIMARY}{Theme.BOX_HORIZONTAL * right_len}{Theme.BOX_BOTTOM_RIGHT}{Theme.RESET}")
-        
-        return lines
-    
-    def _animate(self):
-        """Background thread animation loop.
-        
-        Uses global _stdout_lock to coordinate with other output threads.
-        """
-        while self.running:
-            with self._lock:
-                lines = self._build_card_lines()
-                
-                # Use global stdout lock for atomic terminal output
-                with _stdout_lock:
-                    # Move cursor up to overwrite previous card
-                    if self._lines_printed > 0:
-                        sys.stdout.write(f"\033[{self._lines_printed}A")
-                    
-                    # Print new card
-                    for line in lines:
-                        sys.stdout.write(f"\033[K{line}\n")
-                    sys.stdout.flush()
-                
-                self._lines_printed = len(lines)
-            
-            self.frame_index += 1
-            time.sleep(0.1)
-    
-    def start(
-        self,
-        tasks: List[Dict[str, Any]],
-        current_task_id: Optional[int] = None,
-        current_action: Optional[str] = None,
-        current_task_content: Optional[str] = None
-    ):
-        """Start the live card animation.
-        
-        Note: Fixed-position StatusBar uses cursor save/restore, so no pausing needed.
-        """
-        self.tasks = tasks
-        self.current_task_id = current_task_id
-        self.current_action = current_action
-        self.current_task_content = current_task_content
-        self.start_time = time.time()
-        self.frame_index = 0
-        self._lines_printed = 0
-        
-        # Print initial card
-        print()
-        lines = self._build_card_lines()
-        for line in lines:
-            print(line)
-        self._lines_printed = len(lines)
-        
-        # Start animation thread
-        self.running = True
-        self.thread = threading.Thread(target=self._animate, daemon=True)
-        self.thread.start()
-    
-    def update(
-        self,
-        tasks: Optional[List[Dict[str, Any]]] = None,
-        current_task_id: Optional[int] = None,
-        current_action: Optional[str] = None,
-        current_task_content: Optional[str] = None
-    ):
-        """Update the card data (thread-safe)."""
-        with self._lock:
-            if tasks is not None:
-                self.tasks = tasks
-            if current_task_id is not None:
-                self.current_task_id = current_task_id
-            if current_action is not None:
-                self.current_action = current_action
-            if current_task_content is not None:
-                self.current_task_content = current_task_content
-    
-    def stop(self):
-        """Stop the animation and show final state."""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=0.5)
-        
-        # Clear animation and ensure clean state
-        with self._lock:
-            if self._lines_printed > 0:
-                sys.stdout.write(f"\033[{self._lines_printed}A")
-                for _ in range(self._lines_printed):
-                    sys.stdout.write("\033[K\n")
-                sys.stdout.write(f"\033[{self._lines_printed}A")
-            self._lines_printed = 0
-
-
-class StatusBar:
-    """
-    Animated status bar with spinner, message, and elapsed time.
-    
-    Displays a line like:
-    ⠋ I'm Feeling Lucky (esc to cancel, 3m 55s)
-    
-    Features:
-    - Left: animated spinner
-    - Center: status message
-    - Right: elapsed time counter
-    """
-    
-    # Spinner frames
-    SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    
-    # Status bar colors
-    STATUS_COLOR = "\033[38;5;214m"  # Orange/gold
-    TIME_COLOR = "\033[38;5;245m"    # Gray
-    HINT_COLOR = "\033[38;5;242m"    # Dark gray
-    
-    # Debug logging
-    _DEBUG_LOG_FILE = "/tmp/statusbar_debug.log"
-    _DEBUG_ENABLED = True
-    
-    @classmethod
-    def _debug_log(cls, msg: str) -> None:
-        """Write debug message to log file."""
-        if cls._DEBUG_ENABLED:
-            try:
-                with open(cls._DEBUG_LOG_FILE, "a") as f:
-                    import datetime
-                    ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                    f.write(f"[{ts}] {msg}\n")
-            except:
-                pass
-    
-    def __init__(self, message: str = "Processing", hint: str = "esc to cancel", fixed_row: Optional[int] = None):
-        """Initialize the status bar.
-        
-        Args:
-            message: Status message to display
-            hint: Hint text (shown in parentheses)
-            fixed_row: If set, render at this fixed row (1-indexed from top).
-                      If None, render at current cursor position.
-        """
-        self.message = message
-        self.hint = hint
-        self.fixed_row = fixed_row  # Fixed screen row (1-indexed), or None for inline
-        self.running = False
-        self.paused = False  # When True, animation continues but no output
-        self.thread: Optional[threading.Thread] = None
-        self.frame_index = 0
-        self.start_time = 0.0
-        self._lock = threading.Lock()
-        
-        # Log initialization
-        self._debug_log(f"StatusBar.__init__: message={message!r}, hint={hint!r}, fixed_row={fixed_row}")
-    
-    def _format_elapsed(self, seconds: int) -> str:
-        """Format seconds as Xm Ys or Xs."""
-        if seconds >= 60:
-            mins = seconds // 60
-            secs = seconds % 60
-            return f"{mins}m {secs}s"
-        return f"{seconds}s"
-    
-    def _build_line(self) -> str:
-        """Build the status bar line."""
-        frame = self.SPINNER_FRAMES[self.frame_index % len(self.SPINNER_FRAMES)]
-        elapsed = int(time.time() - self.start_time)
-        elapsed_str = self._format_elapsed(elapsed)
-        
-        # Format: ⠋ Message (hint, time)
-        line = (
-            f"{self.STATUS_COLOR}{frame}{Theme.RESET} "
-            f"{self.STATUS_COLOR}{self.message}{Theme.RESET} "
-            f"{self.HINT_COLOR}({self.hint}, {self.TIME_COLOR}{elapsed_str}{self.HINT_COLOR}){Theme.RESET}"
-        )
-        return line
-    
-    def _animate(self):
-        """Background thread animation loop.
-        
-        Uses both the instance lock (self._lock) and global stdout lock (_stdout_lock)
-        to coordinate with other threads.
-        """
-        self._debug_log(f"_animate: THREAD STARTED, fixed_row={self.fixed_row}")
-        loop_count = 0
-        while self.running:
-            loop_count += 1
-            with self._lock:
-                # Only write output if not paused
-                if not self.paused:
-                    line = self._build_line()
-                    
-                    # Ensure line doesn't exceed terminal width to prevent wrapping
-                    try:
-                        import shutil
-                        width = shutil.get_terminal_size().columns
-                        # Simplified truncation for extremely long strings
-                        if len(line) > width * 3:
-                             pass
-                    except:
-                        pass
-
-                    # Use global stdout lock to prevent conflicts with other output
-                    with _stdout_lock:
-                        if self.fixed_row is not None:
-                            # Fixed position mode: save, move, clear+draw, restore
-                            # Combine into SINGLE write to minimize threading conflict
-                            output = (
-                                f"\0337"                     # Save cursor
-                                f"\033[{self.fixed_row};1H"  # Move to fixed row
-                                f"\033[K"                    # Clear line
-                                f"{line}"                    # Draw content
-                                f"\0338"                     # Restore cursor
-                            )
-                            sys.stdout.write(output)
-                            if loop_count <= 3:  # Log first few loops
-                                self._debug_log(f"_animate: loop={loop_count}, mode=FIXED, row={self.fixed_row}, output_repr={output!r}")
-                        else:
-                            # Inline mode
-                            sys.stdout.write(f"\r\033[K{line}")
-                            if loop_count <= 3:  # Log first few loops
-                                self._debug_log(f"_animate: loop={loop_count}, mode=INLINE, line_len={len(line)}")
-                        
-                        sys.stdout.flush()
-            
-            self.frame_index += 1
-            time.sleep(0.1)
-        
-        self._debug_log(f"_animate: THREAD STOPPED after {loop_count} loops")
-    
-    def start(self):
-        """Start the status bar animation."""
-        self._debug_log(f"start: called, fixed_row={self.fixed_row}")
-        self.start_time = time.time()
-        self.frame_index = 0
-        self.running = True
-        self.paused = False
-        self.thread = threading.Thread(target=self._animate, daemon=True)
-        self.thread.start()
-        self._debug_log(f"start: thread started")
-    
-    def pause(self):
-        """Pause the status bar output (thread-safe).
-        
-        The animation thread continues running but doesn't write to stdout.
-        Call resume() to continue output.
-        """
-        with self._lock:
-            if not self.paused:
-                self.paused = True
-                # Clear the status bar line (use global lock for stdout)
-                with _stdout_lock:
-                    if self.fixed_row is not None:
-                        # Fixed position mode: clear the fixed row
-                        output = (
-                            f"\0337"                     # Save cursor
-                            f"\033[{self.fixed_row};1H"  # Move to fixed row
-                            f"\033[K"                    # Clear line
-                            f"\0338"                     # Restore cursor
-                        )
-                        sys.stdout.write(output)
-                    else:
-                        # Inline mode: clear current line and move to next line
-                        # This ensures subsequent output doesn't mix with status bar
-                        sys.stdout.write("\r\033[K\n")
-                    sys.stdout.flush()
-    
-    def resume(self):
-        """Resume the status bar output (thread-safe).
-        
-        Immediately redraws the status bar to ensure it's visible right away.
-        """
-        with self._lock:
-            self.paused = False
-            # Immediately redraw to ensure visibility (use global lock for stdout)
-            line = self._build_line()
-            with _stdout_lock:
-                if self.fixed_row is not None:
-                    output = (
-                        f"\0337"                     # Save cursor
-                        f"\033[{self.fixed_row};1H"  # Move to fixed row
-                        f"\033[K"                    # Clear line
-                        f"{line}"                    # Draw content
-                        f"\0338"                     # Restore cursor
-                    )
-                    sys.stdout.write(output)
-                else:
-                    # Inline mode: redraw on current line
-                    sys.stdout.write(f"\r\033[K{line}")
-                sys.stdout.flush()
-    
-    def update_message(self, message: str):
-        """Update the status message (thread-safe)."""
-        with self._lock:
-            self.message = message
-    
-    def stop(self, clear: bool = True):
-        """Stop the status bar animation."""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=0.5)
-        
-        if clear:
-            # Clear the status bar line (use global lock for stdout)
-            with _stdout_lock:
-                sys.stdout.write("\r\033[K")
-                sys.stdout.flush()
-
-
-class FixedInputLayout:
-    """
-    Terminal layout with fixed bottom input area and scrollable top content.
-    
-    Uses ANSI scroll regions to create:
-    - Top area: scrollable content output
-    - Bottom area: fixed status bar + input prompt
-    
-    Usage:
-        layout = FixedInputLayout(status_message="Ready")
-        layout.start()
-        
-        # Print content normally - it scrolls in the top area
-        layout.print("Some output...")
-        
-        # Get user input from fixed bottom
-        user_input = layout.get_input()
-        
-        layout.stop()
-    """
-    
-    # Reserve lines at bottom for: status bar (1) + info line (1) + input prompt (1) + buffer (1)
-    BOTTOM_RESERVE = 5
-    
-    def __init__(
-        self,
-        status_message: str = "Ready",
-        status_hint: str = "esc to cancel",
-        info_line: str = ""
-    ):
-        self.status_message = status_message
-        self.status_hint = status_hint
-        self.info_line = info_line
-        self._status_bar: Optional[StatusBar] = None
-        self._terminal_height = 24
-        self._terminal_width = 80
-        self._active = False
-        self._lock = threading.Lock()
-    
-    def _get_terminal_size(self) -> tuple:
-        """Get terminal dimensions."""
-        try:
-            import shutil
-            size = shutil.get_terminal_size()
-            return size.lines, size.columns
-        except Exception:
-            return 24, 80
-    
-    def _setup_scroll_region(self):
-        """Setup ANSI scroll region (top portion of screen)."""
-        self._terminal_height, self._terminal_width = self._get_terminal_size()
-        scroll_bottom = self._terminal_height - self.BOTTOM_RESERVE
-        
-        # Set scroll region: ESC[<top>;<bottom>r
-        # This makes only lines 1 to scroll_bottom scrollable
-        sys.stdout.write(f"\033[1;{scroll_bottom}r")
-        
-        # Move cursor to top of scroll region
-        sys.stdout.write("\033[1;1H")
-        sys.stdout.flush()
-    
-    def _draw_fixed_bottom(self):
-        """Draw the fixed bottom area (status bar, info, input prompt)."""
-        height, width = self._terminal_height, self._terminal_width
-        bottom_start = height - self.BOTTOM_RESERVE + 1
-        
-        # Save cursor position
-        sys.stdout.write("\0337")
-        
-        # Move to bottom area (outside scroll region)
-        sys.stdout.write(f"\033[{bottom_start};1H")
-        
-        # Clear the bottom lines
-        for i in range(self.BOTTOM_RESERVE):
-            sys.stdout.write(f"\033[{bottom_start + i};1H\033[K")
-        
-        # Draw separator line
-        sys.stdout.write(f"\033[{bottom_start};1H")
-        separator = f"{Theme.BORDER}{'─' * (width - 1)}{Theme.RESET}"
-        sys.stdout.write(separator)
-        
-        # Draw info line (if any)
-        if self.info_line:
-            sys.stdout.write(f"\033[{bottom_start + 1};1H")
-            sys.stdout.write(f"{Theme.MUTED}{self.info_line}{Theme.RESET}")
-        
-        # Status bar will be drawn by StatusBar class at bottom_start + 2
-        
-        # Input prompt position: bottom_start + 3
-        sys.stdout.write(f"\033[{bottom_start + 3};1H")
-        sys.stdout.write(f"{Theme.PRIMARY}>{Theme.RESET} ")
-        
-        # Restore cursor to scroll region
-        sys.stdout.write("\0338")
-        sys.stdout.flush()
-    
-    def start(self):
-        """Initialize the fixed layout."""
-        self._active = True
-        self._setup_scroll_region()
-        
-        # Clear screen in scroll region
-        sys.stdout.write("\033[2J\033[1;1H")
-        sys.stdout.flush()
-        
-        # Draw fixed bottom
-        self._draw_fixed_bottom()
-        
-        # Start status bar animation (positioned in fixed bottom area)
-        self._status_bar = StatusBar(
-            message=self.status_message,
-            hint=self.status_hint
-        )
-        # Don't auto-start - we'll render it manually in the fixed position
-    
-    def print(self, text: str):
-        """Print text to the scrollable area."""
-        if not self._active:
-            print(text)
-            return
-        
-        with self._lock:
-            # Save cursor, move to scroll region, print, restore
-            sys.stdout.write("\0337")
-            # Text will print in scroll region and scroll naturally
-            print(text)
-            sys.stdout.write("\0338")
-            sys.stdout.flush()
-    
-    def update_status(self, message: str):
-        """Update the status bar message."""
-        with self._lock:
-            self.status_message = message
-            if self._status_bar:
-                self._status_bar.update_message(message)
-    
-    def update_info(self, info: str):
-        """Update the info line."""
-        with self._lock:
-            self.info_line = info
-            self._draw_fixed_bottom()
-    
-    def stop(self):
-        """Restore normal terminal mode."""
-        self._active = False
-        
-        if self._status_bar:
-            self._status_bar.stop(clear=False)
-            self._status_bar = None
-        
-        # Reset scroll region to full screen
-        sys.stdout.write("\033[r")
-        # Move cursor to bottom
-        sys.stdout.write(f"\033[{self._terminal_height};1H")
-        sys.stdout.flush()
 
 
 class ConsoleUI:
@@ -1417,7 +486,7 @@ class ConsoleUI:
         
         # Print all lines
         for line in output_lines:
-            print(line)
+            safe_print(line)
         
         # Start the spinner animation for skill execution
         # Also animate the icon in the Box Header (top-left)
@@ -1489,11 +558,32 @@ class ConsoleUI:
         # Other types - convert to string
         return f"{Theme.PARAM_VALUE}{str(response)[:max_length]}{Theme.RESET}"
     
+    def _highlight_inline_markdown(self, text: str) -> str:
+        """Highlight inline Markdown formats: **bold**, `code`, etc.
+
+        Args:
+            text: Text with inline markdown
+
+        Returns:
+            Text with ANSI color codes for formatting
+        """
+        import re
+        BOLD = "\033[1m"
+        UNBOLD = "\033[22m"  # Reset bold/faint without resetting color
+        CYAN = "\033[36m"
+        RESET = "\033[0m"
+
+        # Replace **text** with bold (use unbold instead of full reset to preserve outer colors)
+        text = re.sub(r'\*\*(.+?)\*\*', f'{BOLD}\\1{UNBOLD}', text)
+        # Replace `code` with cyan
+        text = re.sub(r'`([^`]+)`', f'{CYAN}\\1{RESET}', text)
+        return text
+
     def _format_multiline_text(self, text: str, max_length: int = 300) -> str:
         """
         Format multiline text for display in a box.
         Handles:
-        - Markdown-like content
+        - Markdown-like content (including inline formats like **bold**, `code`)
         - Python execution output (Session info, errors, tracebacks)
         - General structured text
         """
@@ -1565,19 +655,28 @@ class ConsoleUI:
             
             # Markdown patterns
             elif line.startswith('# '):
-                result_lines.append(f"{Theme.PRIMARY}{Theme.BOLD}{display_line}{Theme.RESET}")
+                # Apply inline markdown to header content
+                header_text = self._highlight_inline_markdown(display_line[2:])
+                result_lines.append(f"{Theme.PRIMARY}{Theme.BOLD}{header_text}{Theme.RESET}")
             elif line.startswith('## '):
-                result_lines.append(f"{Theme.SECONDARY}{Theme.BOLD}{display_line}{Theme.RESET}")
+                header_text = self._highlight_inline_markdown(display_line[3:])
+                result_lines.append(f"{Theme.SECONDARY}{Theme.BOLD}{header_text}{Theme.RESET}")
             elif line.startswith('### '):
-                result_lines.append(f"{Theme.ACCENT}{display_line}{Theme.RESET}")
+                header_text = self._highlight_inline_markdown(display_line[4:])
+                result_lines.append(f"{Theme.ACCENT}{header_text}{Theme.RESET}")
             elif line.startswith('- ') or line.startswith('* '):
-                result_lines.append(f"{Theme.SUCCESS}•{Theme.RESET} {display_line[2:]}")
+                list_text = self._highlight_inline_markdown(display_line[2:])
+                result_lines.append(f"{Theme.SUCCESS}•{Theme.RESET} {list_text}")
             elif line.startswith('  - ') or line.startswith('  * '):
-                result_lines.append(f"  {Theme.SUCCESS}◦{Theme.RESET} {display_line[4:]}")
+                list_text = self._highlight_inline_markdown(display_line[4:])
+                result_lines.append(f"  {Theme.SUCCESS}◦{Theme.RESET} {list_text}")
             elif line.strip().startswith('|'):
                 result_lines.append(f"{Theme.MUTED}{display_line}{Theme.RESET}")
             else:
-                result_lines.append(f"{Theme.PARAM_VALUE}{display_line}{Theme.RESET}")
+                # Apply inline markdown to regular text
+                formatted_text = self._highlight_inline_markdown(display_line)
+                # Don't wrap in PARAM_VALUE to avoid interfering with inline markdown colors
+                result_lines.append(formatted_text)
 
         # NOTE: No max_length truncation here - let _format_collapsed_content handle folding
         return '\n'.join(result_lines)
@@ -1664,7 +763,7 @@ class ConsoleUI:
         # No blank line after - let following content manage spacing
         
         for line in output_lines:
-            print(line)
+            safe_print(line)
     
     def skill_call_compact(
         self,
@@ -1713,7 +812,7 @@ class ConsoleUI:
                 duration_str = f" {Theme.MUTED}({duration_ms:.0f}ms){Theme.RESET}"
         
         # Single line format for very short calls
-        print(
+        safe_print(
             f"\n{status_color}{status_icon}{Theme.RESET} "
             f"{Theme.BOLD}⚡ {Theme.TOOL_NAME}{skill_name}{Theme.RESET}"
             f"{Theme.MUTED}({Theme.RESET}{Theme.PARAM_VALUE}{param_str}{Theme.RESET}{Theme.MUTED}){Theme.RESET}"
@@ -1769,7 +868,7 @@ class ConsoleUI:
         
         # Pause status bar to avoid output conflicts
         with pause_status_bar_context():
-            print(line)
+            safe_print(line)
     
     def thinking_indicator(
         self,
@@ -1786,7 +885,7 @@ class ConsoleUI:
         if verbose is False or (verbose is None and not self.verbose):
             return
         
-        print(f"{Theme.MUTED}{Theme.BOX_SPINNER_FRAMES[0]} {message}...{Theme.RESET}", end="\r")
+        safe_print(f"{Theme.MUTED}{Theme.BOX_SPINNER_FRAMES[0]} {message}...{Theme.RESET}", end="\r")
 
     def agent_skill_enter(
         self,
@@ -1834,7 +933,7 @@ class ConsoleUI:
             color = Theme.PRIMARY
             
         # Top border
-        print(f"\n{color}{Theme.BOX_TOP_LEFT}{Theme.BOX_HORIZONTAL * width}{Theme.BOX_TOP_RIGHT}{Theme.RESET}")
+        safe_print(f"\n{color}{Theme.BOX_TOP_LEFT}{Theme.BOX_HORIZONTAL * width}{Theme.BOX_TOP_RIGHT}{Theme.RESET}")
         
         # Content string
         # Ensure text is not too long
@@ -1844,10 +943,10 @@ class ConsoleUI:
         padding_left = (width - len(text)) // 2
         padding_right = width - len(text) - padding_left
         
-        print(f"{color}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding_left}{Theme.BOLD}{text}{Theme.RESET}{' ' * padding_right}{color}{Theme.BOX_VERTICAL}{Theme.RESET}")
+        safe_print(f"{color}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding_left}{Theme.BOLD}{text}{Theme.RESET}{' ' * padding_right}{color}{Theme.BOX_VERTICAL}{Theme.RESET}")
         
         # Bottom border
-        print(f"{color}{Theme.BOX_BOTTOM_LEFT}{Theme.BOX_HORIZONTAL * width}{Theme.BOX_BOTTOM_RIGHT}{Theme.RESET}\n")
+        safe_print(f"{color}{Theme.BOX_BOTTOM_LEFT}{Theme.BOX_HORIZONTAL * width}{Theme.BOX_BOTTOM_RIGHT}{Theme.RESET}\n")
 
     # ─────────────────────────────────────────────────────────────
     # Session/Conversation Display
@@ -1908,34 +1007,31 @@ class ConsoleUI:
         # This ensures the LOGO displays cleanly without trailing artifacts
         import sys
         
-        print()
-        sys.stdout.write("\033[K")  # Clear to end of line
-        print(top_border)
+        safe_print()
+        safe_write("\033[K")  # Clear to end of line
+        safe_print(top_border)
         
         # Empty padding row
-        empty_content = ' ' * content_width
-        sys.stdout.write("\033[K")
-        print(f"{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding}{empty_content}{' ' * padding}{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}")
+        empty_row = ' ' * content_width
+        safe_write("\033[K")
+        safe_print(f"{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding}{empty_row}{' ' * padding}{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}")
         
         # Print banner lines
         for line in banner_lines:
             # Line already has colors, just add padding and borders
-            sys.stdout.write("\033[K")
-            print(f"{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding}{line}{' ' * padding}{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}")
+            safe_write("\033[K")
+            safe_print(f"{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding}{line}{' ' * padding}{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}")
         
         # Empty padding row
-        sys.stdout.write("\033[K")
-        print(f"{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding}{empty_content}{' ' * padding}{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}")
+        safe_write("\033[K")
+        safe_print(f"{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}{' ' * padding}{empty_row}{' ' * padding}{border_color}{Theme.BOLD}{Theme.BOX_VERTICAL}{Theme.RESET}")
         
-        sys.stdout.write("\033[K")
-        print(bottom_border)
+        safe_write("\033[K")
+        safe_print(bottom_border)
         
         # Session info
-        print()
-        print(f"{Theme.SUCCESS}{Theme.BOLD}🚀 Starting {session_type} session{Theme.RESET}")
-        print(f"{Theme.PRIMARY}   Target: {target}{Theme.RESET}")
-        print(f"{Theme.MUTED}   Type 'exit', 'quit', or 'q' to end{Theme.RESET}")
-        print()
+        safe_print(f"{Theme.MUTED}   Type 'exit', 'quit', or 'q' to end{Theme.RESET}")
+        safe_print()
     
     def session_end(self, verbose: Optional[bool] = None) -> None:
         """Display session end"""
@@ -1945,9 +1041,9 @@ class ConsoleUI:
         width = min(40, self._get_terminal_width() - 4)
         border = f"{Theme.BORDER}{'═' * width}{Theme.RESET}"
 
-        print(f"\n{border}")
-        print(f"{Theme.WARNING}{Theme.BOLD}👋 Session ended{Theme.RESET}")
-        print(f"{border}\n")
+        safe_print(f"\n{border}")
+        safe_print(f"{Theme.WARNING}{Theme.BOLD}👋 Session ended{Theme.RESET}")
+        safe_print(f"{border}\n")
 
     def display_session_info(
         self,
@@ -1966,14 +1062,14 @@ class ConsoleUI:
             return
 
         if skillkit_info:
-            print(f"{Theme.SECONDARY}📦 Available Skillkits:{Theme.RESET}")
+            safe_print(f"{Theme.SECONDARY}📦 Available Skillkits:{Theme.RESET}")
             for name, count in sorted(skillkit_info.items()):
-                print(f"{Theme.MUTED}   • {name} ({count} tools){Theme.RESET}")
+                safe_print(f"{Theme.MUTED}   • {name} ({count} tools){Theme.RESET}")
 
         if show_commands:
-            print(f"{Theme.MUTED}💡 Commands: /help • exit/quit/q to end{Theme.RESET}")
+            safe_print(f"{Theme.MUTED}💡 Commands: /help • exit/quit/q to end{Theme.RESET}")
 
-        print()
+        safe_print()
     
     def user_input_display(
         self,
@@ -1990,7 +1086,7 @@ class ConsoleUI:
             content = f"{Theme.MUTED}(empty input){Theme.RESET}"
         
         # Clean, minimal style like Claude Code - single newline before for separation
-        print(f"{Theme.SECONDARY}{Theme.BOLD}>{Theme.RESET} {content}")
+        safe_print(f"{Theme.SECONDARY}{Theme.BOLD}>{Theme.RESET} {content}")
     
     def agent_label(
         self,
@@ -2001,7 +1097,7 @@ class ConsoleUI:
         if verbose is False or (verbose is None and not self.verbose):
             return
         
-        print(f"\n{Theme.SUCCESS}{Theme.BOLD}🤖 {agent_name}{Theme.RESET}")
+        safe_print(f"\n{Theme.SUCCESS}{Theme.BOLD}🤖 {agent_name}{Theme.RESET}")
 
     # ─────────────────────────────────────────────────────────────
     # Plan/Task Progress Display
@@ -2047,9 +1143,9 @@ class ConsoleUI:
             f"{Theme.MUTED}({percentage:.0f}%){Theme.RESET}"
         )
         
-        print(f"\n{progress_line}")
+        safe_print(f"\n{progress_line}")
         if current_task:
-            print(f"  {Theme.LABEL}▸{Theme.RESET} {current_task}")
+            safe_print(f"  {Theme.LABEL}▸{Theme.RESET} {current_task}")
     
     # ─────────────────────────────────────────────────────────────
     # Codex-Style Components (New)
@@ -2115,7 +1211,7 @@ class ConsoleUI:
         
         # Header with bullet point
         progress_str = f"{Theme.MUTED}({completed}/{total} · {percentage:.0f}%){Theme.RESET}"
-        print(f"\n{Theme.PRIMARY}•{Theme.RESET} {Theme.BOLD}{title}{Theme.RESET} {progress_str}")
+        safe_print(f"\n{Theme.PRIMARY}•{Theme.RESET} {Theme.BOLD}{title}{Theme.RESET} {progress_str}")
         
         # Render tasks
         for i, task in enumerate(tasks):
@@ -2132,7 +1228,7 @@ class ConsoleUI:
             else:
                 task_line = f"{prefix} {color}{icon}{Theme.RESET} {content}"
             
-            print(task_line)
+            safe_print(task_line)
             
             # Render children if present
             children = task.get("children", [])
@@ -2141,9 +1237,9 @@ class ConsoleUI:
                 child_status = child.get("status", "pending").lower()
                 child_icon, child_color = status_icons.get(child_status, ("○", Theme.MUTED))
                 child_line = f"       {Theme.MUTED}·{Theme.RESET} {child_color}{child_icon}{Theme.RESET} {child_content}"
-                print(child_line)
+                safe_print(child_line)
         
-        print()  # Trailing newline
+        safe_print()  # Trailing newline
     
     def collapsible_text(
         self,
@@ -2191,7 +1287,7 @@ class ConsoleUI:
         """Print text with automatic folding."""
         formatted = self.collapsible_text(text, max_lines, verbose)
         if formatted:
-            print(formatted)
+            safe_print(formatted)
     
     def timed_status(
         self,
@@ -2218,7 +1314,7 @@ class ConsoleUI:
         time_str = f"{elapsed_seconds}s"
         hint_str = " • esc to interrupt" if show_interrupt_hint else ""
         
-        print(f"\n{Theme.PRIMARY}•{Theme.RESET} {message} {Theme.MUTED}({time_str}{hint_str}){Theme.RESET}")
+        safe_print(f"\n{Theme.PRIMARY}•{Theme.RESET} {message} {Theme.MUTED}({time_str}{hint_str}){Theme.RESET}")
     
     def action_item(
         self,
@@ -2245,18 +1341,18 @@ class ConsoleUI:
             return
         
         # Action header
-        print(f"\n{Theme.PRIMARY}•{Theme.RESET} {Theme.BOLD}{action}{Theme.RESET}")
+        safe_print(f"\n{Theme.PRIMARY}•{Theme.RESET} {Theme.BOLD}{action}{Theme.RESET}")
         
         # Description with tree connector
         if description:
-            print(f"  {Theme.MUTED}└─{Theme.RESET} {description}")
+            safe_print(f"  {Theme.MUTED}└─{Theme.RESET} {description}")
         
         # Details as sub-items
         if details:
             for i, detail in enumerate(details[:10]):  # Limit to 10 items
-                print(f"     {Theme.MUTED}{detail}{Theme.RESET}")
+                safe_print(f"     {Theme.MUTED}{detail}{Theme.RESET}")
             if len(details) > 10:
-                print(f"     {Theme.MUTED}… +{len(details) - 10} more{Theme.RESET}")
+                safe_print(f"     {Theme.MUTED}… +{len(details) - 10} more{Theme.RESET}")
 
     # ─────────────────────────────────────────────────────────────
     # Plan Renderer (Codex-style)
@@ -2375,9 +1471,9 @@ class ConsoleUI:
         header_padding = width - v_header_w - v_progress_w - 4
         
         # No leading blank - previous content should manage spacing
-        print(f"{PLAN_PRIMARY}{Theme.BOX_TOP_LEFT}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_TOP_RIGHT}{Theme.RESET}")
-        print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{Theme.BOLD}{header_text}{Theme.RESET}{' ' * max(0, header_padding)}{PLAN_ACCENT}{progress}{Theme.RESET}  {PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
-        print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_VERTICAL}{Theme.RESET}")
+        safe_print(f"{PLAN_PRIMARY}{Theme.BOX_TOP_LEFT}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_TOP_RIGHT}{Theme.RESET}")
+        safe_print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{Theme.BOLD}{header_text}{Theme.RESET}{' ' * max(0, header_padding)}{PLAN_ACCENT}{progress}{Theme.RESET}  {PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
+        safe_print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_VERTICAL}{Theme.RESET}")
         
         # Task list
         for i, task in enumerate(tasks):
@@ -2411,7 +1507,7 @@ class ConsoleUI:
             v_indicator_w = self._get_visual_width(indicator)
             padding = width - v_line_w - v_indicator_w - 1
             
-            print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{task_line}{indicator}{' ' * max(0, padding)}{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
+            safe_print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{task_line}{indicator}{' ' * max(0, padding)}{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
         
         # Footer with action info
         if current_action and current_task_id:
@@ -2425,7 +1521,7 @@ class ConsoleUI:
             action_icon = action_icons.get(current_action, "•")
             
             # Separator
-            print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_VERTICAL}{Theme.RESET}")
+            safe_print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_VERTICAL}{Theme.RESET}")
             
             # Action line
             if current_task_content:
@@ -2439,7 +1535,7 @@ class ConsoleUI:
                 v_action_w = self._get_visual_width(action_text)
             
             padding = width - v_action_w - 1
-            print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{PLAN_ACCENT}{action_text}{Theme.RESET}{' ' * max(0, padding)}{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
+            safe_print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{PLAN_ACCENT}{action_text}{Theme.RESET}{' ' * max(0, padding)}{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
             
             # Conclusions if present
             if conclusions:
@@ -2450,7 +1546,7 @@ class ConsoleUI:
                     v_conclusion_w = self._get_visual_width(conclusion_text)
                 
                 padding = width - v_conclusion_w - 1
-                print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{PLAN_MUTED}{conclusion_text}{Theme.RESET}{' ' * max(0, padding)}{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
+                safe_print(f"{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}{PLAN_MUTED}{conclusion_text}{Theme.RESET}{' ' * max(0, padding)}{PLAN_PRIMARY}{Theme.BOX_VERTICAL}{Theme.RESET}")
         
         # Bottom border with optional timer
         if elapsed_seconds is not None:
@@ -2458,9 +1554,9 @@ class ConsoleUI:
             v_timer_w = self._get_visual_width(timer_text)
             left_len = (width - v_timer_w) // 2
             right_len = width - v_timer_w - left_len
-            print(f"{PLAN_PRIMARY}{Theme.BOX_BOTTOM_LEFT}{Theme.BOX_HORIZONTAL * left_len}{Theme.RESET}{Theme.MUTED}{timer_text}{Theme.RESET}{PLAN_PRIMARY}{Theme.BOX_HORIZONTAL * right_len}{Theme.BOX_BOTTOM_RIGHT}{Theme.RESET}")
+            safe_print(f"{PLAN_PRIMARY}{Theme.BOX_BOTTOM_LEFT}{Theme.BOX_HORIZONTAL * left_len}{Theme.RESET}{Theme.MUTED}{timer_text}{Theme.RESET}{PLAN_PRIMARY}{Theme.BOX_HORIZONTAL * right_len}{Theme.BOX_BOTTOM_RIGHT}{Theme.RESET}")
         else:
-            print(f"{PLAN_PRIMARY}{Theme.BOX_BOTTOM_LEFT}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_BOTTOM_RIGHT}{Theme.RESET}")
+            safe_print(f"{PLAN_PRIMARY}{Theme.BOX_BOTTOM_LEFT}{Theme.BOX_HORIZONTAL * (width)}{Theme.BOX_BOTTOM_RIGHT}{Theme.RESET}")
         
         # No trailing newline - let following content add spacing as needed
 
@@ -2505,7 +1601,7 @@ class ConsoleUI:
         percentage = (done_count / total_count * 100) if total_count > 0 else 0
         header = f"{Theme.BOLD}{title}{Theme.RESET} {Theme.MUTED}({done_count}/{total_count} · {percentage:.0f}%){Theme.RESET}"
         
-        print(f"\n{header}")
+        safe_print(f"\n{header}")
         
         # Task items
         for i, task in enumerate(tasks, 1):
@@ -2519,7 +1615,7 @@ class ConsoleUI:
             else:
                 task_line = f"  {color}{icon}{Theme.RESET} {i}. {name}"
             
-            print(task_line)
+            safe_print(task_line)
     
     def plan_summary(
         self,
@@ -2540,23 +1636,23 @@ class ConsoleUI:
         if verbose is False or (verbose is None and not self.verbose):
             return
         
-        print(f"\n{self._draw_box_top(plan_name, '📋 ', StatusType.SUCCESS)}")
+        safe_print(f"\n{self._draw_box_top(plan_name, '📋 ', StatusType.SUCCESS)}")
         
         # Tasks section
-        print(self._draw_box_line(f"{Theme.LABEL}Tasks ({len(tasks)}):{Theme.RESET}"))
+        safe_print(self._draw_box_line(f"{Theme.LABEL}Tasks ({len(tasks)}):{Theme.RESET}"))
         for i, task in enumerate(tasks[:7], 1):  # Show max 7 tasks
             task_preview = self._truncate(task, 50)
-            print(self._draw_box_line(f"  {Theme.MUTED}{i}.{Theme.RESET} {task_preview}"))
+            safe_print(self._draw_box_line(f"  {Theme.MUTED}{i}.{Theme.RESET} {task_preview}"))
         
         if len(tasks) > 7:
-            print(self._draw_box_line(f"  {Theme.MUTED}...+{len(tasks) - 7} more{Theme.RESET}"))
+            safe_print(self._draw_box_line(f"  {Theme.MUTED}...+{len(tasks) - 7} more{Theme.RESET}"))
         
         # Next step section
         if next_step:
-            print(self._draw_separator("light"))
-            print(self._draw_box_line(f"{Theme.LABEL}Next:{Theme.RESET} {Theme.PRIMARY}{next_step}{Theme.RESET}"))
+            safe_print(self._draw_separator("light"))
+            safe_print(self._draw_box_line(f"{Theme.LABEL}Next:{Theme.RESET} {Theme.PRIMARY}{next_step}{Theme.RESET}"))
         
-        print(self._draw_box_bottom())
+        safe_print(self._draw_box_bottom())
     
     def result_card(
         self,
@@ -2584,7 +1680,7 @@ class ConsoleUI:
         }
         status_type, icon = status_map.get(status, (StatusType.SUCCESS, "✓"))
         
-        print(f"\n{self._draw_box_top(title, f'{icon} ', status_type)}")
+        safe_print(f"\n{self._draw_box_top(title, f'{icon} ', status_type)}")
         
         # Format content
         if isinstance(content, dict):
@@ -2595,12 +1691,12 @@ class ConsoleUI:
             formatted = str(content)
         
         for line in formatted.split("\n")[:15]:  # Limit to 15 lines
-            print(self._draw_box_line(f"  {line}"))
+            safe_print(self._draw_box_line(f"  {line}"))
         
         if formatted.count("\n") > 15:
-            print(self._draw_box_line(f"  {Theme.MUTED}...{Theme.RESET}"))
+            safe_print(self._draw_box_line(f"  {Theme.MUTED}...{Theme.RESET}"))
         
-        print(self._draw_box_bottom())
+        safe_print(self._draw_box_bottom())
 
 
 # ─────────────────────────────────────────────────────────────
@@ -2691,24 +1787,24 @@ def console_user_input(user_input: str) -> None:
 def console_conversation_separator() -> None:
     """Display conversation separator line"""
     separator = f"{Theme.MUTED}{Theme.BOX_HORIZONTAL * 40}{Theme.RESET}"
-    print(f"\n{separator}")
+    safe_print(f"\n{separator}")
 
 
 if __name__ == "__main__":
     # Demo the UI
     ui = ConsoleUI()
     
-    print("\n" + "=" * 60)
-    print("  Dolphin Console UI Demo")
-    print("=" * 60)
+    safe_print("\n" + "=" * 60)
+    safe_print("  Dolphin Console UI Demo")
+    safe_print("=" * 60)
     
     # ─────────────────────────────────────────────────────────────
     # NEW: Codex-Style Components Demo
     # ─────────────────────────────────────────────────────────────
     
-    print("\n" + "-" * 60)
-    print("  [NEW] Codex-Style Components")
-    print("-" * 60)
+    safe_print("\n" + "-" * 60)
+    safe_print("  [NEW] Codex-Style Components")
+    safe_print("-" * 60)
     
     # Demo Codex-style task list tree
     ui.task_list_tree(
@@ -2748,20 +1844,20 @@ if __name__ == "__main__":
     
     # Demo collapsible text
     long_text = "\n".join([f"Line {i}: Some content here..." for i in range(1, 80)])
-    print("\n[Collapsible Text Demo]")
+    safe_print("\n[Collapsible Text Demo]")
     ui.print_collapsible(long_text, max_lines=5)
     
-    print("\n" + "-" * 60)
-    print("  [END] Codex-Style Components")
-    print("-" * 60)
+    safe_print("\n" + "-" * 60)
+    safe_print("  [END] Codex-Style Components")
+    safe_print("-" * 60)
     
     # ─────────────────────────────────────────────────────────────
     # Original Demo
     # ─────────────────────────────────────────────────────────────
     
-    print("\n" + "-" * 60)
-    print("  Original Components")
-    print("-" * 60)
+    safe_print("\n" + "-" * 60)
+    safe_print("  Original Components")
+    safe_print("-" * 60)
     
     # Demo skill call
     ui.skill_call_start(

@@ -1040,33 +1040,21 @@ class BasicCodeBlock:
             except Exception as e:
                 console(f"Warning: Failed to generate function call tools: {e}")
 
-        # Create stream renderer for live markdown (CLI layer)
-        renderer = None
+        # CLI rendering is handled by the CLI layer via output events.
+        # Core should not import or manage terminal rendering components.
         on_chunk = None
-        if self.context.is_cli_mode():
-            try:
-                from dolphin.cli.ui.stream_renderer import LiveStreamRenderer
-                renderer = LiveStreamRenderer(verbose=self.context.is_verbose())
-                renderer.start()
-                on_chunk = renderer.on_chunk
-            except ImportError:
-                pass
 
         last_stream_item: Optional[StreamItem] = None
         assert self.content, "content is None"
-        try:
-            async for stream_item in self.llm_chat_stream(
-                llm_params,
-                self.recorder,
-                self.content,
-                early_stop_on_tool_call,
-                on_stream_chunk=on_chunk,
-            ):
-                last_stream_item = stream_item
-                yield stream_item.to_dict()
-        finally:
-            if renderer:
-                renderer.stop()
+        async for stream_item in self.llm_chat_stream(
+            llm_params,
+            self.recorder,
+            self.content,
+            early_stop_on_tool_call,
+            on_stream_chunk=on_chunk,
+        ):
+            last_stream_item = stream_item
+            yield stream_item.to_dict()
 
         assert last_stream_item, f"failed read from llm[{llm_params}]"
 
@@ -1446,40 +1434,68 @@ class BasicCodeBlock:
 
         stream_item = None
         cur_len = 0
+        emitted_output_events = False
+        last_full_text = ""
 
-        async for chunk in self.llm_client.mf_chat_stream(**llm_params):
-            # Checkpoint: Check user interrupt during LLM streaming
-            self.context.check_user_interrupt()
+        try:
+            async for chunk in self.llm_client.mf_chat_stream(**llm_params):
+                # Checkpoint: Check user interrupt during LLM streaming
+                self.context.check_user_interrupt()
 
-            stream_item = StreamItem()
-            stream_item.parse_from_chunk(chunk, session_counter=session_counter)
+                stream_item = StreamItem()
+                stream_item.parse_from_chunk(chunk, session_counter=session_counter)
 
-            # Rendering: use callback if provided, otherwise default console output
-            chunk_text = stream_item.answer[cur_len:]
-            if on_stream_chunk:
-                on_stream_chunk(
-                    chunk_text=chunk_text, full_text=stream_item.answer, is_final=False
+                # Rendering: use callback if provided, otherwise default console output
+                chunk_text = stream_item.answer[cur_len:]
+                if on_stream_chunk:
+                    on_stream_chunk(
+                        chunk_text=chunk_text,
+                        full_text=stream_item.answer,
+                        is_final=False,
+                    )
+                else:
+                    # CLI path: emit output events for the CLI layer to render.
+                    # Non-CLI path: preserve legacy behavior (print to stdout).
+                    if self.context.is_cli_mode():
+                        self.context.write_output(
+                            "llm_stream",
+                            {
+                                "chunk_text": chunk_text,
+                                "full_text": stream_item.answer,
+                                "is_final": False,
+                            },
+                        )
+                        emitted_output_events = True
+                        last_full_text = stream_item.answer
+                    else:
+                        console(chunk_text, verbose=self.context.is_verbose(), end="")
+
+                cur_len = len(stream_item.answer)
+
+                if recorder:
+                    recorder.update(item=stream_item, raw_output=stream_item.answer)
+
+                # Update tool call detection flags
+                if stream_item.has_tool_call():
+                    tool_call_detected = True
+                    if stream_item.has_complete_tool_call():
+                        complete_tool_call = stream_item.get_tool_call()
+
+                yield stream_item
+
+                # If a complete tool call is detected and early-stop is enabled, stop streaming.
+                if early_stop_on_tool_call and tool_call_detected and complete_tool_call:
+                    break
+        finally:
+            if emitted_output_events:
+                self.context.write_output(
+                    "llm_stream",
+                    {
+                        "chunk_text": "",
+                        "full_text": last_full_text,
+                        "is_final": True,
+                    },
                 )
-            else:
-                # Default: simple console output
-                console(chunk_text, verbose=self.context.is_verbose(), end="")
-
-            cur_len = len(stream_item.answer)
-
-            if recorder:
-                recorder.update(item=stream_item, raw_output=stream_item.answer)
-
-            # Update tool call detection flags
-            if stream_item.has_tool_call():
-                tool_call_detected = True
-                if stream_item.has_complete_tool_call():
-                    complete_tool_call = stream_item.get_tool_call()
-
-            yield stream_item
-
-            # If a complete tool call is detected and early-stop is enabled, stop streaming.
-            if early_stop_on_tool_call and tool_call_detected and complete_tool_call:
-                break
 
     async def yield_None(self, function_name):
         yield {

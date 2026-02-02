@@ -14,16 +14,18 @@ Usage:
 """
 
 from typing import Optional, Callable
+from dolphin.cli.ui.state import (
+    safe_print, 
+    safe_write, 
+    _pause_active_components, 
+    _resume_components
+)
 
 
 def _is_fixed_layout_active() -> bool:
-    """Check if we're using the fixed bottom layout (scroll region is active).
-    
-    When fixed layout is active, Rich Live is incompatible and should be disabled.
-    """
+    """Check if we're using the fixed bottom layout."""
     try:
         from dolphin.cli.ui.console import _active_status_bar
-        # If there's an active status bar with a fixed_row, we're in fixed layout mode
         if _active_status_bar and hasattr(_active_status_bar, 'fixed_row'):
             return _active_status_bar.fixed_row is not None
     except ImportError:
@@ -51,40 +53,50 @@ class LiveStreamRenderer:
         self._started = False
         self._rich_available = False
         self._use_simple_mode = False  # True when Rich Live is disabled
-        self._paused_status_bar = None  # Track paused status bar for resume
+        self._paused_components = []  # Track paused components for resume
         self._has_output = False  # Track if we've actually output something
         
     def start(self) -> "LiveStreamRenderer":
         """
         Start the Live renderer context.
-        
+
         Returns self for method chaining:
             renderer = LiveStreamRenderer().start()
         """
         if not self._verbose:
             return self
-        
-        # Pause the status bar to avoid conflicts with streaming output
-        try:
-            from dolphin.cli.ui.console import _pause_active_status_bar
-            self._paused_status_bar = _pause_active_status_bar()
-        except ImportError:
-            self._paused_status_bar = None
-        
+
+        # Pause active live components to avoid conflicts with streaming output
+        self._paused_components = _pause_active_components()
+
         # ALWAYS use simple mode in CLI
         # Rich Live is INCOMPATIBLE with scroll regions and terminal layouts
         # because it takes over terminal control and breaks cursor positioning
+        #
+        # NOTE: We check if we're in a CLI-like environment (not just isatty)
+        # because some terminals/shells may not report as TTY correctly
         import sys
-        if sys.stdout.isatty():
+
+        # Use simple mode if:
+        # 1. stdout is a TTY (standard case), OR
+        # 2. stdout has a 'write' method and we're likely in a terminal
+        #    (handles cases where isatty() incorrectly returns False)
+        is_terminal_like = sys.stdout.isatty() or (
+            hasattr(sys.stdout, 'write') and
+            hasattr(sys.stdout, 'flush') and
+            not hasattr(sys.stdout, 'getvalue')  # not a StringIO
+        )
+
+        if is_terminal_like:
             self._use_simple_mode = True
             self._started = True
             return self
-        
+
         # Non-TTY fallback: try Rich Live (for notebooks, etc.)
         try:
             from rich.live import Live
             from rich.markdown import Markdown
-            
+
             self._Markdown = Markdown
             self._live = Live(
                 Markdown(""),
@@ -98,7 +110,7 @@ class LiveStreamRenderer:
         except ImportError:
             self._rich_available = False
             self._started = True
-            
+
         return self
     
     def on_chunk(self, chunk_text: str, full_text: str, is_final: bool = False) -> None:
@@ -115,7 +127,6 @@ class LiveStreamRenderer:
         
         if self._use_simple_mode:
             # Line-buffered output with manual ANSI highlighting
-            # This provides basic Markdown formatting without Rich Live
             if not hasattr(self, '_line_buffer'):
                 self._line_buffer = ""
             
@@ -125,14 +136,24 @@ class LiveStreamRenderer:
             while '\n' in self._line_buffer:
                 line, self._line_buffer = self._line_buffer.split('\n', 1)
                 self._print_highlighted_line(line)
-                self._has_output = True  # Track that we've output something
+                self._has_output = True
                 
         elif self._rich_available and self._live and self._Markdown:
-            # Rich Live mode: update with full Markdown
+            # Rich Live mode: update with full Markdown (Rich handles its own locking)
             self._live.update(self._Markdown(full_text))
         else:
-            # Fallback: print incremental text
-            print(chunk_text, end="", flush=True)
+            # Fallback: use line-buffered output with highlighting
+            # (same as simple mode, to ensure markdown rendering)
+            if not hasattr(self, '_line_buffer'):
+                self._line_buffer = ""
+
+            self._line_buffer += chunk_text
+
+            # Process complete lines
+            while '\n' in self._line_buffer:
+                line, self._line_buffer = self._line_buffer.split('\n', 1)
+                self._print_highlighted_line(line)
+                self._has_output = True
     
     def _print_highlighted_line(self, line: str) -> None:
         """Print a line with simple ANSI Markdown highlighting."""
@@ -148,6 +169,8 @@ class LiveStreamRenderer:
         DIM = "\033[2m"
         BG_GRAY = "\033[48;5;236m"  # Dark gray background for code
         
+        from dolphin.cli.ui.state import safe_print
+
         stripped = line.lstrip()
         indent = line[:len(line) - len(stripped)]
         
@@ -163,68 +186,63 @@ class LiveStreamRenderer:
                 self._in_code_block = True
                 self._code_lang = stripped[3:].strip()
                 lang_display = f" {self._code_lang}" if self._code_lang else ""
-                print(f"{indent}{DIM}╭───{lang_display}{'─' * max(0, 40 - len(lang_display))}╮{RESET}")
+                safe_print(f"{indent}{DIM}╭───{lang_display}{'─' * max(0, 40 - len(lang_display))}╮{RESET}")
             else:
                 # Ending a code block
                 self._in_code_block = False
                 self._code_lang = ""
-                print(f"{indent}{DIM}╰{'─' * 44}╯{RESET}")
+                safe_print(f"{indent}{DIM}╰{'─' * 44}╯{RESET}")
             return
         
         # Inside code block - render code with special formatting
         if self._in_code_block:
-            print(f"{indent}{DIM}│{RESET} {GREEN}{stripped}{RESET}")
+            safe_print(f"{indent}{DIM}│{RESET} {GREEN}{stripped}{RESET}")
             return
         
-        # Headers (H1-H6) - check longer prefixes first, remove # prefix for cleaner output
+        # Headers (H1-H6)
         if stripped.startswith('###### '):
-            title = stripped[7:]  # Remove '###### '
-            print(f"{indent}{DIM}{title}{RESET}")
+            title = stripped[7:]
+            safe_print(f"{indent}{DIM}{title}{RESET}")
         elif stripped.startswith('##### '):
-            title = stripped[6:]  # Remove '##### '
-            print(f"{indent}{WHITE}{title}{RESET}")
+            title = stripped[6:]
+            safe_print(f"{indent}{WHITE}{title}{RESET}")
         elif stripped.startswith('#### '):
-            title = stripped[5:]  # Remove '#### '
-            print(f"{indent}{BLUE}{BOLD}{title}{RESET}")
+            title = stripped[5:]
+            safe_print(f"{indent}{BLUE}{BOLD}{title}{RESET}")
         elif stripped.startswith('### '):
-            title = stripped[4:]  # Remove '### '
-            print(f"{indent}{MAGENTA}{BOLD}{title}{RESET}")
+            title = stripped[4:]
+            safe_print(f"{indent}{MAGENTA}{BOLD}{title}{RESET}")
         elif stripped.startswith('## '):
-            title = stripped[3:]  # Remove '## '
-            print(f"{indent}{CYAN}{BOLD}{title}{RESET}")
+            title = stripped[3:]
+            safe_print(f"{indent}{CYAN}{BOLD}{title}{RESET}")
         elif stripped.startswith('# '):
-            title = stripped[2:]  # Remove '# '
-            print(f"{indent}{YELLOW}{BOLD}{title}{RESET}")
-        # Markdown tables - detect lines with | delimiters
+            title = stripped[2:]
+            safe_print(f"{indent}{YELLOW}{BOLD}{title}{RESET}")
+        # Markdown tables
         elif stripped.startswith('|') and stripped.endswith('|'):
-            # Check if it's a separator row (|---|---|)
             inner = stripped[1:-1]
             if all(c in '-|: ' for c in inner):
-                # Table separator row - render as horizontal line
                 cells = inner.split('|')
                 rendered_cells = [DIM + '─' * max(3, len(cell.strip())) + RESET for cell in cells]
-                print(f"{indent}{DIM}├{'┼'.join(rendered_cells)}┤{RESET}")
+                safe_print(f"{indent}{DIM}├{'┼'.join(rendered_cells)}┤{RESET}")
             else:
-                # Table data row - render with nice borders
                 cells = inner.split('|')
                 rendered_cells = [self._highlight_inline(cell.strip()) for cell in cells]
-                print(f"{indent}{DIM}│{RESET} {f' {DIM}│{RESET} '.join(rendered_cells)} {DIM}│{RESET}")
+                safe_print(f"{indent}{DIM}│{RESET} {f' {DIM}│{RESET} '.join(rendered_cells)} {DIM}│{RESET}")
         # Lists
         elif stripped.startswith('- ') or stripped.startswith('* '):
-            bullet = stripped[0]
             content = stripped[2:]
-            # Handle inline formatting in content
             content = self._highlight_inline(content)
-            print(f"{indent}{GREEN}•{RESET} {content}")
+            safe_print(f"{indent}{GREEN}•{RESET} {content}")
         # Numbered lists
         elif len(stripped) > 2 and stripped[0].isdigit() and stripped[1] in '.:)':
             num = stripped[0]
             content = stripped[2:].lstrip()
             content = self._highlight_inline(content)
-            print(f"{indent}{GREEN}{num}.{RESET} {content}")
-        # Regular text with inline formatting
+            safe_print(f"{indent}{GREEN}{num}.{RESET} {content}")
+        # Regular text
         else:
-            print(f"{indent}{self._highlight_inline(stripped)}")
+            safe_print(f"{indent}{self._highlight_inline(stripped)}")
     
     def _highlight_inline(self, text: str) -> str:
         """Highlight inline Markdown: **bold**, `code`, etc."""
@@ -254,7 +272,7 @@ class LiveStreamRenderer:
                 self._line_buffer = ""
             # Only add newline if we actually output something
             elif hasattr(self, '_has_output') and self._has_output:
-                print()  # End the streaming output with a newline
+                safe_print()  # End the streaming output with a newline
 
         if self._live and self._started and not self._use_simple_mode:
             try:
@@ -265,14 +283,11 @@ class LiveStreamRenderer:
         self._use_simple_mode = False
         self._has_output = False  # Reset for next use
         
-        # Resume the status bar that was paused during streaming
-        if hasattr(self, '_paused_status_bar') and self._paused_status_bar:
-            try:
-                from dolphin.cli.ui.console import _resume_status_bar
-                _resume_status_bar(self._paused_status_bar)
-            except ImportError:
-                pass
-            self._paused_status_bar = None
+        # Resume components that were paused during streaming
+        if hasattr(self, '_paused_components') and self._paused_components:
+            from dolphin.cli.ui.state import _resume_components
+            _resume_components(self._paused_components)
+            self._paused_components = []
         
     def __enter__(self) -> "LiveStreamRenderer":
         """Context manager support."""

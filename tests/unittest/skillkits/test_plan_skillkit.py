@@ -298,6 +298,32 @@ class TestPlanSkillkit:
         assert context.check_user_interrupt.call_count >= 1
     
     @pytest.mark.asyncio
+    async def test_wait_interrupted(self):
+        """Test _wait returns gracefully when user interrupts."""
+        from dolphin.core.common.exceptions import UserInterrupt
+        
+        context = Context()
+        skillkit = PlanSkillkit(context)
+        
+        # Simulate user interrupt after 2 checks (i.e., ~2 seconds)
+        call_count = 0
+        def mock_check_interrupt():
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise UserInterrupt("User interrupted")
+        
+        context.check_user_interrupt = mock_check_interrupt
+        
+        # This should NOT raise an exception
+        result = await skillkit._wait(10.0)  # Ask to wait 10s, but will be interrupted
+        
+        # Should return with "(interrupted)" suffix, not raise error
+        assert "interrupted" in result.lower()
+        # Should have waited approximately 1-2 seconds before interrupt
+        assert "Waited" in result
+    
+    @pytest.mark.asyncio
     async def test_kill_task_not_enabled(self):
         """Test _kill_task raises RuntimeError when plan is not enabled."""
         context = Context()
@@ -472,3 +498,133 @@ class TestPlanSkillkit:
             second = await skillkit._check_progress()
             assert "Status Unchanged (checked too recently)" in second
             assert "Guidance: Subtasks need time" in second
+
+    @pytest.mark.asyncio
+    async def test_replan_cancels_running_tasks(self):
+        """Test that replan correctly cancels running tasks from previous plan."""
+        import asyncio
+        from dolphin.core.task_registry import Task
+
+        context = Context()
+        context.write_output = MagicMock()
+        skillkit = PlanSkillkit(context)
+
+        # First plan: create a long-running task
+        tasks = [
+            {"id": "task_1", "name": "Long Task", "prompt": "sleep for 10 seconds"}
+        ]
+
+        with patch.object(skillkit, '_spawn_task'):
+            await skillkit._plan_tasks(tasks, exec_mode="parallel")
+
+        # Simulate a running task
+        async def running_task():
+            try:
+                await asyncio.sleep(0.5)  # Short sleep
+            except asyncio.CancelledError:
+                raise
+
+        asyncio_task = asyncio.create_task(running_task())
+        context.task_registry.running_asyncio_tasks["task_1"] = asyncio_task
+
+        # Update task status to RUNNING
+        await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
+
+        # Verify task is running
+        assert len(context.task_registry.running_asyncio_tasks) == 1
+        task1 = await context.task_registry.get_task("task_1")
+        assert task1.status == TaskStatus.RUNNING
+
+        # Replan with new tasks
+        new_tasks = [
+            {"id": "task_2", "name": "Quick Task", "prompt": "quick operation"}
+        ]
+
+        with patch.object(skillkit, '_spawn_task'):
+            await skillkit._plan_tasks(new_tasks, exec_mode="parallel")
+
+        # Verify old task was cancelled
+        task1_after = await context.task_registry.get_task("task_1")
+        # Old task should be gone (registry was reset)
+        assert task1_after is None
+
+        # Verify new task exists
+        task2 = await context.task_registry.get_task("task_2")
+        assert task2 is not None
+        assert task2.name == "Quick Task"
+
+        # Verify running tasks were cleared
+        assert len(context.task_registry.running_asyncio_tasks) == 0
+
+        # Clean up the cancelled task
+        try:
+            await asyncio_task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_replan_waits_for_task_cleanup(self):
+        """Test that replan waits for tasks to complete their cleanup."""
+        import asyncio
+        from dolphin.core.task_registry import Task
+
+        context = Context()
+        context.write_output = MagicMock()
+        skillkit = PlanSkillkit(context)
+
+        # First plan
+        tasks = [{"id": "task_1", "name": "Task with cleanup", "prompt": "test"}]
+        with patch.object(skillkit, '_spawn_task'):
+            await skillkit._plan_tasks(tasks, exec_mode="parallel")
+
+        # Create a task with cleanup
+        cleanup_completed = asyncio.Event()
+        task_started = asyncio.Event()
+
+        async def task_with_cleanup():
+            task_started.set()
+            try:
+                await asyncio.sleep(10)  # Long sleep, will be cancelled
+            except asyncio.CancelledError:
+                # Simulate cleanup work
+                await asyncio.sleep(0.05)  # Short cleanup
+                cleanup_completed.set()
+                raise
+
+        asyncio_task = asyncio.create_task(task_with_cleanup())
+        context.task_registry.running_asyncio_tasks["task_1"] = asyncio_task
+        await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
+
+        # Wait for task to start
+        await task_started.wait()
+
+        # Replan (should wait for cleanup)
+        new_tasks = [{"id": "task_2", "name": "New Task", "prompt": "new operation"}]
+        with patch.object(skillkit, '_spawn_task'):
+            await skillkit._plan_tasks(new_tasks, exec_mode="parallel")
+
+        # Give a small window for cleanup to complete (it happens in the cancelled task)
+        await asyncio.sleep(0.1)
+
+        # Verify cleanup was completed
+        assert cleanup_completed.is_set()
+
+    @pytest.mark.asyncio
+    async def test_wait_with_decimal_seconds(self):
+        """Test _wait method supports decimal seconds."""
+        context = Context()
+        skillkit = PlanSkillkit(context)
+
+        # Mock check_user_interrupt
+        context.check_user_interrupt = MagicMock()
+
+        import time
+        start = time.time()
+        result = await skillkit._wait(1.5)
+        elapsed = time.time() - start
+
+        assert "Waited 1.5s" in result
+        # Should have actually waited ~1.5 seconds
+        assert 1.4 <= elapsed <= 1.7
+        # Should have checked interrupt at least twice (once per second + remainder)
+        assert context.check_user_interrupt.call_count >= 2
