@@ -22,7 +22,6 @@ from dolphin.core.logging.logger import console, console_skill_response, get_log
 from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.common.types import SourceType
-from dolphin.lib.skillkits.system_skillkit import SystemFunctions
 
 logger = get_logger("code_block.explore_block_v2")
 
@@ -731,6 +730,7 @@ class ExploreBlockV2(BasicCodeBlock):
         # Get skill object
         skill = self.context.get_skill(skill_name)
         if not skill:
+            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
             skill = SystemFunctions.getSkill(skill_name)
 
         # Get the last stage as reference

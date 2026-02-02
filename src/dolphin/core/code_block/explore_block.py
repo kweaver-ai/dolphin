@@ -33,7 +33,6 @@ from dolphin.core.hook import (
     parse_hook_config,
 )
 from dolphin.core.context_engineer.config.settings import BuildInBucket
-from dolphin.lib.skillkits.system_skillkit import SystemFunctions
 
 from dolphin.core.common.enums import (
     CategoryBlock,
@@ -1364,6 +1363,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         # Get skill object
         skill = self.context.get_skill(skill_name)
         if not skill:
+            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
             skill = SystemFunctions.getSkill(skill_name)
 
         # Get the last stage as reference

@@ -33,7 +33,6 @@ from dolphin.core.logging.logger import (
 from dolphin.core.trajectory.recorder import Recorder
 from dolphin.core.skill.skillkit import Skillkit
 from dolphin.core.skill.skill_matcher import SkillMatcher
-from dolphin.lib.skillkits.system_skillkit import SystemFunctions
 from dolphin.core.runtime.runtime_instance import ProgressInstance
 from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.common.types import SourceType
@@ -846,9 +845,11 @@ class BasicCodeBlock:
                     skill = skillkit.getSkill(tool_name)
                     if skill:
                         tool_schema = skill.get_openai_tool_schema()
-            except:
-                # 如果获取 schema 失败，忽略错误，使用默认行为
-                pass
+            except Exception:
+                logger.debug(
+                    f"Tool schema fetch failed for tool={tool_name}; falling back to default parsing.",
+                    exc_info=True,
+                )
 
         # 提取参数类型映射
         param_types = {}
@@ -951,7 +952,10 @@ class BasicCodeBlock:
             if getattr(self.context, "_history_injected", False):
                 return
         except Exception:
-            pass
+            logger.debug(
+                "History injection flag check failed; continuing without shortcut.",
+                exc_info=True,
+            )
 
         # 若 conversation_history 已含内容，则视为已有历史，不再二次注入，避免重复
         try:
@@ -967,7 +971,10 @@ class BasicCodeBlock:
                 if isinstance(bucket.content, _Msgs) and bucket.content.get_messages():
                     return
         except Exception:
-            pass
+            logger.debug(
+                "History pre-check in context_manager failed; continuing with injection path.",
+                exc_info=True,
+            )
 
         history_messages = self._get_history_messages()
         if not history_messages:
@@ -981,7 +988,10 @@ class BasicCodeBlock:
         try:
             setattr(self.context, "_history_injected", True)
         except Exception:
-            pass
+            logger.debug(
+                "Failed to set _history_injected flag on context.",
+                exc_info=True,
+            )
 
     async def llm_chat(
         self,
@@ -1152,6 +1162,7 @@ class BasicCodeBlock:
 
         skill = self.context.get_skill(skill_name)
         if not skill:
+            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
             skill = SystemFunctions.getSkill(skill_name)
 
         if skill is None:

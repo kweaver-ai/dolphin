@@ -188,6 +188,10 @@ class LivePlanCard:
                     lines = self._build_card_lines()
 
                     with _stdout_lock:
+                        # Stop can be called while we're waiting on _stdout_lock. Re-check here to
+                        # avoid rendering a "late" frame after stop() has requested shutdown.
+                        if not self.running:
+                            break
                         if self.fixed_row_start:
                             # ABSOLUTE POSITIONING: Gamma-tier stability
                             output_parts = ["\0337"]  # Save cursor
@@ -232,6 +236,8 @@ class LivePlanCard:
         self.current_action = current_action
         self.current_task_content = current_task_content
         self.fixed_row_start = fixed_row_start
+        if self.fixed_row_start is not None and self.fixed_row_start < 1:
+            self.fixed_row_start = 1
         self.start_time = time.time()
         self.frame_index = 0
         self._lines_printed = 0
@@ -240,12 +246,12 @@ class LivePlanCard:
         set_active_plan_card(self)
 
         with _stdout_lock:
-            if not self.fixed_row_start:
+            if self.fixed_row_start is None:
                 safe_write("\n")
 
             lines = self._build_card_lines()
 
-            if self.fixed_row_start:
+            if self.fixed_row_start is not None:
                 output_parts = ["\0337"]
                 for i, line in enumerate(lines):
                     output_parts.append(f"\033[{self.fixed_row_start + i};1H\033[K{line}")
@@ -270,7 +276,7 @@ class LivePlanCard:
         with self._lock:
             if not self.paused:
                 self.paused = True
-                if not self.fixed_row_start:
+                if self.fixed_row_start is None:
                     # Only clear if we are inline and potentially in the way
                     with _stdout_lock:
                         if self._lines_printed > 0:
@@ -286,7 +292,7 @@ class LivePlanCard:
         with self._lock:
             if self.paused:
                 self.paused = False
-                if self.fixed_row_start:
+                if self.fixed_row_start is not None:
                     return # Already there
 
                 # Re-print card if inline
@@ -328,8 +334,9 @@ class LivePlanCard:
                 # Handle fixed row mode (absolute positioning)
                 if self.fixed_row_start is not None:
                     # Fixed row mode: move to fixed row and clear
-                    for row in range(self.fixed_row_start, self.fixed_row_start + self._lines_printed):
-                        safe_write(f"\033[{row};0H\033[K")  # Move to row and clear
+                    start_row = max(1, self.fixed_row_start)
+                    for row in range(start_row, start_row + self._lines_printed):
+                        safe_write(f"\033[{row};1H\033[K")  # Move to row and clear
                     safe_write("", flush=True)
                 elif self._lines_printed > 0:
                     # Relative mode: existing logic

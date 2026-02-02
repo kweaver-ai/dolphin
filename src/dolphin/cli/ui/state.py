@@ -58,28 +58,56 @@ _active_status_bar: Optional['StatusBar'] = None
 _active_plan_card: Optional['LivePlanCard'] = None
 
 
+def get_active_status_bar() -> Optional["StatusBar"]:
+    """Get the active status bar instance in a thread-safe way."""
+    global _active_status_bar
+    with _stdout_lock:
+        return _active_status_bar
+
+
+def get_active_plan_card() -> Optional["LivePlanCard"]:
+    """Get the active plan card instance in a thread-safe way."""
+    global _active_plan_card
+    with _stdout_lock:
+        return _active_plan_card
+
+
 def _pause_active_components() -> List[Any]:
     """Pause all active live UI components (StatusBar, LivePlanCard).
 
     Returns:
         List of paused components to resume later.
     """
-    paused = []
+    paused: List[Any] = []
 
-    # Pause Status Bar
-    global _active_status_bar
-    if _active_status_bar and _active_status_bar.running and not _active_status_bar.paused:
-        _active_status_bar.pause()
-        paused.append(_active_status_bar)
+    with _stdout_lock:
+        status_bar = _active_status_bar
+        plan_card = _active_plan_card
+
+    # Pause Status Bar (only if it may conflict with normal output)
+    status_bar_fixed_row = getattr(status_bar, "fixed_row", None) if status_bar else None
+    if (
+        status_bar
+        and status_bar.running
+        and not status_bar.paused
+        and status_bar_fixed_row is None
+    ):
+        status_bar.pause()
+        paused.append(status_bar)
         # Debug log - import locally to avoid circular dependency
         from dolphin.cli.ui.components.status_bar import StatusBar
         StatusBar._debug_log("Paused active StatusBar")
 
-    # Pause Plan Card
-    global _active_plan_card
-    if _active_plan_card and _active_plan_card.running and not _active_plan_card.paused:
-        _active_plan_card.pause()
-        paused.append(_active_plan_card)
+    # Pause Plan Card (only if it may conflict with normal output)
+    plan_card_fixed_row = getattr(plan_card, "fixed_row_start", None) if plan_card else None
+    if (
+        plan_card
+        and plan_card.running
+        and not plan_card.paused
+        and plan_card_fixed_row is None
+    ):
+        plan_card.pause()
+        paused.append(plan_card)
         # Debug log
         from dolphin.cli.ui.components.status_bar import StatusBar
         StatusBar._debug_log("Paused active LivePlanCard")
@@ -109,14 +137,17 @@ def _pause_active_status_bar() -> Optional['StatusBar']:
     Returns:
         The paused StatusBar instance (to resume later), or None
     """
-    global _active_status_bar
+    status_bar = get_active_status_bar()
     # Debug log - import locally to avoid circular dependency
     from dolphin.cli.ui.components.status_bar import StatusBar
-    StatusBar._debug_log(f"_pause_active_status_bar: called, _active_status_bar={_active_status_bar is not None}, running={_active_status_bar.running if _active_status_bar else 'N/A'}")
-    if _active_status_bar and _active_status_bar.running:
-        _active_status_bar.pause()
+    StatusBar._debug_log(
+        f"_pause_active_status_bar: called, _active_status_bar={status_bar is not None}, "
+        f"running={status_bar.running if status_bar else 'N/A'}"
+    )
+    if status_bar and status_bar.running:
+        status_bar.pause()
         StatusBar._debug_log(f"_pause_active_status_bar: paused StatusBar")
-        return _active_status_bar
+        return status_bar
     return None
 
 
@@ -141,7 +172,8 @@ def set_active_status_bar(status_bar: Optional['StatusBar']) -> None:
         status_bar: The StatusBar instance to track
     """
     global _active_status_bar
-    _active_status_bar = status_bar
+    with _stdout_lock:
+        _active_status_bar = status_bar
 
 
 def set_active_plan_card(plan_card: Optional['LivePlanCard']) -> None:
@@ -151,7 +183,8 @@ def set_active_plan_card(plan_card: Optional['LivePlanCard']) -> None:
         plan_card: The LivePlanCard instance to track
     """
     global _active_plan_card
-    _active_plan_card = plan_card
+    with _stdout_lock:
+        _active_plan_card = plan_card
 
 
 @contextmanager
@@ -173,6 +206,8 @@ __all__ = [
     '_stdout_lock',
     '_active_status_bar',
     '_active_plan_card',
+    'get_active_status_bar',
+    'get_active_plan_card',
     'set_active_status_bar',
     'set_active_plan_card',
     'pause_status_bar_context',

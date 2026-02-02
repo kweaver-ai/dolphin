@@ -18,18 +18,16 @@ from dolphin.cli.ui.state import (
     safe_print, 
     safe_write, 
     _pause_active_components, 
-    _resume_components
+    _resume_components,
+    get_active_status_bar,
 )
 
 
 def _is_fixed_layout_active() -> bool:
     """Check if we're using the fixed bottom layout."""
-    try:
-        from dolphin.cli.ui.console import _active_status_bar
-        if _active_status_bar and hasattr(_active_status_bar, 'fixed_row'):
-            return _active_status_bar.fixed_row is not None
-    except ImportError:
-        pass
+    status_bar = get_active_status_bar()
+    if status_bar and hasattr(status_bar, "fixed_row"):
+        return status_bar.fixed_row is not None
     return False
 
 

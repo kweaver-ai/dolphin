@@ -146,8 +146,11 @@ class SystemFunctionsSkillKit(Skillkit):
         Returns:
             str: File content
         """
-        with open(file_path, "r", encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except Exception as e:
+            raise RuntimeError(f"Failed to read file: {file_path}: {e}") from e
 
     def _read_folder(
         self,
