@@ -442,12 +442,6 @@ class ExploreBlockV2(BasicCodeBlock):
                     )
                 have_answer = True
                 yield self.recorder.get_progress_answers() if self.recorder else None
-            console_skill_response(
-                skill_name=function_name,
-                response=self.recorder.get_answer() if self.recorder else "",
-                max_length=1024,
-            )
-
             if not have_answer:
                 (
                     self.recorder.update(

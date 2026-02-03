@@ -737,12 +737,6 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 have_answer = True
                 yield self.recorder.get_progress_answers() if self.recorder else None
 
-            console_skill_response(
-                skill_name=function_name,
-                response=self.recorder.get_answer() if self.recorder else "",
-                max_length=1024,
-            )
-
             if not have_answer and self.recorder:
                 self.recorder.update(
                     item=f"Calling {function_name} tool did not return proper results, need to call again.",

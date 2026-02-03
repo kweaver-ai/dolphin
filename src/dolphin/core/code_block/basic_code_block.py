@@ -1121,7 +1121,7 @@ class BasicCodeBlock:
     def block_start_log(self, block_name: str, content: Optional[str] = None):
         assert self.output_var
         console_block_start(
-            block_name, self.output_var, content, verbose=self.context.verbose
+            block_name, self.output_var, content, verbose=self.context.verbose, is_cli=self.context.is_cli_mode()
         )
 
     def record_llm_response_to_trajectory(
@@ -1309,10 +1309,10 @@ class BasicCodeBlock:
                     )
             
             console_skill_call(
-                skill_name, skill_params_json, verbose=self.context.verbose, skill=skill
+                skill_name, skill_params_json, verbose=self.context.verbose, skill=skill, is_cli=self.context.is_cli_mode()
             )
             if agent_as_skill is not None:
-                console_agent_skill_enter(skill_name, verbose=self.context.verbose)
+                console_agent_skill_enter(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
             result = None
             async for result in Skillkit.arun(
                 skill=skill,
@@ -1411,7 +1411,7 @@ class BasicCodeBlock:
                 yield result
             
             if agent_as_skill is not None:
-                console_agent_skill_exit(skill_name, verbose=self.context.verbose)
+                console_agent_skill_exit(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
         except ToolInterrupt as e:
             # Restore original agent even in case of interruption
             if agent_as_skill is not None:
@@ -1452,6 +1452,7 @@ class BasicCodeBlock:
                 verbose=self.context.verbose,
                 skill=skill,
                 params=skill_params_json,
+                is_cli=self.context.is_cli_mode(),
             )
         self.context.debug(
             f"call_skill function_name[{skill_name}] "

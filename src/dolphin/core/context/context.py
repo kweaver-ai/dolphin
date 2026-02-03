@@ -2,6 +2,7 @@ import asyncio
 import os
 import json
 import time
+from collections import deque
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
 
@@ -13,6 +14,7 @@ from dolphin.core.common.constants import (
     KEY_USER_ID,
     MAX_ANSWER_CONTENT_LENGTH,
     MAX_LOG_LENGTH,
+    MAX_OUTPUT_EVENTS,
 )
 from dolphin.core.context_engineer.core.context_manager import (
     ContextManager,
@@ -115,7 +117,8 @@ class Context:
         self._nesting_level: int = 0
 
         # Output event buffer (for UI/SDK consumption)
-        self._output_events: List[Dict[str, Any]] = []
+        # Use bounded deque to prevent unbounded memory growth in long-running sessions
+        self._output_events: deque = deque(maxlen=MAX_OUTPUT_EVENTS)
 
     def set_skillkit_hook(self, skillkit_hook: "SkillkitHook"):
         """Set skillkit_hook"""
@@ -1640,8 +1643,8 @@ class Context:
 
     def drain_output_events(self) -> List[Dict[str, Any]]:
         """Drain and clear buffered output events."""
-        events = self._output_events
-        self._output_events = []
+        events = list(self._output_events)
+        self._output_events.clear()
         return events
 
     # === Plan Mode API ===
