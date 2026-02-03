@@ -1944,6 +1944,23 @@ class BasicCodeBlock:
                     )
                     continue
 
+                # Standard approach: Apply interrupt_config if provided in tool_def
+                if "interrupt_config" in tool_def:
+                    interrupt_config = tool_def.get("interrupt_config")
+                    if interrupt_config and isinstance(interrupt_config, dict):
+                        tool_instance.interrupt_config = interrupt_config
+                        self.context.debug(
+                            f"[_load_dynamic_tools] Applied interrupt_config to {tool_name}"
+                        )
+
+                # Hook: Allow upper layer (SDK) to post-process tool instance
+                # This allows SDK to apply temporary policies (e.g., auto-add interrupt_config)
+                if hasattr(self.context, 'on_dynamic_tool_loaded'):
+                    try:
+                        self.context.on_dynamic_tool_loaded(tool_instance, tool_def)
+                    except Exception as e:
+                        self.context.error(f"Error in on_dynamic_tool_loaded hook: {e}")
+
                 # Add tool instance to skillkit
                 current_skillkit.addSkill(tool_instance)
                 loaded_count += 1

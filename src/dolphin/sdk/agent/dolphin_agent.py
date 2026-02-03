@@ -98,6 +98,10 @@ class DolphinAgent(BaseAgent):
         self.skillkit = skillkit
         self.variables = variables
         self.file_path = file_path
+        
+        # Enable auto-interrupt for dynamically loaded tools
+        # This is a temporary hack/policy at SDK layer, not in core
+        self._enable_dynamic_tool_auto_interrupt = True
         self.global_config = global_config
         self.global_config_path = global_config_path
         self.global_skills = global_skills
@@ -363,6 +367,11 @@ class DolphinAgent(BaseAgent):
                 }
             )
 
+            # Register hook for dynamic tool loading (SDK-layer policy)
+            # This is a temporary hack: auto-add interrupt_config to dynamic tools
+            if self._enable_dynamic_tool_auto_interrupt:
+                self._register_dynamic_tool_hooks()
+
             # Validate DPH syntax
             self._validate_syntax()
 
@@ -373,6 +382,51 @@ class DolphinAgent(BaseAgent):
                 "INIT_FAILED", f"Failed to initialize agent: {str(e)}"
             )
 
+    def _register_dynamic_tool_hooks(self):
+        """Register hooks for dynamically loaded tools (SDK-layer temporary policy)
+        
+        This is a TEMPORARY HACK to auto-add interrupt_config to all dynamic tools.
+        
+        Architecture decision:
+        - Placed at SDK layer (DolphinAgent) instead of core layer (BasicCodeBlock)
+        - Reduces invasiveness and keeps core clean
+        - Future: Remove this method when upper business layer provides interrupt_config
+        
+        Working mechanism:
+        - Core layer: Standard approach - applies interrupt_config if present in tool_def
+        - SDK layer: Temporary policy - auto-adds interrupt_config to tool_instance
+        """
+        def on_dynamic_tool_loaded(tool_instance, tool_def):
+            """Hook called after each dynamic tool is loaded and interrupt_config applied
+            
+            Args:
+                tool_instance: The created tool instance (already has interrupt_config if tool_def had it)
+                tool_def: The tool definition dict from _dynamic_tools
+            """
+            # Only add if tool doesn't already have interrupt_config
+            # (i.e., not provided in tool_def)
+            if not hasattr(tool_instance, 'interrupt_config'):
+                tool_name = tool_def.get("name", "unknown")
+                
+                # TEMPORARY HACK: Auto-add interrupt_config
+                # TODO: Remove this when upper layer provides interrupt_config in tool_def
+                auto_interrupt_config = {
+                    "requires_confirmation": True,
+                    "confirmation_message": (
+                        f"即将调用「{tool_name}」工具，是否确认执行？"
+                    )
+                }
+                tool_instance.interrupt_config = auto_interrupt_config
+                
+                self._logger.debug(
+                    f"[DolphinAgent] Auto-added interrupt protection to dynamic tool: {tool_name}"
+                )
+        
+        # Register the hook on executor's context
+        if self.executor and self.executor.context:
+            self.executor.context.on_dynamic_tool_loaded = on_dynamic_tool_loaded
+            self._logger.debug("[DolphinAgent] Registered dynamic tool hook (temporary policy)")
+    
     def _parse_header_info(self):
         """Parse the header information block of DPH files, supporting the general @XX ... @XX format.
                同时从content中移除这些header块，避免干扰后续解析
