@@ -10,8 +10,21 @@ def test_read_file_replaces_invalid_utf8(tmp_path):
     file_path.write_bytes(b"ok\xff\xfeend")
 
     content = skillkit._read_file(str(file_path))
+    assert content.startswith("[WARNING] File is not valid UTF-8; decoded with replacement characters.\n")
     assert "ok" in content
+    assert "\ufffd" in content
     assert "end" in content
+
+
+def test_read_file_valid_utf8_no_warning(tmp_path):
+    skillkit = SystemFunctionsSkillKit()
+
+    file_path = tmp_path / "utf8.txt"
+    file_path.write_text("hello世界", encoding="utf-8")
+
+    content = skillkit._read_file(str(file_path))
+    assert not content.startswith("[WARNING] ")
+    assert content == "hello世界"
 
 
 def test_read_file_missing_path_raises_runtime_error(tmp_path):

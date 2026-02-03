@@ -271,6 +271,10 @@ class PlanSkillkit(Skillkit):
                     # where task finished but hasn't updated status yet)
                     if t.id in registry._completing_tasks:
                         continue
+                    # Re-check task status under lock to avoid restarting tasks that have already completed.
+                    current_task = registry.tasks.get(t.id)
+                    if not current_task or current_task.status != TaskStatus.RUNNING:
+                        continue
                     if t.id not in registry.running_asyncio_tasks:
                         logger.warning(
                             f"[PlanSkillkit] Reconciliation: Task {t.id} is RUNNING in registry but has no asyncio task. "

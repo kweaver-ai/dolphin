@@ -147,8 +147,17 @@ class SystemFunctionsSkillKit(Skillkit):
             str: File content
         """
         try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                return f.read()
+            with open(file_path, "rb") as f:
+                data = f.read()
+
+            try:
+                return data.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                text = data.decode("utf-8", errors="replace")
+                return (
+                    "[WARNING] File is not valid UTF-8; decoded with replacement characters.\n"
+                    + text
+                )
         except Exception as e:
             raise RuntimeError(f"Failed to read file: {file_path}: {e}") from e
 

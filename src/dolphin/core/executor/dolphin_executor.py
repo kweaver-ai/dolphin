@@ -277,6 +277,10 @@ class DolphinExecutor:
                 "请使用 flags.set_flag(flags.EXPLORE_BLOCK_V2, False) 禁用后再调用"
             )
 
+        # Initialize context.all_skills from global_skills if not already set
+        # This ensures tools are available for the exploration session
+        self._prepare_for_run(**kwargs)
+
         # Ensure interrupt state is cleared for the new exploration round
         if hasattr(self.context, "clear_interrupt"):
             self.context.clear_interrupt()
