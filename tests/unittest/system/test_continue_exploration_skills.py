@@ -558,10 +558,11 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
             context_manager=ContextManager()
         )
 
-        # 验证初始状态：context.all_skills 应该是空的
-        self.assertTrue(
+        # 验证初始状态：context.all_skills 应该已经从 global_skills 自动填充
+        # 因为 Context.__init__ 会调用 _calc_all_skills()
+        self.assertFalse(
             executor.context.all_skills.isEmpty(),
-            "初始状态下 context.all_skills 应该为空"
+            "初始状态下 context.all_skills 应该已经从 global_skills 自动填充"
         )
 
         # 验证 global_skills 包含技能（这些技能应该被加载到 context）
@@ -580,39 +581,31 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
             debug_infos=None,
         )
 
-        # 在调用 continue_exploration 前，模拟 _prepare_for_run 应该被调用
-        # Bug 复现：如果不调用 _prepare_for_run，get_skillkit() 会返回空集
-        skillkit_before_prepare = explore_block.get_skillkit()
+        # 验证 explore_block.get_skillkit() 可以正常获取技能
+        # 因为 Context 初始化时已经调用了 _calc_all_skills()
+        skillkit = explore_block.get_skillkit()
+        skills_count = len(skillkit.getSkills())
 
-        # 关键断言：在 _prepare_for_run 之前，skillkit 应该是空的（这是 bug）
-        # 修复后，continue_exploration 应该调用 _prepare_for_run，所以不应该是空的
-        skills_count_before = len(skillkit_before_prepare.getSkills())
+        # 验证技能已经可用（无需调用 _prepare_for_run）
+        self.assertGreater(
+            skills_count,
+            0,
+            "Context 初始化后，explore_block 应该能获取到技能"
+        )
 
-        # 模拟修复：调用 _prepare_for_run（这应该在 continue_exploration 中自动调用）
+        # 验证 context.skillkit 初始时为空（与 all_skills 不同）
+        self.assertTrue(
+            executor.context.is_skillkit_empty(),
+            "初始状态下 context.skillkit 应该为空"
+        )
+
+        # 调用 _prepare_for_run 会填充 context.skillkit
         executor._prepare_for_run()
 
-        # 验证修复后的状态
+        # 验证 _prepare_for_run 填充了 context.skillkit
         self.assertFalse(
-            executor.context.all_skills.isEmpty(),
-            "调用 _prepare_for_run 后，context.all_skills 应该被填充"
-        )
-
-        # 再次获取 skillkit
-        skillkit_after_prepare = explore_block.get_skillkit()
-        skills_count_after = len(skillkit_after_prepare.getSkills())
-
-        # 验证 _prepare_for_run 确实加载了技能
-        self.assertGreater(
-            skills_count_after,
-            0,
-            "_prepare_for_run 后应该能获取到技能"
-        )
-
-        # 验证修复前后的差异
-        self.assertNotEqual(
-            skills_count_before,
-            skills_count_after,
-            "调用 _prepare_for_run 前后，可用技能数量应该不同"
+            executor.context.is_skillkit_empty(),
+            "调用 _prepare_for_run 后，context.skillkit 应该被填充"
         )
 
     def test_continue_exploration_method_calls_prepare_for_run(self):
@@ -639,8 +632,18 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
                 context_manager=ContextManager()
             )
 
-            # 验证初始状态
-            self.assertTrue(executor.context.all_skills.isEmpty())
+            # 验证初始状态：context.all_skills 应该已经从 global_skills 自动填充
+            # 因为 Context.__init__ 会调用 _calc_all_skills()
+            self.assertFalse(
+                executor.context.all_skills.isEmpty(),
+                "初始状态下 context.all_skills 应该已经从 global_skills 自动填充"
+            )
+
+            # 验证 context.skillkit 初始时为空（与 all_skills 不同）
+            self.assertTrue(
+                executor.context.is_skillkit_empty(),
+                "初始状态下 context.skillkit 应该为空"
+            )
 
             # 使用 patch 监视 _prepare_for_run 是否被调用
             with patch.object(
