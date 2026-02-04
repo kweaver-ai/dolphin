@@ -680,7 +680,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             
             return_answer["answer"] = skip_response
             return_answer["think"] = skip_response
-            return_answer["status"] = "completed"
+            return_answer["status"] = "skipped"
             
             if self.recorder:
                 self.recorder.update(
@@ -690,6 +690,8 @@ Please reconsider your approach and improve your answer based on the feedback ab
                     skill_name=function_name,
                     skill_type=self.context.get_skill_type(function_name),
                     skill_args=function_params_json,
+                    is_completed=True,
+                    is_skipped=True,
                 )
             
             yield [return_answer]

@@ -902,6 +902,7 @@ class Status(Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class TypeStage(Enum):

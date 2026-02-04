@@ -382,7 +382,7 @@ class ExploreBlockV2(BasicCodeBlock):
             
             return_answer["answer"] = skip_response
             return_answer["think"] = skip_response
-            return_answer["status"] = "completed"
+            return_answer["status"] = "skipped"
             
             (
                 self.recorder.update(
@@ -392,6 +392,8 @@ class ExploreBlockV2(BasicCodeBlock):
                     skill_name=function_name,
                     skill_type=self.context.get_skill_type(function_name),
                     skill_args=function_params_json,
+                    is_completed=True,
+                    is_skipped=True,
                 )
                 if self.recorder
                 else None
