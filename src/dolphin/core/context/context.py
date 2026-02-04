@@ -120,6 +120,9 @@ class Context:
         # Use bounded deque to prevent unbounded memory growth in long-running sessions
         self._output_events: deque = deque(maxlen=MAX_OUTPUT_EVENTS)
 
+        # Calculate all skills initially
+        self._calc_all_skills()
+
     def set_skillkit_hook(self, skillkit_hook: "SkillkitHook"):
         """Set skillkit_hook"""
         self.skillkit_hook = skillkit_hook

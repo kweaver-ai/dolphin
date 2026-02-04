@@ -1017,7 +1017,7 @@ class StreamItem:
             )]
         return []
 
-    def parse_from_chunk(self, chunk: dict, session_counter: int | None = None):
+    def parse_from_chunk(self, chunk: dict, session_counter: Optional[int] = None):
         """Parse streaming chunk from LLM response.
 
         Args:

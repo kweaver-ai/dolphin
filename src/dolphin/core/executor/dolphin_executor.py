@@ -309,9 +309,10 @@ class DolphinExecutor:
             progress=progress,
         )
 
-        # Extract parameters from kwargs
-        model_name = kwargs.get("model") or self.context.get_last_model_name() or ""
-        use_history = kwargs.get("use_history", True)
+        # Extract parameters from kwargs and remove them to avoid "multiple values" error
+        # when passing both explicitly and via **kwargs
+        model_name = kwargs.pop("model", None) or self.context.get_last_model_name() or ""
+        use_history = kwargs.pop("use_history", True)
 
         # Sync the model name to ExploreBlock
         if model_name:
