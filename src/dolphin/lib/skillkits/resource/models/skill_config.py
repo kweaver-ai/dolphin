@@ -4,6 +4,7 @@ This module contains configuration dataclasses for ResourceSkillkit settings.
 """
 
 from dataclasses import dataclass, field
+import os
 from typing import List, Optional
 from pathlib import Path
 
@@ -82,7 +83,12 @@ class ResourceSkillConfig:
         """
         resolved = []
         for dir_str in self.directories:
-            path = Path(dir_str).expanduser()
+            raw = "" if dir_str is None else str(dir_str)
+            raw = raw.strip()
+            while len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in {"'", '"', "`"}:
+                raw = raw[1:-1].strip()
+            raw = os.path.expandvars(os.path.expanduser(raw))
+            path = Path(raw).expanduser()
             if not path.is_absolute():
                 if base_path:
                     path = base_path / path

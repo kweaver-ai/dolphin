@@ -15,6 +15,9 @@ Usage:
 import os
 import sys
 
+# Enable Rich status spinners for the CLI only (opt-in).
+os.environ.setdefault("DOLPHIN_ENABLE_RICH_STATUS", "1")
+
 # Setup Python import paths for the Dolphin package
 scriptDir = os.path.dirname(os.path.abspath(__file__))
 projectRoot = os.path.abspath(os.path.join(scriptDir, ".."))

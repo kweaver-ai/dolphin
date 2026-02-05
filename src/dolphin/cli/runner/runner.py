@@ -56,6 +56,7 @@ from dolphin.cli.runner.modules.artifacts import (
     _saveExecutionTrace,
     _saveSnapshotAnalysis,
 )
+from dolphin.core.utils.rich_status import safe_rich_status
 
 
 # Note: The following functions have been moved to modules/:
@@ -92,7 +93,10 @@ async def runDolphinAgent(args: Args) -> None:
     
     env = None
     try:
-        with richConsole.status("[bold green]Initializing Dolphin Environment...") as status:
+        with safe_rich_status(
+            "[bold green]Initializing Dolphin Environment...",
+            console=richConsole,
+        ) as status:
             status.update("[bold blue]Loading configuration...[/]")
             env, _ = await initializeEnvironment(args)
             
@@ -216,7 +220,10 @@ async def _runDolphinAgentWithEnv(env, args: Args) -> None:
     sessionId = args.sessionId if args.sessionId else str(uuid.uuid4())
     
     try:
-        with richConsole.status("[bold green]Initializing agent...[/]") as status:
+        with safe_rich_status(
+            "[bold green]Initializing agent...[/]",
+            console=richConsole,
+        ) as status:
             status.update(f"[bold blue]Loading agent:[/][white] {args.agent}[/]")
             agent = await loadAndPrepareAgent(env, args, initialVariables)
             

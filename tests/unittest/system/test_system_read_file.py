@@ -33,3 +33,17 @@ def test_read_file_missing_path_raises_runtime_error(tmp_path):
     missing_path = tmp_path / "missing.txt"
     with pytest.raises(RuntimeError):
         skillkit._read_file(str(missing_path))
+
+def test_read_file_normalizes_path_formats(tmp_path, monkeypatch):
+    skillkit = SystemFunctionsSkillKit()
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("ALFRED_TEST_DIR", str(tmp_path))
+
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+
+    assert skillkit._read_file(" `~/a.txt` " ) == "hello"
+    assert skillkit._read_file("'~/a.txt'") == "hello"
+    assert skillkit._read_file('\"~/a.txt\"') == "hello"
+    assert skillkit._read_file(" $ALFRED_TEST_DIR/a.txt " ) == "hello"
+
