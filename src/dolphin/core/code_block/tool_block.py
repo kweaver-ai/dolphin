@@ -100,7 +100,7 @@ class ToolBlock(BasicCodeBlock):
                     else:
                         skip_response = f"[SKIPPED] {default_skip_msg} (parameters: {params_str})"
                     
-                    resp_item = {"answer": skip_response}
+                    resp_item = {"answer": skip_response, "status": "skipped"}
                     
                     if self.recorder is not None:
                         self.recorder.update(
@@ -111,6 +111,7 @@ class ToolBlock(BasicCodeBlock):
                             skill_type=self.context.get_skill_type(tool_name),
                             source_type=SourceType.SKILL,
                             is_completed=True,
+                            is_skipped=True,
                         )
                     
                     yield {"data": resp_item}

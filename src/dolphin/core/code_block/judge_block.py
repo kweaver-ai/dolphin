@@ -2,7 +2,7 @@ import traceback
 from typing import Any, Optional, AsyncGenerator
 
 from dolphin.core.code_block.basic_code_block import BasicCodeBlock
-from dolphin.core.common.enums import CategoryBlock
+from dolphin.core.common.enums import CategoryBlock, TypeStage
 from dolphin.core.context.context import Context
 from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.utils.tools import ToolInterrupt
@@ -178,7 +178,20 @@ class JudgeBlock(BasicCodeBlock):
                     else:
                         skip_response = f"[SKIPPED] {default_skip_msg} (parameters: {params_str})"
                     
-                    yield {"answer": skip_response}
+                    # Update recorder with skipped status
+                    if self.recorder is not None:
+                        self.recorder.update(
+                            stage=TypeStage.SKILL,
+                            item={"answer": skip_response},
+                            skill_name=tool_name,
+                            skill_args=new_tool_args,
+                            skill_type=self.context.get_skill_type(tool_name),
+                            source_type=SourceType.SKILL,
+                            is_completed=True,
+                            is_skipped=True,
+                        )
+                    
+                    yield {"answer": skip_response, "status": "skipped"}
                 else:
                     # Normal execution (not skipped)
                     async for resp_item in self.skill_run(

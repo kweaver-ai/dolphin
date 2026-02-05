@@ -39,6 +39,7 @@ class Recorder:
         stage=None,  # Changed to None, let us infer automatically
         is_completed=False,
         has_error=False,
+        is_skipped=False,
         input_messages=None,
         source_type=SourceType.OTHER,
         raw_output=None,
@@ -78,6 +79,8 @@ class Recorder:
             status = Status.PROCESSING
         elif has_error:
             status = Status.FAILED
+        elif is_skipped:
+            status = Status.SKIPPED
         else:
             status = Status.COMPLETED
 
