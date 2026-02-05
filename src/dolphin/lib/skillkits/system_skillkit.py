@@ -42,6 +42,23 @@ Notes:
 """
 
 
+def _normalize_path(value: Any) -> str:
+    """Normalize a user-provided path string.
+
+    This function makes path-based tools resilient to common LLM formatting
+    artifacts such as surrounding whitespace, quotes, or markdown backticks.
+    It also expands environment variables and the user home directory.
+    """
+    path = "" if value is None else str(value)
+    path = path.strip()
+    while len(path) >= 2 and path[0] == path[-1] and path[0] in {"'", '"', "`"}:
+        path = path[1:-1].strip()
+    path = os.path.expandvars(path)
+    path = os.path.expanduser(path)
+    return os.path.normpath(path)
+
+
+
 class SystemFunctionsSkillKit(Skillkit):
     def __init__(self, enabled_functions: List[str] | None = None):
         """Initialize system function toolkit
@@ -100,6 +117,7 @@ class SystemFunctionsSkillKit(Skillkit):
         Returns:
             str: File path
         """
+        file_path = _normalize_path(file_path)
         file_dir = os.path.dirname(file_path)
         # Only create directory if there is a directory component
         if file_dir and not os.path.exists(file_dir):
@@ -119,8 +137,9 @@ class SystemFunctionsSkillKit(Skillkit):
         Returns:
             str: File path
         """
+        file_path = _normalize_path(file_path)
         file_dir = os.path.dirname(file_path)
-        if not os.path.exists(file_dir):
+        if file_dir and not os.path.exists(file_dir):
             os.makedirs(file_dir, exist_ok=True)
 
         if isinstance(content, str):
@@ -146,8 +165,21 @@ class SystemFunctionsSkillKit(Skillkit):
         Returns:
             str: File content
         """
-        with open(file_path, "r", encoding="utf-8") as f:
-            return f.read()
+        file_path = _normalize_path(file_path)
+        try:
+            with open(file_path, "rb") as f:
+                data = f.read()
+
+            try:
+                return data.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                text = data.decode("utf-8", errors="replace")
+                return (
+                    "[WARNING] File is not valid UTF-8; decoded with replacement characters.\n"
+                    + text
+                )
+        except Exception as e:
+            raise RuntimeError(f"Failed to read file: {file_path}: {e}") from e
 
     def _read_folder(
         self,
@@ -170,6 +202,7 @@ class SystemFunctionsSkillKit(Skillkit):
         Returns:
             str: Content of all matching files, sorted by filename, with each file's content prefixed by its filename
         """
+        folder_path = _normalize_path(folder_path)
         if not os.path.exists(folder_path):
             raise FileNotFoundError(f"Folder not found: {folder_path}")
 
@@ -271,6 +304,7 @@ class SystemFunctionsSkillKit(Skillkit):
         """
         if not target_path:
             raise ValueError("target_path is required")
+        target_path = _normalize_path(target_path)
         if pattern is None or pattern == "":
             raise ValueError("pattern cannot be empty")
         if before < 0 or after < 0:
@@ -417,7 +451,7 @@ class SystemFunctionsSkillKit(Skillkit):
 
         return f"Slept for {actual_duration:.2f} seconds"
 
-    def _get_cached_result_detail(
+    async def _get_cached_result_detail(
         self,
         reference_id: str,
         scope: str = "auto",
@@ -465,14 +499,14 @@ class SystemFunctionsSkillKit(Skillkit):
         content: str | None = None
         error_text: str | None = None
 
-        def _try_task() -> tuple[str | None, str | None]:
+        async def _try_task() -> tuple[str | None, str | None]:
             if not hasattr(context, "is_plan_enabled") or not context.is_plan_enabled():
                 return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
             registry = getattr(context, "task_registry", None)
             if registry is None:
                 return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
 
-            task = registry.get_task(reference_id)
+            task = await registry.get_task(reference_id)
             if not task:
                 return None, f"Error: task_id '{reference_id}' not found."
 
@@ -484,7 +518,10 @@ class SystemFunctionsSkillKit(Skillkit):
                     return None, f"Error: task '{reference_id}' failed: {err}"
                 return None, f"Error: task '{reference_id}' is not completed (status: {status_value})."
 
-            output = getattr(task, "output", None)
+            output = getattr(task, "answer", None)
+            if output is None:
+                # Backward compatibility: historical Task objects may expose "output".
+                output = getattr(task, "output", None)
             return str(output or "(no output)"), None
 
         def _try_skill() -> tuple[str | None, str | None]:
@@ -501,15 +538,15 @@ class SystemFunctionsSkillKit(Skillkit):
             return str(raw), None
 
         if resolved_scope == "task":
-            content, error_text = _try_task()
+            content, error_text = await _try_task()
         elif resolved_scope == "skill":
             content, error_text = _try_skill()
         elif resolved_scope == "auto":
             # Deterministic: if a task with the same id exists, use task scope and do not fall back.
             registry = getattr(context, "task_registry", None)
-            if getattr(context, "is_plan_enabled", lambda: False)() and registry and registry.get_task(reference_id):
+            if getattr(context, "is_plan_enabled", lambda: False)() and registry and await registry.get_task(reference_id):
                 resolved_scope = "task"
-                content, error_text = _try_task()
+                content, error_text = await _try_task()
             else:
                 resolved_scope = "skill"
                 content, error_text = _try_skill()

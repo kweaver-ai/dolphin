@@ -64,6 +64,32 @@ class TestPlanContext:
         assert plan_id_2 == "plan_2"
         # Tasks should be cleared by reset()
         assert not await registry2.has_tasks()
+
+    @pytest.mark.asyncio
+    async def test_enable_plan_replan_uses_non_force_initial_cancel(self):
+        """Test replan cancellation uses force=False for the initial cancellation attempt."""
+        context = Context()
+        await context.enable_plan(plan_id="plan_1")
+
+        calls = []
+
+        async def fake_cancel_all_running(*, timeout: float = 5.0, force: bool = True):
+            calls.append({"timeout": timeout, "force": force})
+            if len(calls) == 1:
+                return {"cancelled": 0, "timeout": 1, "task_ids": ["task_1"]}
+            return {"cancelled": 0, "timeout": 0, "task_ids": []}
+
+        async def fake_reset(*, cancel_timeout: float = 5.0):
+            return None
+
+        assert context.task_registry is not None
+        context.task_registry.cancel_all_running = fake_cancel_all_running  # type: ignore[method-assign]
+        context.task_registry.reset = fake_reset  # type: ignore[method-assign]
+
+        await context.enable_plan(plan_id="plan_2", cancel_timeout=1.0, cancel_warning_threshold=0.1)
+
+        assert calls, "Expected cancel_all_running to be called during replan"
+        assert calls[0]["force"] is False
     
     @pytest.mark.asyncio
     async def test_disable_plan(self):

@@ -3,7 +3,6 @@ import importlib.util
 import importlib.metadata
 import inspect
 from typing import Dict, Optional
-from rich.console import Console
 
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.logging.logger import get_logger
@@ -13,6 +12,7 @@ from dolphin.lib.skillkits.system_skillkit import (
     SystemFunctionsSkillKit,
 )
 from dolphin.core.agent.base_agent import BaseAgent
+from dolphin.core.utils.rich_status import safe_rich_status
 
 logger = get_logger("skill")
 
@@ -93,9 +93,9 @@ class GlobalSkills:
                     logger.warning(f"Failed to create VM: {str(e)}")
 
             loaded_count = 0
-            console = Console()
-            
-            with console.status("[bold green]Loading skillkits from entry points...") as status:
+            with safe_rich_status(
+                "[bold green]Loading skillkits from entry points..."
+            ) as status:
                 for entry_point in entry_points:
                     status.update(f"[bold blue]Loading skillkit:[/][white] {entry_point.name}[/]")
                     try:

@@ -15,15 +15,15 @@ Usage:
 import os
 import sys
 
-# Ensure we're working from the project root directory
-# This allows relative paths to work correctly regardless of where the script is called from
+# Enable Rich status spinners for the CLI only (opt-in).
+os.environ.setdefault("DOLPHIN_ENABLE_RICH_STATUS", "1")
+
+# Setup Python import paths for the Dolphin package
 scriptDir = os.path.dirname(os.path.abspath(__file__))
 projectRoot = os.path.abspath(os.path.join(scriptDir, ".."))
 
-# Change to project root directory to make relative paths work correctly
-os.chdir(projectRoot)
-
 # Add project root and src directory to sys.path for relative imports
+# Note: We do NOT chdir to projectRoot - users expect their working directory to be preserved
 srcPath = os.path.join(projectRoot, "src")
 if srcPath not in sys.path:
     sys.path.insert(0, srcPath)

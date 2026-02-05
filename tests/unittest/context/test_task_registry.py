@@ -128,25 +128,75 @@ class TestTaskRegistry:
     
     @pytest.mark.asyncio
     async def test_reset(self):
-        """Test reset clears tasks."""
+        """Test reset clears tasks and gracefully cancels running tasks."""
         registry = TaskRegistry()
         task1 = Task(id="task_1", name="Task 1", prompt="Prompt 1")
         task2 = Task(id="task_2", name="Task 2", prompt="Prompt 2")
-        
+
         await registry.add_task(task1)
         await registry.add_task(task2)
         registry.exec_mode = PlanExecMode.SEQUENTIAL
         registry.max_concurrency = 10
-        
+
+        # Add a running task that responds quickly to cancellation
+        async def dummy_task():
+            try:
+                await asyncio.sleep(0.5)  # Short sleep
+            except asyncio.CancelledError:
+                raise
+
+        asyncio_task = asyncio.create_task(dummy_task())
+        registry.running_asyncio_tasks["task_1"] = asyncio_task
+
         assert await registry.has_tasks()
-        
-        await registry.reset()
-        
+        assert len(registry.running_asyncio_tasks) == 1
+
+        # Reset with reasonable timeout
+        await registry.reset(cancel_timeout=1.0)
+
         # Tasks cleared
         assert not await registry.has_tasks()
+        # Running tasks cleared
+        assert len(registry.running_asyncio_tasks) == 0
+        # Task was cancelled
+        assert asyncio_task.cancelled()
         # Config preserved
         assert registry.exec_mode == PlanExecMode.SEQUENTIAL
         assert registry.max_concurrency == 10
+
+    @pytest.mark.asyncio
+    async def test_reset_with_slow_cleanup(self):
+        """Test reset waits for tasks to complete cleanup."""
+        registry = TaskRegistry()
+
+        cleanup_done = asyncio.Event()
+        task_started = asyncio.Event()
+
+        async def cleanup_task():
+            task_started.set()
+            try:
+                await asyncio.sleep(0.5)  # Short initial sleep
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.1)  # Quick cleanup
+                cleanup_done.set()
+                raise
+
+        task = Task(id="task_1", name="Task 1", prompt="Prompt 1")
+        await registry.add_task(task)
+
+        asyncio_task = asyncio.create_task(cleanup_task())
+        registry.running_asyncio_tasks["task_1"] = asyncio_task
+
+        # Wait for task to start
+        await task_started.wait()
+
+        # Reset with sufficient timeout
+        await registry.reset(cancel_timeout=1.0)
+
+        # Verify cleanup completed
+        assert cleanup_done.is_set()
+        assert not await registry.has_tasks()
+        assert len(registry.running_asyncio_tasks) == 0
     
     @pytest.mark.asyncio
     async def test_is_all_done_terminal_states(self):
@@ -214,36 +264,164 @@ class TestTaskRegistry:
     
     @pytest.mark.asyncio
     async def test_cancel_all_running(self):
-        """Test cancel_all_running cancels asyncio tasks."""
+        """Test cancel_all_running cancels asyncio tasks and waits for completion."""
         registry = TaskRegistry()
-        
+
         async def dummy_task():
             try:
-                await asyncio.sleep(10)
+                await asyncio.sleep(0.5)  # Short sleep
             except asyncio.CancelledError:
                 raise
-        
+
         # Create and store asyncio tasks
         task1 = asyncio.create_task(dummy_task())
         task2 = asyncio.create_task(dummy_task())
-        
+
         registry.running_asyncio_tasks["task_1"] = task1
         registry.running_asyncio_tasks["task_2"] = task2
-        
-        cancelled = await registry.cancel_all_running()
-        
-        assert cancelled == 2
+
+        result = await registry.cancel_all_running()
+
+        # Check new return format
+        assert result["cancelled"] == 2
+        assert result["timeout"] == 0
+        assert result["task_ids"] == []
         assert len(registry.running_asyncio_tasks) == 0
-        
-        # Wait for cancellation to propagate
-        try:
-            await task1
-        except asyncio.CancelledError:
-            pass
-        try:
-            await task2
-        except asyncio.CancelledError:
-            pass
-        
+
+        # Verify tasks are done
         assert task1.cancelled()
         assert task2.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_running_waits_for_completion(self):
+        """Test cancel_all_running waits for tasks to complete their cleanup."""
+        registry = TaskRegistry()
+
+        cleanup_done = asyncio.Event()
+        task_started = asyncio.Event()
+
+        async def cleanup_task():
+            task_started.set()
+            try:
+                await asyncio.sleep(0.5)  # Short sleep
+            except asyncio.CancelledError:
+                # Simulate cleanup (e.g., closing file handles)
+                await asyncio.sleep(0.05)
+                cleanup_done.set()
+                raise
+
+        # Create task and add to registry with metadata
+        task = Task(id="task_1", name="task with cleanup", prompt="test")
+        await registry.add_task(task)
+
+        import time
+        await registry.update_status("task_1", TaskStatus.RUNNING, started_at=time.time())
+
+        asyncio_task = asyncio.create_task(cleanup_task())
+        registry.running_asyncio_tasks["task_1"] = asyncio_task
+
+        # Wait for task to actually start
+        await task_started.wait()
+
+        # Cancel and wait
+        result = await registry.cancel_all_running(timeout=1.0)
+
+        # Verify task completed cleanup
+        assert cleanup_done.is_set(), "Cleanup should have executed"
+        assert result["cancelled"] == 1
+        assert result["timeout"] == 0
+        assert asyncio_task.done()
+        assert len(registry.running_asyncio_tasks) == 0
+
+        # Verify task status was updated
+        task_obj = await registry.get_task("task_1")
+        assert task_obj.status == TaskStatus.CANCELLED
+        assert task_obj.duration is not None
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_running_force_cleanup(self):
+        """Test cancel_all_running with force=True clears registry.
+
+        This verifies the key safety mechanism: force=True ensures registry
+        cleanup even if tasks take time to complete.
+        """
+        registry = TaskRegistry()
+
+        cleanup_started = asyncio.Event()
+        task_started = asyncio.Event()
+
+        async def task_with_cleanup():
+            task_started.set()
+            try:
+                await asyncio.sleep(0.5)  # Short sleep
+            except asyncio.CancelledError:
+                cleanup_started.set()
+                # Simulate cleanup
+                await asyncio.sleep(0.1)
+                raise
+
+        # Create task and add to registry
+        import time
+        task = Task(id="task_1", name="task with cleanup", prompt="test")
+        await registry.add_task(task)
+        await registry.update_status("task_1", TaskStatus.RUNNING, started_at=time.time())
+
+        asyncio_task = asyncio.create_task(task_with_cleanup())
+        registry.running_asyncio_tasks["task_1"] = asyncio_task
+
+        # Wait for task to start
+        await task_started.wait()
+
+        # Cancel with force=True
+        result = await registry.cancel_all_running(timeout=1.0, force=True)
+
+        # Verify cleanup was started
+        assert cleanup_started.is_set()
+
+        # Key assertion: force cleanup cleared registry
+        assert len(registry.running_asyncio_tasks) == 0
+
+        # Task was processed
+        assert result["cancelled"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_running_empty_registry(self):
+        """Test cancel_all_running with no running tasks."""
+        registry = TaskRegistry()
+
+        result = await registry.cancel_all_running()
+
+        assert result["cancelled"] == 0
+        assert result["timeout"] == 0
+        assert result["task_ids"] == []
+
+    @pytest.mark.asyncio
+    async def test_cancel_all_running_already_done_tasks(self):
+        """Test cancel_all_running skips already completed tasks."""
+        registry = TaskRegistry()
+
+        async def quick_task():
+            await asyncio.sleep(0.01)
+            return "done"
+
+        asyncio_task = asyncio.create_task(quick_task())
+        await asyncio_task  # Wait for it to complete
+
+        registry.running_asyncio_tasks["task_1"] = asyncio_task
+
+        result = await registry.cancel_all_running()
+
+        assert result["cancelled"] == 0
+        assert result["timeout"] == 0
+        assert len(registry.running_asyncio_tasks) == 0
+
+    def test_task_from_dict_supports_legacy_output_field(self):
+        """Test Task.from_dict supports the legacy 'output' field for backward compatibility."""
+        task = Task.from_dict({
+            "id": "task_1",
+            "name": "Task 1",
+            "prompt": "Prompt 1",
+            "status": TaskStatus.COMPLETED.value,
+            "output": "Legacy output",
+        })
+        assert task.answer == "Legacy output"

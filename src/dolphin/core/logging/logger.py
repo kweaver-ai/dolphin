@@ -241,6 +241,27 @@ def setup_default_logger(log_suffix: Optional[str] = None):
 setup_default_logger()
 
 
+def _should_use_cli_ui(verbose: Optional[bool], is_cli: Optional[bool] = None) -> bool:
+    """Return True if CLI UI rendering should be used for console_* helpers.
+
+    This avoids importing CLI UI modules in non-interactive contexts (e.g., pytest capture),
+    which can start background threads and cause output interleaving.
+    """
+    if verbose is False:
+        return False
+    
+    # If is_cli is explicitly provided, respect it.
+    if is_cli is not None:
+        return bool(is_cli)
+
+    try:
+        import sys
+        isatty = getattr(sys.stdout, "isatty", None)
+        return bool(isatty()) if callable(isatty) else False
+    except Exception:
+        return False
+
+
 def _format_json_compact(data, max_width=80):
     """Format JSON data, keeping it compact within a reasonable width"""
     if isinstance(data, dict):
@@ -274,7 +295,7 @@ def _stdout(value: str, info: bool = False, **kwargs):
             _write_to_extra_log(value, ensure_newline=False)
 
 
-def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=None):
+def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=None, duration_ms=0, is_cli=None):
     """Display skill/tool call with modern styling.
     
     This function uses the new console_ui module for enhanced visual display
@@ -301,14 +322,23 @@ def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=N
                 skillkit.render_skill_start(skill_name, params, verbose=verbose if verbose is not None else True)
             return  # Skip default rendering
 
+    effective_verbose = True if verbose is None else bool(verbose)
+
+    if _should_use_cli_ui(verbose, is_cli=is_cli):
+        try:
+            from dolphin.cli.ui.console import get_console_ui
+            ui = get_console_ui()
+            ui.skill_call_start(skill_name, params, max_length, verbose=effective_verbose)
+            return
+        except Exception:
+            # Fall back to legacy display.
+            pass
+
+    # Fallback to legacy display if console_ui is unavailable or unsuitable.
     try:
-        from dolphin.cli.ui.console import get_console_ui
-        ui = get_console_ui()
-        ui.skill_call_start(skill_name, params, max_length, verbose=True)
-    except ImportError:
-        # Fallback to legacy display if console_ui not available
         header = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}🔧 CALL SKILL{Colors.RESET} {Colors.BOLD}{Colors.BRIGHT_YELLOW}<{skill_name}>{Colors.RESET}"
-        separator = f"{Colors.DIM}{Colors.BRIGHT_BLACK}{'─' * 60}{Colors.RESET}"
+        # Use ASCII-compatible separator to avoid junk characters (M-^TM-^@)
+        separator = f"{Colors.DIM}{Colors.BRIGHT_BLACK}{'-' * 60}{Colors.RESET}"
         formatted_params = _format_json_compact(params, max_width=100)
         if len(formatted_params) > max_length:
             formatted_params = formatted_params[:max_length] + "..."
@@ -316,9 +346,11 @@ def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=N
         print(separator)
         print(header)
         print(input_line)
+    except Exception:
+        return
 
 
-def console_skill_response(skill_name, response, max_length=200, verbose=None, skill=None, params=None, duration_ms=0):
+def console_skill_response(skill_name, response, max_length=200, verbose=None, skill=None, params=None, duration_ms=0, is_cli=None):
     """Display skill/tool response with modern styling.
     
     This function uses the new console_ui module for enhanced visual display
@@ -334,6 +366,7 @@ def console_skill_response(skill_name, response, max_length=200, verbose=None, s
         skill: Optional SkillFunction object (for custom UI lookup)
         params: Optional parameters that were passed to the skill
         duration_ms: Execution duration in milliseconds
+        is_cli: Whether to use CLI UI (overrides default TTY detection)
     """
     from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
 
@@ -359,12 +392,26 @@ def console_skill_response(skill_name, response, max_length=200, verbose=None, s
                 )
             return  # Skip default rendering
 
+    effective_verbose = True if verbose is None else bool(verbose)
+
+    if _should_use_cli_ui(verbose, is_cli=is_cli):
+        try:
+            from dolphin.cli.ui.console import get_console_ui
+            ui = get_console_ui()
+            ui.skill_call_end(
+                skill_name,
+                response,
+                max_length,
+                success=True,
+                verbose=effective_verbose,
+            )
+            return
+        except Exception:
+            # Fall back to legacy display.
+            pass
+
+    # Fallback to legacy display if console_ui is unavailable or unsuitable.
     try:
-        from dolphin.cli.ui.console import get_console_ui
-        ui = get_console_ui()
-        ui.skill_call_end(skill_name, response, max_length, success=True, verbose=True)
-    except ImportError:
-        # Fallback to legacy display if console_ui not available
         if isinstance(response, dict):
             display_response = _format_json_compact(response, max_width=100)
         elif not isinstance(response, str):
@@ -376,12 +423,15 @@ def console_skill_response(skill_name, response, max_length=200, verbose=None, s
             display_response = display_response[:max_length] + "..."
 
         output_line = f"{Colors.BRIGHT_BLUE}<<< {Colors.RESET}{Colors.BRIGHT_WHITE}{display_response}{Colors.RESET}"
-        separator = f"{Colors.DIM}{Colors.BRIGHT_BLACK}{'─' * 60}{Colors.RESET}"
+        # Use ASCII-compatible separator to avoid junk characters in non-UTF8 environments (M-^TM-^@)
+        separator = f"{Colors.DIM}{Colors.BRIGHT_BLACK}{'-' * 60}{Colors.RESET}"
         print(f"\n{output_line}")
         print(f"{separator}\n")
+    except Exception:
+        return
 
 
-def console_agent_skill_exit(skill_name: str, message: str = None, verbose=None):
+def console_agent_skill_exit(skill_name: str, message: str = None, verbose=None, is_cli=None):
     """Display a delimiter indicating an agent-as-skill has exited.
 
     This keeps terminal formatting concerns in the UI layer.
@@ -389,18 +439,27 @@ def console_agent_skill_exit(skill_name: str, message: str = None, verbose=None)
     if verbose is False:
         return
 
-    try:
-        from dolphin.cli.ui.console import get_console_ui
+    effective_verbose = True if verbose is None else bool(verbose)
 
-        ui = get_console_ui()
-        ui.agent_skill_exit(skill_name, message=message, verbose=True)
-    except ImportError:
+    if _should_use_cli_ui(verbose, is_cli=is_cli):
+        try:
+            from dolphin.cli.ui.console import get_console_ui
+
+            ui = get_console_ui()
+            ui.agent_skill_exit(skill_name, message=message, verbose=effective_verbose)
+            return
+        except Exception:
+            pass
+
+    try:
         # Fallback: plain separator
         label = message or f" AGENT EXITED: {skill_name}"
-        print("\n" + ("─" * 10) + label + ("─" * 10) + "\n")
+        print("\n" + ("-" * 10) + label + ("-" * 10) + "\n")
+    except Exception:
+        return
 
 
-def console_agent_skill_enter(skill_name: str, message: str = None, verbose=None):
+def console_agent_skill_enter(skill_name: str, message: str = None, verbose=None, is_cli=None):
     """Display a delimiter indicating an agent-as-skill has started.
     
     This keeps terminal formatting concerns in the UI layer.
@@ -408,17 +467,26 @@ def console_agent_skill_enter(skill_name: str, message: str = None, verbose=None
     if verbose is False:
         return
 
+    effective_verbose = True if verbose is None else bool(verbose)
+
+    if _should_use_cli_ui(verbose, is_cli=is_cli):
+        try:
+            from dolphin.cli.ui.console import get_console_ui
+            ui = get_console_ui()
+            ui.agent_skill_enter(skill_name, message=message, verbose=effective_verbose)
+            return
+        except Exception:
+            pass
+
     try:
-        from dolphin.cli.ui.console import get_console_ui
-        ui = get_console_ui()
-        ui.agent_skill_enter(skill_name, message=message, verbose=True)
-    except ImportError:
         label = message or f"🚀 AGENT ACTIVATE: {skill_name}"
         print(f"\n===== {label} =====\n")
+    except Exception:
+        return
 
 
 def console_block_start(
-    block_name: str, output_var: str, content: Optional[str] = None, verbose=None
+    block_name: str, output_var: str, content: Optional[str] = None, verbose=None, is_cli=None
 ):
     """Display code block start with modern styling.
     
@@ -434,12 +502,19 @@ def console_block_start(
     if verbose is False:
         return
 
+    effective_verbose = True if verbose is None else bool(verbose)
+
+    if _should_use_cli_ui(verbose, is_cli=is_cli):
+        try:
+            from dolphin.cli.ui.console import get_console_ui
+            ui = get_console_ui()
+            ui.block_start(block_name, output_var, content, verbose=effective_verbose)
+            return
+        except Exception:
+            pass
+
     try:
-        from dolphin.cli.ui.console import get_console_ui
-        ui = get_console_ui()
-        ui.block_start(block_name, output_var, content, verbose=True)
-    except ImportError:
-        # Fallback to legacy display if console_ui not available
+        # Fallback to legacy display if console_ui is unavailable or unsuitable.
         block_icons = {
             "explore": "🔍",
             "prompt": "💬",
@@ -479,6 +554,8 @@ def console_block_start(
 
         output_line = f"{header} {var_name} {arrow}{content_part}"
         print(output_line)
+    except Exception:
+        return
 
 
 def set_log_level(level: int = logging.INFO, force: bool = False):
@@ -522,5 +599,3 @@ def console(info, verbose=None, **kwargs):
             _stdout(str(info), info=True, flush=True, end=kwargs["end"])
         else:
             _stdout(str(info), info=True, flush=True)
-
-

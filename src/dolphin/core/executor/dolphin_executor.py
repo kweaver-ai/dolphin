@@ -277,6 +277,10 @@ class DolphinExecutor:
                 "请使用 flags.set_flag(flags.EXPLORE_BLOCK_V2, False) 禁用后再调用"
             )
 
+        # Initialize context.all_skills from global_skills if not already set
+        # This ensures tools are available for the exploration session
+        self._prepare_for_run(**kwargs)
+
         # Ensure interrupt state is cleared for the new exploration round
         if hasattr(self.context, "clear_interrupt"):
             self.context.clear_interrupt()
@@ -305,9 +309,10 @@ class DolphinExecutor:
             progress=progress,
         )
 
-        # Extract parameters from kwargs
-        model_name = kwargs.get("model") or self.context.get_last_model_name() or ""
-        use_history = kwargs.get("use_history", True)
+        # Extract parameters from kwargs and remove them to avoid "multiple values" error
+        # when passing both explicitly and via **kwargs
+        model_name = kwargs.pop("model", None) or self.context.get_last_model_name() or ""
+        use_history = kwargs.pop("use_history", True)
 
         # Sync the model name to ExploreBlock
         if model_name:

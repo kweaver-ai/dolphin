@@ -33,7 +33,6 @@ from dolphin.core.hook import (
     parse_hook_config,
 )
 from dolphin.core.context_engineer.config.settings import BuildInBucket
-from dolphin.lib.skillkits.system_skillkit import SystemFunctions
 
 from dolphin.core.common.enums import (
     CategoryBlock,
@@ -740,12 +739,6 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 have_answer = True
                 yield self.recorder.get_progress_answers() if self.recorder else None
 
-            console_skill_response(
-                skill_name=function_name,
-                response=self.recorder.get_answer() if self.recorder else "",
-                max_length=1024,
-            )
-
             if not have_answer and self.recorder:
                 self.recorder.update(
                     item=f"Calling {function_name} tool did not return proper results, need to call again.",
@@ -817,17 +810,8 @@ Please reconsider your approach and improve your answer based on the feedback ab
             tool_choice=getattr(self, "tool_choice", None),  # Consistent with V2: use only when explicitly specified by user
             no_cache=no_cache,
         )
-        # Create stream renderer for live markdown (CLI layer)
-        renderer = None
+        # CLI rendering is handled by the CLI layer via output events.
         on_chunk = None
-        if self.context.is_cli_mode():
-            try:
-                from dolphin.cli.ui.stream_renderer import LiveStreamRenderer
-                renderer = LiveStreamRenderer(verbose=self.context.is_verbose())
-                renderer.start()
-                on_chunk = renderer.on_chunk
-            except ImportError:
-                pass
 
         try:
             # Initialize stream_item
@@ -869,10 +853,10 @@ Please reconsider your approach and improve your answer based on the feedback ab
                     logger.debug(f"UserInterrupt: saved partial output ({len(stream_item.answer)} chars) to context")
             raise
         finally:
-            if renderer:
-                renderer.stop()
+            pass
 
-        console("\n", verbose=self.context.is_verbose())
+        if not self.context.is_cli_mode():
+            console("\n", verbose=self.context.is_verbose())
 
         if self.times >= MAX_SKILL_CALL_TIMES:
             self.context.warn(
@@ -1375,6 +1359,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         # Get skill object
         skill = self.context.get_skill(skill_name)
         if not skill:
+            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
             skill = SystemFunctions.getSkill(skill_name)
 
         # Get the last stage as reference

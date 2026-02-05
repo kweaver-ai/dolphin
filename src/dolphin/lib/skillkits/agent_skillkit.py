@@ -22,11 +22,13 @@ class AgentSkillKit(Skillkit):
         super().__init__()
         self.agent = agent
         self.agentName = agentName or agent.get_name()
+        self._context = None
 
         # Create the agent execution functions
         self._createAgentSkills()
 
     def set_context(self, context):
+        self._context = context
         self.agent.set_context(context)
 
     def _createAgentSkills(self):
@@ -58,6 +60,11 @@ class AgentSkillKit(Skillkit):
                 agentArgs["query"] = queryParam
 
             await self.agent.initialize()
+            # The agent initialization may recreate its executor/context.
+            # Re-attach the injected parent context to preserve shared state
+            # (variables, history, CLI stream renderer factory, etc.).
+            if self._context is not None:
+                self.agent.set_context(self._context)
             async for result in self.agent.arun(**agentArgs):
                 lastResult = result
 

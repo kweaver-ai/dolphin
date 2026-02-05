@@ -27,6 +27,7 @@ DUPLICATE_PATTERN_LENGTH = int(
     os.environ.get("DOLPHIN_DUPLICATE_PATTERN_LENGTH", "50")
 )  # Length of pattern to check for repetition
 MAX_LOG_LENGTH = 2048
+MAX_OUTPUT_EVENTS = 1000  # Bounded buffer for UI/SDK output events
 
 KEY_USER_ID = "_user_id"
 KEY_SESSION_ID = "_session_id"

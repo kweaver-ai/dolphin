@@ -530,5 +530,160 @@ class TestContinueExplorationModeInheritance(unittest.TestCase):
         self.assertEqual(self.context.get_last_explore_mode(), "tool_call")
 
 
+class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
+    """
+    测试 DolphinExecutor.continue_exploration 的真实初始化流程
+
+    Bug: continue_exploration 未调用 _prepare_for_run()，导致 context.all_skills 为空
+    """
+
+    def test_continue_exploration_initializes_all_skills_from_global_skills(self):
+        """
+        测试 continue_exploration 应该自动初始化 context.all_skills
+
+        场景：
+        1. 创建 DolphinExecutor（不手动设置 context.all_skills）
+        2. 直接调用 continue_exploration（而不是先调用 run）
+        3. 验证 context.all_skills 应该从 global_skills 自动填充
+
+        这是真实的使用场景，测试不应该手动初始化 context
+        """
+        from dolphin.core.executor.dolphin_executor import DolphinExecutor
+        from dolphin.core.config.global_config import GlobalConfig
+        from dolphin.core.context_engineer.core.context_manager import ContextManager
+
+        # 创建 executor（模拟真实用户场景，不手动初始化 context）
+        executor = DolphinExecutor(
+            global_config=GlobalConfig(),
+            context_manager=ContextManager()
+        )
+
+        # 验证初始状态：context.all_skills 应该已经从 global_skills 自动填充
+        # 因为 Context.__init__ 会调用 _calc_all_skills()
+        self.assertFalse(
+            executor.context.all_skills.isEmpty(),
+            "初始状态下 context.all_skills 应该已经从 global_skills 自动填充"
+        )
+
+        # 验证 global_skills 包含技能（这些技能应该被加载到 context）
+        if hasattr(executor.global_skills, "getAllSkills"):
+            global_skills = executor.global_skills.getAllSkills()
+            self.assertGreater(
+                len(global_skills.getSkills()),
+                0,
+                "global_skills 应该包含技能"
+            )
+
+        # 测试关键点：直接创建 ExploreBlock（模拟 continue_exploration 的行为）
+        from dolphin.core.code_block.explore_block import ExploreBlock
+        explore_block = ExploreBlock(
+            context=executor.context,
+            debug_infos=None,
+        )
+
+        # 验证 explore_block.get_skillkit() 可以正常获取技能
+        # 因为 Context 初始化时已经调用了 _calc_all_skills()
+        skillkit = explore_block.get_skillkit()
+        skills_count = len(skillkit.getSkills())
+
+        # 验证技能已经可用（无需调用 _prepare_for_run）
+        self.assertGreater(
+            skills_count,
+            0,
+            "Context 初始化后，explore_block 应该能获取到技能"
+        )
+
+        # 验证 context.skillkit 初始时为空（与 all_skills 不同）
+        self.assertTrue(
+            executor.context.is_skillkit_empty(),
+            "初始状态下 context.skillkit 应该为空"
+        )
+
+        # 调用 _prepare_for_run 会填充 context.skillkit
+        executor._prepare_for_run()
+
+        # 验证 _prepare_for_run 填充了 context.skillkit
+        self.assertFalse(
+            executor.context.is_skillkit_empty(),
+            "调用 _prepare_for_run 后，context.skillkit 应该被填充"
+        )
+
+    def test_continue_exploration_method_calls_prepare_for_run(self):
+        """
+        测试 continue_exploration 方法应该自动调用 _prepare_for_run
+
+        使用 mock 验证 _prepare_for_run 是否被调用
+        """
+        from dolphin.core.executor.dolphin_executor import DolphinExecutor
+        from dolphin.core.config.global_config import GlobalConfig
+        from dolphin.core.context_engineer.core.context_manager import ContextManager
+        from dolphin.core import flags
+        from unittest.mock import patch, MagicMock, AsyncMock
+        import asyncio
+
+        # 保存原始 flag 状态并禁用 EXPLORE_BLOCK_V2
+        original_flag = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            # 创建 executor
+            executor = DolphinExecutor(
+                global_config=GlobalConfig(),
+                context_manager=ContextManager()
+            )
+
+            # 验证初始状态：context.all_skills 应该已经从 global_skills 自动填充
+            # 因为 Context.__init__ 会调用 _calc_all_skills()
+            self.assertFalse(
+                executor.context.all_skills.isEmpty(),
+                "初始状态下 context.all_skills 应该已经从 global_skills 自动填充"
+            )
+
+            # 验证 context.skillkit 初始时为空（与 all_skills 不同）
+            self.assertTrue(
+                executor.context.is_skillkit_empty(),
+                "初始状态下 context.skillkit 应该为空"
+            )
+
+            # 使用 patch 监视 _prepare_for_run 是否被调用
+            with patch.object(
+                executor,
+                '_prepare_for_run',
+                wraps=executor._prepare_for_run
+            ) as mock_prepare:
+                # Mock ExploreBlock.continue_exploration 以避免真实的 LLM 调用
+                async def mock_explore(*args, **kwargs):
+                    # 直接返回，不进行真实的探索
+                    yield {"status": "completed"}
+
+                with patch(
+                    'dolphin.core.code_block.explore_block.ExploreBlock.continue_exploration',
+                    new=mock_explore
+                ):
+                    # 调用 continue_exploration
+                    async def test_call():
+                        async for result in executor.continue_exploration(
+                            content="test question",
+                            output_var="result"
+                        ):
+                            break  # 只需要第一个结果
+
+                    # 运行异步测试
+                    asyncio.run(test_call())
+
+                # 关键断言：_prepare_for_run 应该被调用
+                # 这是测试的核心 - 验证 bug 是否已修复
+                mock_prepare.assert_called_once()
+
+            # 额外验证：调用后 context.all_skills 应该被填充
+            self.assertFalse(
+                executor.context.all_skills.isEmpty(),
+                "continue_exploration 应该通过 _prepare_for_run 初始化 context.all_skills"
+            )
+        finally:
+            # 恢复原始 flag 状态
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original_flag)
+
+
 if __name__ == "__main__":
     unittest.main()

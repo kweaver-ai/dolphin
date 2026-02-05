@@ -71,6 +71,9 @@ class COWContext(Context):
             parent: Parent context to delegate to
             task_id: Task identifier for event tagging
         """
+        # In Plan mode, subtasks should run in "silent" mode (is_cli=False) to avoid
+        # their output interfering with the LivePlanCard and StatusBar UI components.
+        # Subtask outputs are captured in task.answer and can be retrieved via _get_task_output().
         super().__init__(
             config=parent.config,
             global_skills=parent.global_skills,
@@ -78,8 +81,10 @@ class COWContext(Context):
             global_types=parent.global_types,
             skillkit_hook=getattr(parent, "skillkit_hook", None),
             context_manager=ContextManager(),
-            verbose=parent.verbose,
-            is_cli=parent.is_cli,
+            # Subtasks should not stream raw output to stdout. Their outputs are
+            # captured and surfaced via plan events (plan_task_output) instead.
+            verbose=False,
+            is_cli=False,  # Subtasks run silently to avoid output conflicts with plan UI
         )
 
         self.parent = parent

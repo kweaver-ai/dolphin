@@ -494,26 +494,27 @@ Examples:
     
     # Get all flag names
     flagNames = list(set(flagNamesExplore + flagNamesRun + flagNamesDebug + flagNamesChat))
-    
-    # Check if subcommand is provided - default to 'explore' if no subcommand
+
+    # Prepare argv for parsing - default to 'explore' subcommand if not provided
+    # We create a modified copy instead of modifying sys.argv directly
     validSubcommands = ['explore', 'run', 'debug', 'chat', '--version', '-h', '--help']
-    
-    if len(sys.argv) < 2:
+    argv = sys.argv[1:]  # Get args without program name
+
+    # Determine if we need to inject 'explore' subcommand
+    if len(argv) == 0:
         # No arguments - default to explore mode
-        sys.argv.insert(1, 'explore')
-    elif sys.argv[1] not in validSubcommands and not sys.argv[1].startswith('-'):
+        argv = ['explore']
+    elif argv[0] not in validSubcommands and not argv[0].startswith('-'):
         # User provided something that isn't a subcommand or flag
-        # It might be a query for explore mode
-        if not sys.argv[1].startswith('--'):
-            # Not a flag, treat as query and insert explore
-            sys.argv.insert(1, 'explore')
-            sys.argv.insert(2, '-q')  # The original first arg becomes the query
-    elif sys.argv[1].startswith('-') and sys.argv[1] not in ['--version', '-h', '--help']:
+        # Treat it as a query for explore mode
+        if not argv[0].startswith('--'):
+            argv = ['explore', '-q'] + argv
+    elif argv[0].startswith('-') and argv[0] not in ['--version', '-h', '--help']:
         # User started with a flag (like -q or --config) - default to explore
-        sys.argv.insert(1, 'explore')
-    
-    # Parse arguments
-    knownArgs, unknownArgs = parser.parse_known_args()
+        argv = ['explore'] + argv
+
+    # Parse arguments using our prepared argv
+    knownArgs, unknownArgs = parser.parse_known_args(argv)
     argsDict = vars(knownArgs)
     
     # Handle subcommand

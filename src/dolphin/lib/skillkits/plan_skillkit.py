@@ -223,6 +223,7 @@ class PlanSkillkit(Skillkit):
         self._context.check_user_interrupt()
 
         registry = self._context.task_registry
+        all_tasks = await registry.get_all_tasks()
         status_text = await registry.get_all_status()
 
         # Check for busy-waiting (same status polled too frequently)
@@ -266,6 +267,14 @@ class PlanSkillkit(Skillkit):
             if t.id not in registry.running_asyncio_tasks:
                 # Double-check with lock to prevent race
                 async with registry._lock:
+                    # Skip if task is in the process of completing (prevents race condition
+                    # where task finished but hasn't updated status yet)
+                    if t.id in registry._completing_tasks:
+                        continue
+                    # Re-check task status under lock to avoid restarting tasks that have already completed.
+                    current_task = registry.tasks.get(t.id)
+                    if not current_task or current_task.status != TaskStatus.RUNNING:
+                        continue
                     if t.id not in registry.running_asyncio_tasks:
                         logger.warning(
                             f"[PlanSkillkit] Reconciliation: Task {t.id} is RUNNING in registry but has no asyncio task. "
@@ -322,6 +331,14 @@ class PlanSkillkit(Skillkit):
                     result += outputs
                     result += "\n\nPlease synthesize all task outputs into the final answer."
                     self._context.set_variable(injected_var, True)
+
+                    # Emit plan_finished event for UI cleanup
+                    self._context.write_output("plan_finished", {
+                        "plan_id": plan_id,
+                        "total_tasks": len(all_tasks),
+                        "completed": counts["completed"],
+                        "failed": counts.get("failed", 0),
+                    })
         elif not await registry.is_all_done():
             # Suggest using _wait tool if tasks are still running
             result += "\n\n💡 Tip: Some tasks are still running. If you have no other tasks to perform, use the `_wait(seconds=10)` tool to wait for progress instead of polling `_check_progress` repeatedly."
@@ -380,15 +397,28 @@ class PlanSkillkit(Skillkit):
         """Wait for a specified time (can be interrupted by user).
 
         Args:
-            seconds: Duration to wait in seconds
+            seconds: Duration to wait in seconds (supports decimal values)
 
         Returns:
-            Confirmation message
+            Confirmation message (includes "(interrupted)" if user interrupted)
         """
-        for i in range(int(seconds)):
-            # Check user interrupt once per second
-            self._context.check_user_interrupt()
-            await asyncio.sleep(1)
+        from dolphin.core.common.exceptions import UserInterrupt
+        
+        elapsed = 0.0
+        remaining = seconds
+        try:
+            while remaining > 0:
+                # Check user interrupt
+                self._context.check_user_interrupt()
+                # Sleep in 1-second increments to allow for interrupt checking
+                sleep_time = min(1.0, remaining)
+                await asyncio.sleep(sleep_time)
+                elapsed += sleep_time
+                remaining -= sleep_time
+        except UserInterrupt:
+            # User interruption is expected behavior for _wait, not an error
+            # Return gracefully with the actual elapsed time
+            return f"Waited {elapsed:.1f}s (interrupted)"
 
         return f"Waited {seconds}s"
 
@@ -561,11 +591,12 @@ class PlanSkillkit(Skillkit):
                 if hasattr(child_context, 'clear_local_changes'):
                     child_context.clear_local_changes()
 
-                # Transition to COMPLETED
+                # Transition to COMPLETED (atomically)
                 duration = time.time() - task.started_at
-                await registry.update_status(
+                await registry.complete_task(
                     task_id,
                     TaskStatus.COMPLETED,
+                    asyncio_task=asyncio.current_task(),
                     answer=output_dict.get("answer"),
                     think=output_dict.get("think"),
                     block_answer=output_dict.get("block_answer"),
@@ -578,6 +609,26 @@ class PlanSkillkit(Skillkit):
                     "status": "completed",
                     "duration_ms": duration * 1000,
                 })
+
+                # Emit final output for UI display (best-effort).
+                # UI can render this as Markdown without relying on subtask stdout.
+                try:
+                    final_answer = output_dict.get("answer") if isinstance(output_dict, dict) else None
+                    final_think = output_dict.get("think") if isinstance(output_dict, dict) else None
+                    if final_answer or final_think:
+                        self._context.write_output(
+                            "plan_task_output",
+                            {
+                                "plan_id": self._context.get_plan_id(),
+                                "task_id": task_id,
+                                "answer": final_answer or "",
+                                "think": final_think or "",
+                                "stream_mode": "final",
+                                "is_final": True,
+                            },
+                        )
+                except Exception:
+                    pass
 
                 # Sequential mode: start next ready task
                 # Note: This is only done on success. In case of failure or cancellation,
@@ -592,7 +643,14 @@ class PlanSkillkit(Skillkit):
                 task_obj = await registry.get_task(task_id)
                 started_at = task_obj.started_at if task_obj else None
                 duration = (time.time() - started_at) if started_at else None
-                await registry.update_status(task_id, TaskStatus.CANCELLED, duration=duration)
+
+                # Use atomic complete_task for consistency
+                await registry.complete_task(
+                    task_id,
+                    TaskStatus.CANCELLED,
+                    asyncio_task=asyncio.current_task(),
+                    duration=duration
+                )
 
                 payload = {
                     "plan_id": self._context.get_plan_id(),
@@ -606,7 +664,14 @@ class PlanSkillkit(Skillkit):
                 raise
             except Exception as e:
                 logger.error(f"Task {task_id} failed: {e}", exc_info=True)
-                await registry.update_status(task_id, TaskStatus.FAILED, error=str(e))
+
+                # Use atomic complete_task for consistency
+                await registry.complete_task(
+                    task_id,
+                    TaskStatus.FAILED,
+                    asyncio_task=asyncio.current_task(),
+                    error=str(e)
+                )
 
                 self._context.write_output("plan_task_update", {
                     "plan_id": self._context.get_plan_id(),
@@ -614,24 +679,11 @@ class PlanSkillkit(Skillkit):
                     "status": "failed",
                     "error": str(e),
                 })
-            finally:
-                # Idempotent cleanup with plan_id check to prevent race conditions
-                # Only clean up if the plan hasn't been reset/replaced
-                # Use lock to prevent race conditions with _kill_task and _check_progress reconciliation
-                current_plan_id = self._context.get_plan_id()
-                if current_plan_id == spawn_plan_id:
-                    async with registry._lock:
-                        registry.running_asyncio_tasks.pop(task_id, None)
-                else:
-                    logger.debug(
-                        f"Skipping cleanup for task {task_id}: plan_id mismatch "
-                        f"(spawn={spawn_plan_id}, current={current_plan_id})"
-                    )
 
         # Start asyncio task
-        # Use lock to ensure atomicity when adding to running_asyncio_tasks
-        asyncio_task = asyncio.create_task(run_task())
+        # Create task inside lock for atomicity (prevents race condition)
         async with registry._lock:
+            asyncio_task = asyncio.create_task(run_task())
             registry.running_asyncio_tasks[task_id] = asyncio_task
 
     @staticmethod

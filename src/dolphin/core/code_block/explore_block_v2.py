@@ -22,7 +22,6 @@ from dolphin.core.logging.logger import console, console_skill_response, get_log
 from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.common.types import SourceType
-from dolphin.lib.skillkits.system_skillkit import SystemFunctions
 
 logger = get_logger("code_block.explore_block_v2")
 
@@ -445,12 +444,6 @@ class ExploreBlockV2(BasicCodeBlock):
                     )
                 have_answer = True
                 yield self.recorder.get_progress_answers() if self.recorder else None
-            console_skill_response(
-                skill_name=function_name,
-                response=self.recorder.get_answer() if self.recorder else "",
-                max_length=1024,
-            )
-
             if not have_answer:
                 (
                     self.recorder.update(
@@ -733,6 +726,7 @@ class ExploreBlockV2(BasicCodeBlock):
         # Get skill object
         skill = self.context.get_skill(skill_name)
         if not skill:
+            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
             skill = SystemFunctions.getSkill(skill_name)
 
         # Get the last stage as reference

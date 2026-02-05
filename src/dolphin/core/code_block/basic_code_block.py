@@ -33,7 +33,6 @@ from dolphin.core.logging.logger import (
 from dolphin.core.trajectory.recorder import Recorder
 from dolphin.core.skill.skillkit import Skillkit
 from dolphin.core.skill.skill_matcher import SkillMatcher
-from dolphin.lib.skillkits.system_skillkit import SystemFunctions
 from dolphin.core.runtime.runtime_instance import ProgressInstance
 from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.common.types import SourceType
@@ -846,9 +845,11 @@ class BasicCodeBlock:
                     skill = skillkit.getSkill(tool_name)
                     if skill:
                         tool_schema = skill.get_openai_tool_schema()
-            except:
-                # 如果获取 schema 失败，忽略错误，使用默认行为
-                pass
+            except Exception:
+                logger.debug(
+                    f"Tool schema fetch failed for tool={tool_name}; falling back to default parsing.",
+                    exc_info=True,
+                )
 
         # 提取参数类型映射
         param_types = {}
@@ -951,7 +952,10 @@ class BasicCodeBlock:
             if getattr(self.context, "_history_injected", False):
                 return
         except Exception:
-            pass
+            logger.debug(
+                "History injection flag check failed; continuing without shortcut.",
+                exc_info=True,
+            )
 
         # 若 conversation_history 已含内容，则视为已有历史，不再二次注入，避免重复
         try:
@@ -967,7 +971,10 @@ class BasicCodeBlock:
                 if isinstance(bucket.content, _Msgs) and bucket.content.get_messages():
                     return
         except Exception:
-            pass
+            logger.debug(
+                "History pre-check in context_manager failed; continuing with injection path.",
+                exc_info=True,
+            )
 
         history_messages = self._get_history_messages()
         if not history_messages:
@@ -981,7 +988,10 @@ class BasicCodeBlock:
         try:
             setattr(self.context, "_history_injected", True)
         except Exception:
-            pass
+            logger.debug(
+                "Failed to set _history_injected flag on context.",
+                exc_info=True,
+            )
 
     async def llm_chat(
         self,
@@ -1040,33 +1050,21 @@ class BasicCodeBlock:
             except Exception as e:
                 console(f"Warning: Failed to generate function call tools: {e}")
 
-        # Create stream renderer for live markdown (CLI layer)
-        renderer = None
+        # CLI rendering is handled by the CLI layer via output events.
+        # Core should not import or manage terminal rendering components.
         on_chunk = None
-        if self.context.is_cli_mode():
-            try:
-                from dolphin.cli.ui.stream_renderer import LiveStreamRenderer
-                renderer = LiveStreamRenderer(verbose=self.context.is_verbose())
-                renderer.start()
-                on_chunk = renderer.on_chunk
-            except ImportError:
-                pass
 
         last_stream_item: Optional[StreamItem] = None
         assert self.content, "content is None"
-        try:
-            async for stream_item in self.llm_chat_stream(
-                llm_params,
-                self.recorder,
-                self.content,
-                early_stop_on_tool_call,
-                on_stream_chunk=on_chunk,
-            ):
-                last_stream_item = stream_item
-                yield stream_item.to_dict()
-        finally:
-            if renderer:
-                renderer.stop()
+        async for stream_item in self.llm_chat_stream(
+            llm_params,
+            self.recorder,
+            self.content,
+            early_stop_on_tool_call,
+            on_stream_chunk=on_chunk,
+        ):
+            last_stream_item = stream_item
+            yield stream_item.to_dict()
 
         assert last_stream_item, f"failed read from llm[{llm_params}]"
 
@@ -1123,7 +1121,7 @@ class BasicCodeBlock:
     def block_start_log(self, block_name: str, content: Optional[str] = None):
         assert self.output_var
         console_block_start(
-            block_name, self.output_var, content, verbose=self.context.verbose
+            block_name, self.output_var, content, verbose=self.context.verbose, is_cli=self.context.is_cli_mode()
         )
 
     def record_llm_response_to_trajectory(
@@ -1164,6 +1162,7 @@ class BasicCodeBlock:
 
         skill = self.context.get_skill(skill_name)
         if not skill:
+            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
             skill = SystemFunctions.getSkill(skill_name)
 
         if skill is None:
@@ -1310,10 +1309,10 @@ class BasicCodeBlock:
                     )
             
             console_skill_call(
-                skill_name, skill_params_json, verbose=self.context.verbose, skill=skill
+                skill_name, skill_params_json, verbose=self.context.verbose, skill=skill, is_cli=self.context.is_cli_mode()
             )
             if agent_as_skill is not None:
-                console_agent_skill_enter(skill_name, verbose=self.context.verbose)
+                console_agent_skill_enter(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
             result = None
             async for result in Skillkit.arun(
                 skill=skill,
@@ -1412,7 +1411,7 @@ class BasicCodeBlock:
                 yield result
             
             if agent_as_skill is not None:
-                console_agent_skill_exit(skill_name, verbose=self.context.verbose)
+                console_agent_skill_exit(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
         except ToolInterrupt as e:
             # Restore original agent even in case of interruption
             if agent_as_skill is not None:
@@ -1453,6 +1452,7 @@ class BasicCodeBlock:
                 verbose=self.context.verbose,
                 skill=skill,
                 params=skill_params_json,
+                is_cli=self.context.is_cli_mode(),
             )
         self.context.debug(
             f"call_skill function_name[{skill_name}] "
@@ -1517,40 +1517,68 @@ class BasicCodeBlock:
 
         stream_item = None
         cur_len = 0
+        emitted_output_events = False
+        last_full_text = ""
 
-        async for chunk in self.llm_client.mf_chat_stream(**llm_params):
-            # Checkpoint: Check user interrupt during LLM streaming
-            self.context.check_user_interrupt()
+        try:
+            async for chunk in self.llm_client.mf_chat_stream(**llm_params):
+                # Checkpoint: Check user interrupt during LLM streaming
+                self.context.check_user_interrupt()
 
-            stream_item = StreamItem()
-            stream_item.parse_from_chunk(chunk, session_counter=session_counter)
+                stream_item = StreamItem()
+                stream_item.parse_from_chunk(chunk, session_counter=session_counter)
 
-            # Rendering: use callback if provided, otherwise default console output
-            chunk_text = stream_item.answer[cur_len:]
-            if on_stream_chunk:
-                on_stream_chunk(
-                    chunk_text=chunk_text, full_text=stream_item.answer, is_final=False
+                # Rendering: use callback if provided, otherwise default console output
+                chunk_text = stream_item.answer[cur_len:]
+                if on_stream_chunk:
+                    on_stream_chunk(
+                        chunk_text=chunk_text,
+                        full_text=stream_item.answer,
+                        is_final=False,
+                    )
+                else:
+                    # CLI path: emit output events for the CLI layer to render.
+                    # Non-CLI path: preserve legacy behavior (print to stdout).
+                    if self.context.is_cli_mode():
+                        self.context.write_output(
+                            "llm_stream",
+                            {
+                                "chunk_text": chunk_text,
+                                "full_text": stream_item.answer,
+                                "is_final": False,
+                            },
+                        )
+                        emitted_output_events = True
+                        last_full_text = stream_item.answer
+                    else:
+                        console(chunk_text, verbose=self.context.is_verbose(), end="")
+
+                cur_len = len(stream_item.answer)
+
+                if recorder:
+                    recorder.update(item=stream_item, raw_output=stream_item.answer)
+
+                # Update tool call detection flags
+                if stream_item.has_tool_call():
+                    tool_call_detected = True
+                    if stream_item.has_complete_tool_call():
+                        complete_tool_call = stream_item.get_tool_call()
+
+                yield stream_item
+
+                # If a complete tool call is detected and early-stop is enabled, stop streaming.
+                if early_stop_on_tool_call and tool_call_detected and complete_tool_call:
+                    break
+        finally:
+            if emitted_output_events:
+                self.context.write_output(
+                    "llm_stream",
+                    {
+                        "chunk_text": "",
+                        "full_text": last_full_text,
+                        "is_final": True,
+                    },
                 )
-            else:
-                # Default: simple console output
-                console(chunk_text, verbose=self.context.is_verbose(), end="")
-
-            cur_len = len(stream_item.answer)
-
-            if recorder:
-                recorder.update(item=stream_item, raw_output=stream_item.answer)
-
-            # Update tool call detection flags
-            if stream_item.has_tool_call():
-                tool_call_detected = True
-                if stream_item.has_complete_tool_call():
-                    complete_tool_call = stream_item.get_tool_call()
-
-            yield stream_item
-
-            # If a complete tool call is detected and early-stop is enabled, stop streaming.
-            if early_stop_on_tool_call and tool_call_detected and complete_tool_call:
-                break
 
     async def yield_None(self, function_name):
         yield {
