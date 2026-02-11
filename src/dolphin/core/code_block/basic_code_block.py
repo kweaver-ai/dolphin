@@ -180,7 +180,21 @@ class BasicCodeBlock:
         return self.recorder.getProgress()
 
     def find_matching_paren(self, s: str, start: int) -> int:
-        """Find the matching right parenthesis position, ignoring parentheses within strings, handling special cases such as nested single and double quotes, triple quotes, various quote symbols, etc."""
+        """Find the matching right parenthesis position, ignoring parentheses within strings.
+
+        Handles special cases:
+        - Single and double quotes
+        - Triple quotes (''' and \""")
+        - Escape sequences (only within quoted strings)
+        - Word apostrophes (e.g., don't)
+
+        Args:
+            s: The input string to search
+            start: The position of the opening parenthesis
+
+        Returns:
+            The position of the matching closing parenthesis, or -1 if not found
+        """
         count = 1
         i = start + 1
         in_single = False
@@ -194,6 +208,7 @@ class BasicCodeBlock:
             return s[idx - 1].isalnum() and s[idx + 1].isalnum()
 
         while i < len(s):
+            # Check for triple quotes first (before single/double quote handling)
             if s[i : i + 3] == "'''" and not in_double and not in_triple_double:
                 in_triple_single = not in_triple_single
                 i += 3
@@ -203,25 +218,32 @@ class BasicCodeBlock:
                 i += 3
                 continue
 
+            # Skip characters inside triple-quoted strings
             if in_triple_single or in_triple_double:
                 i += 1
                 continue
 
             c = s[i]
 
-            if c == "\\" and i + 1 < len(s):
+            # Handle escape sequences ONLY inside quoted strings
+            # This prevents incorrect parsing when backslashes appear outside strings
+            if c == "\\" and i + 1 < len(s) and (in_single or in_double):
                 i += 2
                 continue
 
+            # Handle single quotes (excluding word apostrophes like "don't")
             if c == "'" and not in_double and not is_word_apostrophe(i):
                 in_single = not in_single
                 i += 1
                 continue
+
+            # Handle double quotes
             if c == '"' and not in_single:
                 in_double = not in_double
                 i += 1
                 continue
 
+            # Count parentheses only when outside all string types
             if not (in_single or in_double or in_triple_single or in_triple_double):
                 if c == "(":
                     count += 1
@@ -1637,16 +1659,16 @@ class BasicCodeBlock:
         variable_index_list = self.context.recognize_variable(content)
 
         if variable_index_list:
-            # 按照位置从后往前排序，避免替换时位置偏移
+            # Sort by position in reverse order to avoid offset issues during replacement
             variable_index_list.sort(key=lambda x: x[1][0], reverse=True)
 
             for variable_name, (start, end) in variable_index_list:
                 variable_value = self.context.get_variable_type(variable_name)
                 variable_value_str = str(variable_value)
 
-                # 如果变量值包含特殊字符，用引号包围以避免解析问题
+                # If the variable value contains special characters, wrap with quotes
                 if self.should_quote_variable_value(variable_value_str):
-                    # 如果值本身已经有引号，则不再添加
+                    # Skip if value is already quoted
                     if not (
                         (
                             variable_value_str.startswith('"')
@@ -1657,7 +1679,10 @@ class BasicCodeBlock:
                             and variable_value_str.endswith("'")
                         )
                     ):
-                        variable_value_str = f'"{variable_value_str}"'
+                        # Escape backslashes and double quotes within the value
+                        # to prevent parsing errors when the value contains these characters
+                        escaped_value = variable_value_str.replace('\\', '\\\\').replace('"', '\\"')
+                        variable_value_str = f'"{escaped_value}"'
 
                 content = content.replace(variable_name, variable_value_str)
         return content
