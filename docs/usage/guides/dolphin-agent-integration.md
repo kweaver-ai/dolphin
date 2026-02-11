@@ -197,6 +197,10 @@ async for result in agent.continue_chat(
                     print(delta, end="", flush=True)
 ```
 
+`continue_chat()` is state-aware when the Agent is paused:
+- If paused by user interrupt (`PAUSED + USER_INTERRUPT`), it defaults to `preserve_context=True`.
+- If paused by tool interrupt (`PAUSED + TOOL_INTERRUPT`), it fails fast with `NEED_RESUME`, and you must call `resume(updates)` first.
+
 ---
 
 ## stream_mode: Automatic Delta Calculation (v2.1+ Recommended)
@@ -1425,4 +1429,3 @@ A:
   - Streaming output support
 
 > **Note**: This document was first published on 2026-01-15, containing complete documentation of all implemented features. Version history reflects feature evolution.
-

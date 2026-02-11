@@ -254,6 +254,37 @@ class ResourceSkillkit(Skillkit):
         full_content = path_info + content.get_full_content()
         return truncate_content(full_content, self.config.max_content_tokens)
 
+    def load_skill_short(self, name: str) -> str:
+        """Load a compact summary for a skill.
+
+        This is intended as the default lightweight view for multi-turn sessions.
+
+        Args:
+            name: The skill name to load
+
+        Returns:
+            Short summary text or error message
+        """
+        self._ensure_initialized()
+
+        is_valid, error = validate_skill_name(name)
+        if not is_valid:
+            return f"Error: {error}"
+
+        meta = self._skills_meta.get(name)
+        if meta is None:
+            available = sorted(self._skills_meta.keys())
+            return (
+                f"Error: Skill '{name}' not found.\n"
+                f"Available skills: {', '.join(available) if available else 'none'}"
+            )
+
+        return (
+            f"{meta.to_prompt_entry()}\n\n"
+            f"To load full instructions, call: "
+            f"_load_resource_skill(skill_name=\"{name}\", mode=\"full\")"
+        )
+
     def load_resource(self, skill_name: str, resource_path: str) -> str:
         """Load Level 3 resource file content.
 
@@ -325,19 +356,23 @@ class ResourceSkillkit(Skillkit):
     # Tool Functions (exposed to LLM)
     # =====================================
 
-    def _load_resource_skill(self, skill_name: str, **kwargs) -> str:
-        """Load the full instructions for a resource skill.
+    def _load_resource_skill(self, skill_name: str, mode: str = "short", **kwargs) -> str:
+        """Load a resource skill in short or full mode.
 
-        Loads the complete SKILL.md content for the specified skill.
-        The loaded content will be available in conversation history
-        for subsequent turns.
+        Default behavior is short mode for lower context overhead.
+        Use mode="full" to load complete SKILL.md instructions.
 
         Args:
             skill_name (str): Name of the skill to load
+            mode (str): "short" (default) or "full"
 
         Returns:
-            str: Full skill content including instructions and available resources
+            str: Short summary or full skill content
         """
+        normalized_mode = (mode or "short").strip().lower()
+        if normalized_mode != "full":
+            return self.load_skill_short(skill_name)
+
         content = self.load_skill(skill_name)
         if content.startswith(PIN_MARKER):
             return content

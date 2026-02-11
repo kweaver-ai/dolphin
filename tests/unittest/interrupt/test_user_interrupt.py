@@ -531,3 +531,60 @@ class TestBaseAgentInterrupt:
 
         assert result is True
         assert agent._pending_user_input is None
+
+    @pytest.mark.asyncio
+    async def test_mark_user_interrupted_from_running(self):
+        """mark_user_interrupted() should transition RUNNING -> PAUSED."""
+        agent = MockInterruptAgent()
+        await agent.initialize()
+        await agent._change_state(AgentState.RUNNING, "starting")
+
+        await agent.mark_user_interrupted("manual interrupt")
+
+        assert agent.state == AgentState.PAUSED
+        assert agent._pause_type == PauseType.USER_INTERRUPT
+
+    @pytest.mark.asyncio
+    async def test_mark_user_interrupted_from_paused_overrides_pause_type(self):
+        """mark_user_interrupted() should override pause type when already PAUSED."""
+        agent = MockInterruptAgent()
+        await agent.initialize()
+        await agent._change_state(AgentState.RUNNING, "starting")
+        await agent._change_state(AgentState.PAUSED, "tool pause")
+        agent._pause_type = PauseType.TOOL_INTERRUPT
+
+        await agent.mark_user_interrupted("user interrupted while paused")
+
+        assert agent.state == AgentState.PAUSED
+        assert agent._pause_type == PauseType.USER_INTERRUPT
+
+    @pytest.mark.asyncio
+    async def test_mark_user_interrupted_invalid_state_does_not_pollute_pause_type(self):
+        """mark_user_interrupted() should not mutate pause type on invalid state."""
+        agent = MockInterruptAgent()
+        await agent.initialize()
+        agent._pause_type = PauseType.MANUAL
+
+        with pytest.raises(AgentLifecycleException) as exc_info:
+            await agent.mark_user_interrupted("invalid transition")
+
+        assert exc_info.value.code == "INVALID_STATE"
+        assert agent.state == AgentState.INITIALIZED
+        assert agent._pause_type == PauseType.MANUAL
+
+    @pytest.mark.asyncio
+    async def test_mark_user_interrupted_rolls_back_pause_type_on_transition_failure(self):
+        """mark_user_interrupted() should roll back pause type when transition fails."""
+        agent = MockInterruptAgent()
+        await agent.initialize()
+        await agent._change_state(AgentState.RUNNING, "starting")
+
+        async def _mock_change_state(*args, **kwargs):
+            raise RuntimeError("mock transition failure")
+
+        with patch.object(agent, "_change_state", side_effect=_mock_change_state):
+            with pytest.raises(RuntimeError):
+                await agent.mark_user_interrupted("failing transition")
+
+        assert agent.state == AgentState.RUNNING
+        assert agent._pause_type is None

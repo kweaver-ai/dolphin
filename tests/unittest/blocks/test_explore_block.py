@@ -23,7 +23,10 @@ from dolphin.core.code_block.skill_call_deduplicator import (
     NoOpSkillCallDeduplicator,
 )
 from dolphin.core.common.enums import Messages, StreamItem, MessageRole
+from dolphin.core.common.exceptions import UserInterrupt
+from dolphin.core.common.constants import KEY_PENDING_TURN
 from dolphin.core.context.context import Context
+from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.context_engineer.core.context_manager import ContextManager
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.skill.skill_function import SkillFunction
@@ -989,6 +992,305 @@ class TestExploreBlockExecModeParsing(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             block.parse_block_content(content, category=self.CategoryBlock.EXPLORE, replace_variables=False)
         self.assertIn("Invalid execution mode", str(cm.exception))
+
+
+class TestContinueExplorationErrorRecovery(unittest.TestCase):
+    """Tests for continue_exploration error recovery behavior."""
+
+    def _build_context(self) -> Context:
+        """Create a minimal context for ExploreBlock unit tests."""
+        context_manager = ContextManager()
+        context = Context(config=GlobalConfig(), context_manager=context_manager)
+        context._calc_all_skills()
+        return context
+
+    def _build_block_for_stream_error_test(self) -> ExploreBlock:
+        """Build an ExploreBlock with minimal mocked dependencies."""
+        block = ExploreBlock(context=self._build_context())
+        block.model = "gpt-4"
+        block.content = "continue message"
+        block.system_prompt = ""
+        block.recorder = MagicMock()
+        block.recorder.get_progress_answers.return_value = {"_progress": []}
+        block.recorder.get_answer.return_value = "final answer"
+        block.get_skillkit = MagicMock(return_value=None)
+        block.strategy.has_valid_tool_call = MagicMock(return_value=False)
+        return block
+
+    def _get_scratchpad_assistant_messages(self, context: Context) -> list[str]:
+        """Return assistant message contents from scratchpad bucket."""
+        bucket = context.context_manager.state.buckets.get(BuildInBucket.SCRATCHPAD.value)
+        if bucket is None or not isinstance(bucket.content, Messages):
+            return []
+
+        return [
+            msg.content
+            for msg in bucket.content.get_messages()
+            if msg.role == MessageRole.ASSISTANT
+        ]
+
+    def test_handle_new_tool_call_preserves_partial_output_on_user_interrupt(self):
+        """UserInterrupt should preserve partial assistant output in scratchpad."""
+        block = self._build_block_for_stream_error_test()
+
+        async def mock_llm_chat_stream(**kwargs):
+            stream_item = StreamItem()
+            stream_item.answer = "partial answer before interrupt"
+            yield stream_item
+            raise UserInterrupt("manual interrupt")
+
+        block.llm_chat_stream = mock_llm_chat_stream
+
+        async def run_case():
+            async for _ in block._handle_new_tool_call(no_cache=True):
+                pass
+
+        with self.assertRaises(UserInterrupt):
+            asyncio.run(run_case())
+
+        assistant_messages = self._get_scratchpad_assistant_messages(block.context)
+        self.assertTrue(
+            any("partial answer before interrupt" in msg for msg in assistant_messages)
+        )
+
+    def test_handle_new_tool_call_preserves_partial_output_on_generic_exception(self):
+        """Generic stream errors should preserve partial assistant output as well."""
+        block = self._build_block_for_stream_error_test()
+
+        async def mock_llm_chat_stream(**kwargs):
+            stream_item = StreamItem()
+            stream_item.answer = "partial answer before network error"
+            yield stream_item
+            raise RuntimeError("peer closed connection")
+
+        block.llm_chat_stream = mock_llm_chat_stream
+
+        async def run_case():
+            async for _ in block._handle_new_tool_call(no_cache=True):
+                pass
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(run_case())
+
+        assistant_messages = self._get_scratchpad_assistant_messages(block.context)
+        self.assertTrue(
+            any("partial answer before network error" in msg for msg in assistant_messages)
+        )
+
+    def test_continue_exploration_keeps_partial_output_for_next_round_when_preserve_context(self):
+        """Second round should see prior partial output when preserve_context is enabled."""
+        block = self._build_block_for_stream_error_test()
+
+        async def first_round_stream(**kwargs):
+            stream_item = StreamItem()
+            stream_item.answer = "partial round1 answer"
+            yield stream_item
+            raise RuntimeError("peer closed connection")
+
+        block.llm_chat_stream = first_round_stream
+
+        async def run_first_round():
+            async for _ in block.continue_exploration(content="round1 question"):
+                pass
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(run_first_round())
+
+        captured_contents = []
+
+        async def second_round_stream(**kwargs):
+            llm_params = kwargs.get("llm_params", {})
+            messages = llm_params.get("messages")
+            if messages is not None and hasattr(messages, "get_messages"):
+                captured_contents.extend(
+                    [
+                        msg.content
+                        for msg in messages.get_messages()
+                        if getattr(msg, "content", None)
+                    ]
+                )
+            stream_item = StreamItem()
+            stream_item.answer = "round2 final answer"
+            yield stream_item
+
+        block.llm_chat_stream = second_round_stream
+
+        async def run_second_round():
+            async for _ in block.continue_exploration(
+                content="round2 question",
+                preserve_context=True,
+            ):
+                pass
+
+        asyncio.run(run_second_round())
+
+        self.assertTrue(
+            any("partial round1 answer" in content for content in captured_contents),
+            f"Expected prior partial output in next-round messages, got: {captured_contents}",
+        )
+
+    def test_continue_exploration_user_interrupt_creates_pending_turn_and_commits_after_resume(self):
+        """Interrupted turn should be pending first, then committed after resume completion."""
+        block = self._build_block_for_stream_error_test()
+        partial_answer = "partial answer before user interrupt"
+
+        async def interrupted_stream(**kwargs):
+            stream_item = StreamItem()
+            stream_item.answer = partial_answer
+            yield stream_item
+            raise UserInterrupt("manual interrupt")
+
+        block.llm_chat_stream = interrupted_stream
+        user_message = "user turn that should be persisted"
+
+        async def run_case():
+            async for _ in block.continue_exploration(content=user_message):
+                pass
+
+        with self.assertRaises(UserInterrupt):
+            asyncio.run(run_case())
+
+        pending_turn = block.context.get_var_value(KEY_PENDING_TURN)
+        self.assertIsInstance(pending_turn, dict)
+        self.assertEqual(pending_turn.get("user_content"), user_message)
+
+        assistant_messages = self._get_scratchpad_assistant_messages(block.context)
+        self.assertTrue(
+            any(partial_answer in msg for msg in assistant_messages),
+            "Expected partial answer to be preserved in scratchpad after UserInterrupt.",
+        )
+
+        history_raw = block.context.get_history_messages(normalize=False)
+        if history_raw is None:
+            history_list = []
+        elif isinstance(history_raw, Messages):
+            history_list = history_raw.get_messages_as_dict()
+        elif isinstance(history_raw, list):
+            history_list = history_raw
+        else:
+            history_list = []
+        self.assertEqual(history_list, [])
+
+        async def resumed_stream(**kwargs):
+            stream_item = StreamItem()
+            stream_item.answer = "final answer after resume"
+            yield stream_item
+
+        block.llm_chat_stream = resumed_stream
+
+        async def run_resume():
+            async for _ in block.continue_exploration(
+                content="follow-up instruction",
+                preserve_context=True,
+            ):
+                pass
+
+        asyncio.run(run_resume())
+
+        self.assertIsNone(block.context.get_var_value(KEY_PENDING_TURN))
+
+        history_raw = block.context.get_history_messages(normalize=False)
+        if history_raw is None:
+            history_list = []
+        elif isinstance(history_raw, Messages):
+            history_list = history_raw.get_messages_as_dict()
+        elif isinstance(history_raw, list):
+            history_list = history_raw
+        else:
+            history_list = []
+
+        user_contents = [
+            item.get("content")
+            for item in history_list
+            if isinstance(item, dict) and item.get("role") == MessageRole.USER.value
+        ]
+        self.assertIn(
+            user_message,
+            user_contents,
+            "Expected interrupted user turn to be committed after resume completion.",
+        )
+
+    def test_continue_exploration_user_interrupt_during_tool_call_can_persist_orphan_tool_calls(self):
+        """UserInterrupt during tool execution may leave orphan tool_calls in persisted history."""
+        block = self._build_block_for_stream_error_test()
+
+        orphan_tool_call = ToolCall(
+            id="call_orphan_1",
+            name="mock_search",
+            arguments={"query": "orphan case"},
+        )
+
+        original_explore_once = block._explore_once
+
+        async def interrupted_once(no_cache=True):
+            stream_item = StreamItem()
+            stream_item.answer = "I will call a tool now"
+            block.strategy.append_tool_call_message(block.context, stream_item, orphan_tool_call)
+            raise UserInterrupt("manual stop during tool execution")
+            yield None  # pragma: no cover - keep async generator shape
+
+        block._explore_once = interrupted_once
+
+        async def run_interrupt_round():
+            async for _ in block.continue_exploration(content="first round"):
+                pass
+
+        with self.assertRaises(UserInterrupt):
+            asyncio.run(run_interrupt_round())
+        block._explore_once = original_explore_once
+
+        async def resumed_stream(**kwargs):
+            item = StreamItem()
+            item.answer = "final answer after stop"
+            yield item
+
+        block.llm_chat_stream = resumed_stream
+
+        async def run_case():
+            async for _ in block.continue_exploration(
+                content="resume after stop",
+                preserve_context=True,
+            ):
+                pass
+
+        asyncio.run(run_case())
+
+        history_raw = block.context.get_history_messages(normalize=False)
+        if history_raw is None:
+            history_list = []
+        elif isinstance(history_raw, Messages):
+            history_list = history_raw.get_messages_as_dict()
+        elif isinstance(history_raw, list):
+            history_list = history_raw
+        else:
+            history_list = []
+
+        assistant_tool_call_ids = set()
+        for item in history_list:
+            if not isinstance(item, dict):
+                continue
+            if item.get("role") != MessageRole.ASSISTANT.value:
+                continue
+            for tool_call in item.get("tool_calls", []) or []:
+                if isinstance(tool_call, dict):
+                    tool_call_id = tool_call.get("id")
+                    if tool_call_id:
+                        assistant_tool_call_ids.add(tool_call_id)
+
+        tool_response_ids = {
+            item.get("tool_call_id")
+            for item in history_list
+            if isinstance(item, dict)
+            and item.get("role") == MessageRole.TOOL.value
+            and item.get("tool_call_id")
+        }
+
+        orphan_ids = assistant_tool_call_ids - tool_response_ids
+        self.assertEqual(
+            orphan_ids,
+            set(),
+            f"Expected no orphan tool calls in history, got: {orphan_ids}",
+        )
 
 
 if __name__ == "__main__":

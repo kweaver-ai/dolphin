@@ -217,6 +217,7 @@ class ExploreBlock(BasicCodeBlock):
 
         # Build initial message
         self._make_init_messages()
+        self._mark_pending_turn()
 
         async for ret in self._execute_main():
             yield ret
@@ -561,7 +562,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             use_history_flag = str(self.history).lower() == "true"
 
         if use_history_flag:
-            history_messages = self.context.get_history_messages()
+            history_messages = self.context.get_history_messages(projected=True)
             return history_messages or Messages()
         return None
 
@@ -843,14 +844,15 @@ Please reconsider your approach and improve your answer based on the feedback ab
                         )
                         break
         except Exception as e:
-            # Handle UserInterrupt: save partial output to context before re-raising
-            # This ensures the LLM's partial output is preserved in the scratchpad,
-            # so when resuming, the LLM can see what it was outputting before interruption.
-            from dolphin.core.common.exceptions import UserInterrupt
-            if isinstance(e, UserInterrupt):
-                if stream_item and stream_item.answer:
-                    self._append_assistant_message(stream_item.answer)
-                    logger.debug(f"UserInterrupt: saved partial output ({len(stream_item.answer)} chars) to context")
+            # Save partial output for all streaming failures before re-raising.
+            # This keeps context continuity for both user interrupts and transient
+            # transport failures (e.g. peer closed connection).
+            if stream_item and stream_item.answer:
+                self._append_assistant_message(stream_item.answer)
+                logger.debug(
+                    f"Streaming failed ({type(e).__name__}): saved partial output "
+                    f"({len(stream_item.answer)} chars) to context"
+                )
             raise
         finally:
             pass
@@ -1477,8 +1479,14 @@ Please reconsider your approach and improve your answer based on the feedback ab
         ):
             self.context.set_history_bucket(history_messages)
 
+        self._mark_pending_turn()
+
         # 5. Run exploration loop
         while True:
+            # Checkpoint: Check user interrupt before each exploration turn
+            if self.context:
+                self.context.check_user_interrupt()
+
             async for ret in self._explore_once(no_cache=True):
                 yield ret
 

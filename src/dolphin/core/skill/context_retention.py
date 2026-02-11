@@ -16,6 +16,7 @@ class SkillContextRetention:
     """Skill context retention configuration"""
     mode: ContextRetentionMode = ContextRetentionMode.FULL
     max_length: int = 2000  # Only used by SUMMARY mode
+    detail_hint_min_omitted: int = 0  # SUMMARY: minimum omitted chars to add detail hint
     summary_prompt: Optional[str] = None
     ttl_turns: int = -1
     reference_hint: Optional[str] = None  # Hint text for REFERENCE mode
@@ -51,15 +52,18 @@ class SummaryContextStrategy(ContextRetentionStrategy):
         head_chars = int(config.max_length * head_ratio)
         tail_chars = int(config.max_length * tail_ratio)
         
-        # Provide reference_id so LLM can fetch full content if needed
-        ref_hint = ""
-        if reference_id:
-            ref_hint = f"\n[For full content, call _get_cached_result_detail('{reference_id}', scope='skill')]"
-        
         omitted = len(result) - head_chars - tail_chars
         # Ensure we don't have negative omission if rounding puts us over
         if omitted <= 0:
             return result
+
+        # Provide reference_id only when omission is significant enough.
+        hint_threshold = max(0, int(getattr(config, "detail_hint_min_omitted", 0)))
+        ref_hint = ""
+        if reference_id and omitted >= hint_threshold:
+            ref_hint = (
+                f"\n[For full content, call _get_cached_result_detail('{reference_id}', scope='skill')]"
+            )
             
         return (f"{result[:head_chars]}\n"
                 f"... ({omitted} chars omitted) ...\n"
@@ -135,6 +139,7 @@ def get_context_retention_strategy(mode: ContextRetentionMode) -> ContextRetenti
 def context_retention(
     mode: str = "full",
     max_length: int = 2000,
+    detail_hint_min_omitted: int = 0,
     summary_prompt: str = None,
     ttl_turns: int = -1,
     reference_hint: str = None,
@@ -149,6 +154,7 @@ def context_retention(
         func._context_retention = SkillContextRetention(
             mode=retention_mode,
             max_length=max_length,
+            detail_hint_min_omitted=detail_hint_min_omitted,
             summary_prompt=summary_prompt,
             ttl_turns=ttl_turns,
             reference_hint=reference_hint,

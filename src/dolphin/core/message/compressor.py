@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
+import json
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from dataclasses import dataclass, field
 
@@ -15,11 +16,9 @@ from dolphin.core.config.global_config import (
 from dolphin.core.common.constants import (
     estimate_chars_from_tokens,
     estimate_tokens_from_chars,
-    CHINESE_CHAR_TO_TOKEN_RATIO,
 )
 from dolphin.core.context.context import Context
 from dolphin.core.common.multimodal import (
-    estimate_image_tokens,
     ImageTokenConfig,
 )
 
@@ -54,6 +53,10 @@ class CompressionStrategy(ABC):
 
     MEMORY_PREFIX = "Here are some knowledge points: "
     DATE_PREFIX = "今天日期是 "
+    MESSAGE_FIXED_OVERHEAD_TOKENS = 6
+    TOOL_CALL_FIXED_OVERHEAD_TOKENS = 4
+    PRECISE_ESTIMATION_LOWER_RATIO = 0.85
+    PRECISE_ESTIMATION_UPPER_RATIO = 1.05
 
     @abstractmethod
     def get_name(self) -> str:
@@ -71,13 +74,14 @@ class CompressionStrategy(ABC):
         messages: Messages,
         constraints: "ContextConstraints",
         **kwargs,
-    ) -> tuple[Messages, Messages, Messages]:
+    ) -> tuple[Messages, Messages, Messages, Messages]:
         """Preprocess message list
         
         Returns:
-            Tuple of (system_messages, first_user_message, other_messages)
+            Tuple of (system_messages, first_user_message, latest_user_message, other_messages)
             - system_messages: All system messages (must be first)
             - first_user_message: First user message after system (must be preserved for GLM API)
+            - latest_user_message: Trailing latest user message in the current request (task anchor)
             - other_messages: Remaining messages for truncation/compression
         """
         system_messages = (
@@ -117,20 +121,39 @@ class CompressionStrategy(ABC):
             ):
                 non_system_messages[i].metadata.pop("prefix", None)
         
-        # Extract first user message (required by GLM API - first non-system must be user)
-        # This prevents truncation from dropping the only user message
+        # Extract both first and latest user messages.
+        # - first_user_message: required by GLM API (first non-system must be user)
+        # - latest_user_message: required for preserving the current task anchor
         first_user_message = Messages()
+        latest_user_message = Messages()
         other_messages = Messages()
         found_first_user = False
+        latest_user_index = -1
+
+        for idx in range(len(non_system_messages) - 1, -1, -1):
+            if non_system_messages[idx].role == MessageRole.USER:
+                latest_user_index = idx
+                break
         
-        for msg in non_system_messages:
+        last_non_system_index = len(non_system_messages) - 1
+
+        for idx, msg in enumerate(non_system_messages):
             if not found_first_user and msg.role == MessageRole.USER:
                 first_user_message.add_message(content=msg)
                 found_first_user = True
+                # If first and latest are the same message, do not duplicate.
+                if idx == latest_user_index:
+                    continue
+            elif (
+                msg.role == MessageRole.USER
+                and idx == latest_user_index
+                and idx == last_non_system_index
+            ):
+                latest_user_message.add_message(content=msg)
             else:
                 other_messages.add_message(content=msg)
         
-        return system_messages, first_user_message, other_messages
+        return system_messages, first_user_message, latest_user_message, other_messages
 
     @abstractmethod
     def compress(
@@ -158,6 +181,83 @@ class CompressionStrategy(ABC):
             if self.DATE_PREFIX in msg.content:
                 return True
         return False
+
+    def _estimate_tokens_with_structure(self, messages: Messages) -> int:
+        """Fast token estimation with additional message-structure overhead."""
+        total_tokens = 0
+        for message in messages:
+            total_tokens += self._estimate_single_message_tokens_fast(message)
+        return total_tokens
+
+    def _estimate_single_message_tokens_fast(self, message) -> int:
+        """Estimate one message tokens including structure and tool metadata."""
+        total_tokens = self.MESSAGE_FIXED_OVERHEAD_TOKENS
+        total_tokens += estimate_tokens_from_chars(message.role.value)
+
+        metadata = message.metadata or {}
+        if metadata:
+            total_tokens += estimate_tokens_from_chars(
+                self._safe_json_dumps(metadata)
+            )
+
+        content = message.content
+        if isinstance(content, str):
+            total_tokens += estimate_tokens_from_chars(content)
+        elif isinstance(content, list):
+            for block in content:
+                block_type = block.get("type")
+                if block_type == "text":
+                    total_tokens += estimate_tokens_from_chars(block.get("text", ""))
+                elif block_type == "image_url":
+                    detail = block.get("image_url", {}).get("detail", "auto")
+                    total_tokens += _default_image_config.estimate_tokens(detail=detail)
+                else:
+                    total_tokens += estimate_tokens_from_chars(
+                        self._safe_json_dumps(block)
+                    )
+        else:
+            total_tokens += estimate_tokens_from_chars(str(content))
+
+        if message.tool_calls:
+            total_tokens += self.TOOL_CALL_FIXED_OVERHEAD_TOKENS
+            total_tokens += estimate_tokens_from_chars(
+                self._safe_json_dumps(message.tool_calls)
+            )
+        if message.tool_call_id:
+            total_tokens += 1 + estimate_tokens_from_chars(message.tool_call_id)
+
+        return total_tokens
+
+    def _should_use_precise_count(self, estimated_tokens: int, budget_tokens: int) -> bool:
+        """Use precise counting only when estimate is close to the budget boundary."""
+        if budget_tokens <= 0:
+            return False
+        ratio = estimated_tokens / max(budget_tokens, 1)
+        return self.PRECISE_ESTIMATION_LOWER_RATIO <= ratio <= self.PRECISE_ESTIMATION_UPPER_RATIO
+
+    def _count_tokens_precise(self, context: Context, messages: Messages) -> Optional[int]:
+        """Count tokens using tokenizer backend on serialized message payload."""
+        try:
+            from dolphin.core.context_engineer.core.tokenizer_service import TokenizerService
+
+            backend = "auto"
+            if context is not None:
+                backend = context.get_config().context_engineer_config.tokenizer_backend
+
+            tokenizer = TokenizerService(backend=backend)
+            serialized = self._safe_json_dumps(messages.get_messages_as_dict())
+            return tokenizer.count_tokens(serialized)
+        except Exception as exc:
+            logger.debug(f"Precise token counting failed, fallback to fast estimation: {exc}")
+            return None
+
+    @staticmethod
+    def _safe_json_dumps(data: Any) -> str:
+        """Serialize data safely for token estimation."""
+        try:
+            return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        except Exception:
+            return str(data)
 
     def _knowledge_in_system_message(self, system_messages: Messages) -> bool:
         """Determine whether the system message contains knowledge. If it does, return True; otherwise, return False."""
@@ -302,20 +402,7 @@ class TruncationStrategy(CompressionStrategy):
 
     def estimate_tokens(self, messages: Messages) -> int:
         """Estimate the number of tokens, including both text and image content."""
-        total_tokens = 0
-        for message in messages:
-            content = message.content
-            if isinstance(content, str):
-                total_tokens += estimate_tokens_from_chars(content)
-            elif isinstance(content, list):
-                # Multimodal content
-                for block in content:
-                    if block.get("type") == "text":
-                        total_tokens += estimate_tokens_from_chars(block.get("text", ""))
-                    elif block.get("type") == "image_url":
-                        detail = block.get("image_url", {}).get("detail", "auto")
-                        total_tokens += _default_image_config.estimate_tokens(detail=detail)
-        return total_tokens
+        return self._estimate_tokens_with_structure(messages)
 
     def compress(
         self,
@@ -334,17 +421,27 @@ class TruncationStrategy(CompressionStrategy):
                 strategy_used=self.get_name(),
             )
 
-        system_messages, first_user_message, other_messages = self.preparation(
+        system_messages, first_user_message, latest_user_message, other_messages = self.preparation(
             context, messages, constraints, **kwargs
         )
         # Combine for original token count calculation
         all_messages = Messages.combine_messages(
-            Messages.combine_messages(system_messages, first_user_message),
-            other_messages
+            Messages.combine_messages(
+                Messages.combine_messages(system_messages, first_user_message),
+                latest_user_message,
+            ),
+            other_messages,
         )
 
-        original_tokens = self.estimate_tokens(all_messages)
         max_tokens = constraints.max_input_tokens - constraints.reserve_output_tokens
+        original_tokens = self.estimate_tokens(all_messages)
+        if self._should_use_precise_count(original_tokens, max_tokens):
+            precise_tokens = self._count_tokens_precise(context, all_messages)
+            if precise_tokens is not None:
+                logger.debug(
+                    f"Using precise token count near budget boundary: fast={original_tokens}, precise={precise_tokens}, budget={max_tokens}"
+                )
+                original_tokens = precise_tokens
 
         if original_tokens <= max_tokens:
             return CompressionResult(
@@ -362,7 +459,8 @@ class TruncationStrategy(CompressionStrategy):
         # Calculate the number of tokens in system messages and first user message (both preserved)
         system_tokens = self.estimate_tokens(system_messages)
         first_user_tokens = self.estimate_tokens(first_user_message)
-        remaining_tokens = max_tokens - system_tokens - first_user_tokens
+        latest_user_tokens = self.estimate_tokens(latest_user_message)
+        remaining_tokens = max_tokens - system_tokens - first_user_tokens - latest_user_tokens
 
         # Group messages to preserve tool_calls/tool pairing
         groups = self._group_messages(other_messages)
@@ -402,6 +500,9 @@ class TruncationStrategy(CompressionStrategy):
         # Add first user message (preserved)
         for msg in first_user_message:
             compressed_messages.add_message(content=msg)
+        # Add latest user message (preserved)
+        for msg in latest_user_message:
+            compressed_messages.add_message(content=msg)
         # Add compressed other messages
         for msg in compressed_other:
             compressed_messages.add_message(
@@ -433,6 +534,7 @@ class TruncationStrategy(CompressionStrategy):
                 "truncated_messages": len(other_messages) - len(compressed_other),
                 "preserved_system_messages": len_system_messages,
                 "preserved_first_user": len(first_user_message) > 0,
+                "preserved_latest_user": len(latest_user_message) > 0,
                 "original_images": original_images,
                 "compressed_images": compressed_images,
                 "dropped_images": dropped_images,
@@ -451,20 +553,7 @@ class SlidingWindowStrategy(CompressionStrategy):
 
     def estimate_tokens(self, messages: Messages) -> int:
         """Estimate the number of tokens, including both text and image content."""
-        total_tokens = 0
-        for message in messages:
-            content = message.content
-            if isinstance(content, str):
-                total_tokens += int(len(content) / CHINESE_CHAR_TO_TOKEN_RATIO)
-            elif isinstance(content, list):
-                # Multimodal content
-                for block in content:
-                    if block.get("type") == "text":
-                        total_tokens += int(len(block.get("text", "")) / CHINESE_CHAR_TO_TOKEN_RATIO)
-                    elif block.get("type") == "image_url":
-                        detail = block.get("image_url", {}).get("detail", "auto")
-                        total_tokens += _default_image_config.estimate_tokens(detail=detail)
-        return total_tokens
+        return self._estimate_tokens_with_structure(messages)
 
     def compress(
         self,
@@ -486,7 +575,7 @@ class SlidingWindowStrategy(CompressionStrategy):
         original_tokens = self.estimate_tokens(messages)
 
         # Separation system message and first user message
-        system_messages, first_user_message, other_messages = self.preparation(
+        system_messages, first_user_message, latest_user_message, other_messages = self.preparation(
             context, messages, constraints, **kwargs
         )
 
@@ -506,15 +595,21 @@ class SlidingWindowStrategy(CompressionStrategy):
 
         # Merge Results: system + first_user + windowed
         compressed_messages = Messages.combine_messages(
-            Messages.combine_messages(system_messages, first_user_message),
-            windowed_messages
+            Messages.combine_messages(
+                Messages.combine_messages(system_messages, first_user_message),
+                latest_user_message,
+            ),
+            windowed_messages,
         )
         final_tokens = self.estimate_tokens(compressed_messages)
 
         # Count images for logging
         all_messages = Messages.combine_messages(
-            Messages.combine_messages(system_messages, first_user_message),
-            other_messages
+            Messages.combine_messages(
+                Messages.combine_messages(system_messages, first_user_message),
+                latest_user_message,
+            ),
+            other_messages,
         )
         original_images = self._count_images_in_messages(all_messages)
         compressed_images = self._count_images_in_messages(compressed_messages)
@@ -541,6 +636,7 @@ class SlidingWindowStrategy(CompressionStrategy):
                 "messages_in_window": len(windowed_messages),
                 "preserved_system_messages": len(system_messages),
                 "preserved_first_user": len(first_user_message) > 0,
+                "preserved_latest_user": len(latest_user_message) > 0,
                 "original_images": original_images,
                 "compressed_images": compressed_images,
                 "dropped_images": dropped_images,
@@ -556,20 +652,7 @@ class LevelStrategy(CompressionStrategy):
 
     def estimate_tokens(self, messages: Messages) -> int:
         """Estimate the number of tokens, including both text and image content."""
-        total_tokens = 0
-        for message in messages:
-            content = message.content
-            if isinstance(content, str):
-                total_tokens += estimate_tokens_from_chars(content)
-            elif isinstance(content, list):
-                # Multimodal content
-                for block in content:
-                    if block.get("type") == "text":
-                        total_tokens += estimate_tokens_from_chars(block.get("text", ""))
-                    elif block.get("type") == "image_url":
-                        detail = block.get("image_url", {}).get("detail", "auto")
-                        total_tokens += _default_image_config.estimate_tokens(detail=detail)
-        return total_tokens
+        return self._estimate_tokens_with_structure(messages)
 
     def compress(
         self,
@@ -591,7 +674,7 @@ class LevelStrategy(CompressionStrategy):
         original_tokens = self.estimate_tokens(messages)
 
         # Get system, first user, and other messages
-        system_messages, first_user_message, other_messages = self.preparation(
+        system_messages, first_user_message, latest_user_message, other_messages = self.preparation(
             context, messages, constraints, **kwargs
         )
 
@@ -608,8 +691,11 @@ class LevelStrategy(CompressionStrategy):
 
         # Combine results: system + first_user + compressed_other
         compressed_messages = Messages.combine_messages(
-            Messages.combine_messages(system_messages, first_user_message),
-            compressed_other
+            Messages.combine_messages(
+                Messages.combine_messages(system_messages, first_user_message),
+                latest_user_message,
+            ),
+            compressed_other,
         )
         final_tokens = self.estimate_tokens(compressed_messages)
 
@@ -627,6 +713,7 @@ class LevelStrategy(CompressionStrategy):
                 ),
                 "preserved_system_messages": len(system_messages),
                 "preserved_first_user": len(first_user_message) > 0,
+                "preserved_latest_user": len(latest_user_message) > 0,
                 "preserved_last_message": True,
             },
         )

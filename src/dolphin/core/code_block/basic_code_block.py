@@ -2,11 +2,17 @@ from __future__ import annotations
 import json
 import re
 import ast
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from dolphin.core import flags
-from dolphin.core.common.constants import KEY_STATUS, PIN_MARKER
+from dolphin.core.common.constants import (
+    KEY_STATUS,
+    KEY_HISTORY,
+    KEY_PENDING_TURN,
+    PIN_MARKER,
+)
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.common.exceptions import SkillException
 from dolphin.core.utils.tools import ToolInterrupt
@@ -53,6 +59,211 @@ from dolphin.lib.skill_results.strategies import (
 logger = get_logger(__name__)
 
 
+@dataclass
+class _ToolResponseIndex:
+    """Index tool responses by tool_call_id for stable adjacent emission."""
+
+    by_id: dict[str, list[Any]] = field(default_factory=dict)
+
+    @classmethod
+    def from_messages(
+        cls, source_messages: Messages, matched_tool_call_ids: set[str]
+    ) -> "_ToolResponseIndex":
+        """Build index for tool responses that have a matched declaration."""
+        index = cls()
+        for msg in source_messages.get_messages():
+            role = getattr(msg, "role", None)
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if (
+                role == MessageRole.TOOL
+                and tool_call_id
+                and tool_call_id in matched_tool_call_ids
+            ):
+                index.by_id.setdefault(tool_call_id, []).append(msg)
+        return index
+
+    def pop_first(self, tool_call_id: str) -> Any | None:
+        """Pop first response for given tool_call_id."""
+        responses = self.by_id.get(tool_call_id) or []
+        if not responses:
+            return None
+        return responses.pop(0)
+
+
+class _HistoryPersistenceEngine:
+    """Encapsulates history persistence and tool-chain adjacency rules."""
+
+    @staticmethod
+    def normalize_tool_calls(raw_tool_calls) -> list:
+        """Normalize tool_calls into JSON-friendly list entries."""
+        normalized = []
+        for tool_call in raw_tool_calls or []:
+            if isinstance(tool_call, dict):
+                normalized.append(dict(tool_call))
+            elif hasattr(tool_call, "to_dict") and callable(getattr(tool_call, "to_dict")):
+                normalized.append(tool_call.to_dict())
+            else:
+                try:
+                    normalized.append(dict(tool_call))
+                except Exception:
+                    normalized.append(tool_call)
+        return normalized
+
+    def extract_tool_call_ids(self, source_messages: Messages) -> tuple[set[str], set[str]]:
+        """Extract assistant-declared and tool-responded tool_call IDs."""
+        declared_ids: set[str] = set()
+        responded_ids: set[str] = set()
+
+        for msg in source_messages.get_messages():
+            role = getattr(msg, "role", None)
+            if role == MessageRole.ASSISTANT and getattr(msg, "has_tool_calls", None):
+                if msg.has_tool_calls():
+                    for tool_call in self.normalize_tool_calls(msg.tool_calls):
+                        if isinstance(tool_call, dict):
+                            tool_call_id = tool_call.get("id")
+                            if tool_call_id:
+                                declared_ids.add(tool_call_id)
+            elif role == MessageRole.TOOL and getattr(msg, "tool_call_id", None):
+                responded_ids.add(msg.tool_call_id)
+
+        return declared_ids, responded_ids
+
+    def filter_tool_calls_by_ids(self, raw_tool_calls, matched_ids: set[str]) -> list[dict]:
+        """Keep tool calls with IDs that have both call and response."""
+        filtered = []
+        for tool_call in self.normalize_tool_calls(raw_tool_calls):
+            if isinstance(tool_call, dict) and tool_call.get("id") in matched_ids:
+                filtered.append(tool_call)
+        return filtered
+
+    @staticmethod
+    def append_pinned_user_message(
+        msg: Any,
+        content: str,
+        role: Any,
+        persisted_turn_messages: list[dict],
+        existing_contents: set[str],
+    ) -> None:
+        """Persist pinned user content once as assistant text."""
+        if role != MessageRole.USER or PIN_MARKER not in content:
+            return
+        cleaned = content.replace(PIN_MARKER, "").strip()
+        if not cleaned or cleaned in existing_contents:
+            return
+
+        persisted_turn_messages.append(
+            {
+                "role": MessageRole.ASSISTANT.value,
+                "content": cleaned,
+                "timestamp": getattr(msg, "timestamp", None)
+                or datetime.now().isoformat(),
+                "metadata": {"pinned": True, "source": "tool"},
+            }
+        )
+        existing_contents.add(cleaned)
+
+    @staticmethod
+    def build_persisted_tool_response_message(
+        response_msg: Any, tool_call_id: str
+    ) -> dict[str, Any]:
+        """Convert one tool response to persisted history dict."""
+        response_content = getattr(response_msg, "content", "") or ""
+        response_has_pin_marker = PIN_MARKER in response_content
+        cleaned_response_content = (
+            response_content.replace(PIN_MARKER, "").strip()
+            if response_has_pin_marker
+            else response_content
+        )
+        response_metadata = (
+            {"pinned": True, "source": "tool"} if response_has_pin_marker else None
+        )
+        return {
+            "role": MessageRole.TOOL.value,
+            "content": cleaned_response_content,
+            "tool_call_id": tool_call_id,
+            "timestamp": getattr(response_msg, "timestamp", None)
+            or datetime.now().isoformat(),
+            **({"metadata": response_metadata} if response_metadata else {}),
+        }
+
+    def append_adjacent_tool_responses(
+        self,
+        matched_tool_calls: list[dict],
+        tool_response_index: _ToolResponseIndex,
+        persisted_turn_messages: list[dict],
+    ) -> None:
+        """Append matching tool responses right after assistant(tool_calls)."""
+        for tool_call in matched_tool_calls:
+            tool_call_id = tool_call.get("id")
+            if not tool_call_id:
+                continue
+
+            response_msg = tool_response_index.pop_first(tool_call_id)
+            if not response_msg:
+                continue
+
+            persisted_turn_messages.append(
+                self.build_persisted_tool_response_message(response_msg, tool_call_id)
+            )
+
+    def collect_persisted_messages_from_source(
+        self,
+        source_messages: Messages,
+        persisted_turn_messages: list[dict],
+        existing_contents: set[str],
+        include_tool_chain: bool,
+    ) -> None:
+        """Collect persisted messages and enforce tool-call adjacency."""
+        matched_tool_call_ids: set[str] = set()
+        tool_response_index = _ToolResponseIndex()
+        if include_tool_chain:
+            declared_ids, responded_ids = self.extract_tool_call_ids(source_messages)
+            matched_tool_call_ids = declared_ids & responded_ids
+            tool_response_index = _ToolResponseIndex.from_messages(
+                source_messages, matched_tool_call_ids
+            )
+
+        for msg in source_messages.get_messages():
+            role = getattr(msg, "role", None)
+            content = getattr(msg, "content", "") or ""
+            self.append_pinned_user_message(
+                msg=msg,
+                content=content,
+                role=role,
+                persisted_turn_messages=persisted_turn_messages,
+                existing_contents=existing_contents,
+            )
+
+            if not include_tool_chain:
+                continue
+
+            if role == MessageRole.ASSISTANT and msg.has_tool_calls():
+                matched_tool_calls = self.filter_tool_calls_by_ids(
+                    msg.tool_calls, matched_tool_call_ids
+                )
+                if not matched_tool_calls:
+                    continue
+
+                persisted_turn_messages.append(
+                    {
+                        "role": MessageRole.ASSISTANT.value,
+                        "content": content,
+                        "tool_calls": matched_tool_calls,
+                        "timestamp": getattr(msg, "timestamp", None)
+                        or datetime.now().isoformat(),
+                    }
+                )
+                self.append_adjacent_tool_responses(
+                    matched_tool_calls=matched_tool_calls,
+                    tool_response_index=tool_response_index,
+                    persisted_turn_messages=persisted_turn_messages,
+                )
+                continue
+
+            if role == MessageRole.TOOL and msg.tool_call_id:
+                continue
+
+
 class BasicCodeBlock:
     """
     Base class for all Dolphin Language code blocks.
@@ -78,6 +289,7 @@ class BasicCodeBlock:
 
     def __init__(self, context: Context):
         self.context = context
+        self._history_persistence_engine = _HistoryPersistenceEngine()
         self.llm_client: Optional[LLMClient] = None
         self.category: Optional[CategoryBlock] = None
         self.params: Dict[str, Any] = {}
@@ -890,109 +1102,6 @@ class BasicCodeBlock:
 
         return params
 
-    def get_parameter_with_default(
-        self, params: Dict[str, Any], key: str, default: Any
-    ) -> Any:
-        """
-        获取参数值，如果不存在则返回默认值
-
-        Args:
-            params: 参数字典
-            key: 参数名
-            default: 默认值
-
-        Returns:
-            参数值或默认值
-        """
-        return params.get(key, default)
-
-    def _is_history_enabled(self) -> bool:
-        """检查 history 参数是否开启."""
-        if isinstance(self.history, bool):
-            return self.history
-        if isinstance(self.history, str):
-            return self.history.lower() == "true"
-        return False
-
-    def _get_history_messages(self) -> Optional[Messages]:
-        """将 context 中的 history 变量转换为 Messages."""
-        history_vars = self.context.get_var_value("history")
-        if not history_vars:
-            return None
-
-        if isinstance(history_vars, Messages):
-            return history_vars if not history_vars.empty() else None
-
-        msgs = Messages()
-        if isinstance(history_vars, list):
-            for msg in history_vars:
-                if not isinstance(msg, dict):
-                    continue
-                role = str(msg.get("role", "user")).lower()
-                content = msg.get("content", "")
-                if not content:
-                    continue
-                if role == "assistant":
-                    msgs.add_message(content, MessageRole.ASSISTANT)
-                elif role == "system":
-                    msgs.add_message(content, MessageRole.SYSTEM)
-                else:
-                    msgs.add_message(content, MessageRole.USER)
-        return msgs if not msgs.empty() else None
-
-    def _add_history_to_context_manager(self, bucket_prefix: str = "llm_history"):
-        """
-        Add historical messages to context_manager if history parameter is enabled.
-        """
-        if not self._is_history_enabled():
-            return
-
-        # avoid duplicate injection within the same context lifecycle
-        try:
-            if getattr(self.context, "_history_injected", False):
-                return
-        except Exception:
-            logger.debug(
-                "History injection flag check failed; continuing without shortcut.",
-                exc_info=True,
-            )
-
-        # 若 conversation_history 已含内容，则视为已有历史，不再二次注入，避免重复
-        try:
-            cm = self.context.context_manager
-            bucket = (
-                cm.state.buckets.get("conversation_history")
-                if hasattr(cm, "state")
-                else None
-            )
-            if bucket is not None:
-                from dolphin.core.common.enums import Messages as _Msgs
-
-                if isinstance(bucket.content, _Msgs) and bucket.content.get_messages():
-                    return
-        except Exception:
-            logger.debug(
-                "History pre-check in context_manager failed; continuing with injection path.",
-                exc_info=True,
-            )
-
-        history_messages = self._get_history_messages()
-        if not history_messages:
-            return
-
-        self.context.add_bucket(
-            "conversation_history", history_messages, message_role=MessageRole.USER
-        )
-
-        # 标记已注入，防止重复
-        try:
-            setattr(self.context, "_history_injected", True)
-        except Exception:
-            logger.debug(
-                "Failed to set _history_injected flag on context.",
-                exc_info=True,
-            )
-
     async def llm_chat(
         self,
         lang_mode: str,
@@ -1715,6 +1824,136 @@ class BasicCodeBlock:
                 f"Failed to save trajectory in _save_trajectory_before_cleanup: {e}"
             )
 
+    def _collect_persisted_messages_from_source(
+        self,
+        source_messages: Messages,
+        persisted_turn_messages: list[dict],
+        existing_contents: set[str],
+        include_tool_chain: bool,
+    ) -> None:
+        """Delegate history persistence to a dedicated engine."""
+        history_engine = getattr(self, "_history_persistence_engine", None)
+        if history_engine is None:
+            history_engine = _HistoryPersistenceEngine()
+            self._history_persistence_engine = history_engine
+
+        history_engine.collect_persisted_messages_from_source(
+            source_messages=source_messages,
+            persisted_turn_messages=persisted_turn_messages,
+            existing_contents=existing_contents,
+            include_tool_chain=include_tool_chain,
+        )
+
+    def _extract_persisted_turn_messages(self, history_list: list[dict]) -> list[dict]:
+        """Extract persisted messages for current turn."""
+        persisted_turn_messages: list[dict] = []
+        cm = self.context.context_manager
+
+        existing_contents = {
+            item.get("content")
+            for item in history_list
+            if isinstance(item, dict) and isinstance(item.get("content"), str)
+        }
+
+        scratch_bucket = (
+            cm.state.buckets.get(BuildInBucket.SCRATCHPAD.value)
+            if cm and hasattr(cm, "state")
+            else None
+        )
+        scratch_content = (
+            getattr(scratch_bucket, "content", None) if scratch_bucket else None
+        )
+
+        if isinstance(scratch_content, Messages):
+            self._collect_persisted_messages_from_source(
+                source_messages=scratch_content,
+                persisted_turn_messages=persisted_turn_messages,
+                existing_contents=existing_contents,
+                include_tool_chain=True,
+            )
+        elif cm:
+            merged = cm.to_dph_messages()
+            if isinstance(merged, Messages):
+                self._collect_persisted_messages_from_source(
+                    source_messages=merged,
+                    persisted_turn_messages=persisted_turn_messages,
+                    existing_contents=existing_contents,
+                    include_tool_chain=False,
+                )
+
+        return persisted_turn_messages
+
+    def _resolve_turn_user_content(self):
+        """Resolve current turn user content from block content or QUERY bucket."""
+        user_content = self.content
+        if not user_content and self.context.context_manager:
+            bucket = self.context.context_manager.state.buckets.get(
+                BuildInBucket.QUERY.value
+            )
+            if bucket:
+                user_content = bucket._get_content_text()
+        return user_content
+
+    def _get_history_list(self) -> list[dict]:
+        """Get history as a mutable list, normalizing legacy return types."""
+        history_raw = self.context.get_history_messages(normalize=False)
+        if history_raw is None:
+            return []
+        if isinstance(history_raw, Messages):
+            return history_raw.get_messages_as_dict()
+        if isinstance(history_raw, list):
+            return history_raw
+
+        logger.warning(
+            f"Unexpected history type: {type(history_raw)}, initializing as empty list"
+        )
+        return []
+
+    def _get_pending_turn(self) -> Optional[Dict[str, Any]]:
+        """Get pending turn metadata if present and valid."""
+        pending_turn = self.context.get_var_value(KEY_PENDING_TURN)
+        return pending_turn if isinstance(pending_turn, dict) else None
+
+    def _clear_pending_turn(self) -> None:
+        """Clear pending turn metadata from context."""
+        if KEY_PENDING_TURN in self.context.get_all_variables():
+            self.context.delete_variable(KEY_PENDING_TURN)
+
+    @staticmethod
+    def _build_turn_fingerprint(user_content: Any) -> str:
+        """Build a stable fingerprint for idempotent pending-turn creation."""
+        if isinstance(user_content, str):
+            normalized = user_content.strip()
+        else:
+            try:
+                normalized = json.dumps(user_content, ensure_ascii=False, sort_keys=True)
+            except Exception:
+                normalized = str(user_content)
+        return f"user:{normalized}"
+
+    def _mark_pending_turn(self) -> None:
+        """Mark the current turn as pending so interrupt paths can be resumed safely."""
+        user_content = self._resolve_turn_user_content()
+        if not user_content:
+            return
+
+        fingerprint = self._build_turn_fingerprint(user_content)
+        pending_turn = self._get_pending_turn()
+        if pending_turn:
+            if pending_turn.get("fingerprint") != fingerprint:
+                logger.debug("Pending turn already exists; keeping existing pending metadata.")
+            return
+
+        self.context.set_variable(
+            KEY_PENDING_TURN,
+            {
+                "turn_id": datetime.now().isoformat(),
+                "user_content": user_content,
+                "fingerprint": fingerprint,
+            },
+        )
+        logger.debug("Marked pending turn for current explore round.")
+
     def _update_history_and_cleanup(self):
         """
         Update history variable with current conversation turn and save trajectory.
@@ -1740,105 +1979,38 @@ class BasicCodeBlock:
 
         logger.debug("Executing _update_history_and_cleanup...")
 
-        # Extract user content from self.content or QUERY bucket
-        user_content = self.content
-        if not user_content and self.context.context_manager:
-            bucket = self.context.context_manager.state.buckets.get(
-                BuildInBucket.QUERY.value
-            )
-            if bucket:
-                user_content = bucket._get_content_text()
-
+        user_content = self._resolve_turn_user_content()
         answer_content = self.recorder.get_answer()
+        pending_turn = self._get_pending_turn()
+        pending_user_content = pending_turn.get("user_content") if pending_turn else None
+        history_user_content = pending_user_content or user_content
 
         logger.debug(
             f"Cleanup: user_content found: {bool(user_content)}, answer_content found: {bool(answer_content)}"
         )
 
-        # Only record if we have both user content and an answer
-        if user_content and answer_content:
-            history_raw = self.context.get_history_messages(normalize=False)
-
-            # Convert to list format if needed (handle different return types)
-            if history_raw is None:
-                history_list = []
-            elif isinstance(history_raw, Messages):
-                # Convert Messages object to list of dicts
-                history_list = history_raw.get_messages_as_dict()
-            elif isinstance(history_raw, list):
-                history_list = history_raw
-            else:
-                logger.warning(
-                    f"Unexpected history type: {type(history_raw)}, initializing as empty list"
-                )
-                history_list = []
-
-            # Collect pinned tool responses (in-order) and persist them into history.
-            # Minimal rule: any scratchpad message containing PIN_MARKER is considered user-intended persistence.
-            # We scan _scratchpad first; if unavailable, fall back to merged messages from context_manager.
-            pinned_contents: list[str] = []
+        # Record complete turn only when both user content and answer are present.
+        if history_user_content and answer_content:
+            history_list = self._get_history_list()
             try:
-                cm = self.context.context_manager
-
-                existing_contents = {
-                    item.get("content")
-                    for item in history_list
-                    if isinstance(item, dict) and isinstance(item.get("content"), str)
-                }
-
-                def _collect_from_messages(msgs: Messages):
-                    for msg in msgs.get_messages():
-                        role = getattr(msg, "role", None)
-                        # Tool-call mode uses MessageRole.TOOL; prompt mode tool results can be user-role text.
-                        if role not in (MessageRole.TOOL, MessageRole.USER):
-                            continue
-                        content = getattr(msg, "content", "") or ""
-                        if PIN_MARKER not in content:
-                            continue
-                        cleaned = content.replace(PIN_MARKER, "").strip()
-                        if not cleaned or cleaned in existing_contents:
-                            continue
-                        pinned_contents.append(cleaned)
-                        existing_contents.add(cleaned)
-
-                scratch_bucket = (
-                    cm.state.buckets.get(BuildInBucket.SCRATCHPAD.value)
-                    if cm and hasattr(cm, "state")
-                    else None
+                persisted_turn_messages = self._extract_persisted_turn_messages(
+                    history_list
                 )
-                scratch_content = (
-                    getattr(scratch_bucket, "content", None) if scratch_bucket else None
-                )
-
-                if isinstance(scratch_content, Messages):
-                    _collect_from_messages(scratch_content)
-                elif cm:
-                    merged = cm.to_dph_messages()
-                    if isinstance(merged, Messages):
-                        _collect_from_messages(merged)
             except Exception as e:
-                logger.warning(f"Failed to extract pinned messages: {e}")
+                logger.warning(f"Failed to extract scratchpad messages: {e}")
+                persisted_turn_messages = []
 
             # Add User Message with timestamp
             history_list.append(
                 {
                     "role": MessageRole.USER.value,
-                    "content": user_content,
+                    "content": history_user_content,
                     "timestamp": datetime.now().isoformat(),
                 }
             )
 
-            # Insert pinned messages after user input, before assistant final answer.
-            # Use ASSISTANT role to keep message-role ordering compatible with common chat APIs.
-            for pinned in pinned_contents:
-                history_list.append(
-                    {
-                        "role": MessageRole.ASSISTANT.value,
-                        "content": pinned,
-                        "timestamp": datetime.now().isoformat(),
-                        "metadata": {"pinned": True, "source": "tool"},
-                    }
-                )
+            # Append persisted turn messages in their original temporal order.
+            history_list.extend(persisted_turn_messages)
 
             # Add Assistant Message with timestamp
             history_list.append(
@@ -1849,8 +2021,11 @@ class BasicCodeBlock:
                 }
             )
 
-            self.context.set_variable("history", history_list)
+            self.context.set_variable(KEY_HISTORY, history_list)
+            self._clear_pending_turn()
             logger.debug("Cleanup: History variable updated.")
+        elif pending_turn and not answer_content:
+            logger.debug("Cleanup: keeping pending turn because answer is missing.")
 
         # Save trajectory BEFORE cleaning up buckets (so tool calls are preserved)
         self._save_trajectory(stage_name="explore")

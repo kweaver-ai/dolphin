@@ -22,7 +22,6 @@ import sys
 from typing import Any, Dict, Optional, Tuple
 
 from dolphin.core import flags
-from dolphin.core.agent.agent_state import AgentState, PauseType
 from dolphin.core.common.exceptions import DebuggerQuitException, UserInterrupt
 from dolphin.core.logging.logger import console
 
@@ -33,7 +32,7 @@ from dolphin.cli.ui.layout import LayoutManager
 from dolphin.cli.ui.console import console_session_start, console_display_session_info
 
 
-def _handle_user_interrupt(agent, layout, source: str) -> None:
+async def _handle_user_interrupt(agent, layout, source: str) -> None:
     """Handle user interrupt (ESC or Ctrl-C) by setting up agent state for resumption.
 
     This is a shared handler for both UserInterrupt and asyncio.CancelledError,
@@ -48,17 +47,16 @@ def _handle_user_interrupt(agent, layout, source: str) -> None:
 
     layout.hide_status()
 
-    # Set agent state for proper resumption with context preservation
-    agent._state = AgentState.PAUSED
-    agent._pause_type = PauseType.USER_INTERRUPT
+    # Use the centralized state-machine API; avoid direct private field mutation.
+    try:
+        await agent.mark_user_interrupted(f"Agent paused due to {source}")
+    except Exception as e:
+        # Keep CLI responsive and leave final state handling to next execution cycle.
+        StatusBar._debug_log(f"_handle_user_interrupt: state transition skipped due to {e}")
 
     # Clear the interrupt event so future calls don't immediately re-interrupt
-    if hasattr(agent, 'clear_interrupt'):
+    if hasattr(agent, "clear_interrupt"):
         agent.clear_interrupt()
-    elif hasattr(agent, 'get_interrupt_event'):
-        event = agent.get_interrupt_event()
-        if event:
-            event.clear()
 
     StatusBar._debug_log(f"_handle_user_interrupt: handled {source}, agent state set to PAUSED/USER_INTERRUPT")
 
@@ -193,7 +191,7 @@ async def runConversationLoop(agent, args: Args, initialVariables: Dict[str, Any
                 # UserInterrupt: user pressed ESC, interrupt() was called
                 StatusBar._debug_log(f"runConversationLoop: UserInterrupt caught, continuing loop")
                 if args.interactive:
-                    _handle_user_interrupt(agent, layout, "UserInterrupt")
+                    await _handle_user_interrupt(agent, layout, "UserInterrupt")
                     isFirstExecution = False
                 else:
                     raise
@@ -201,7 +199,7 @@ async def runConversationLoop(agent, args: Args, initialVariables: Dict[str, Any
                 # CancelledError: Ctrl-C SIGINT or asyncio task cancellation
                 StatusBar._debug_log(f"runConversationLoop: CancelledError caught, continuing loop")
                 if args.interactive:
-                    _handle_user_interrupt(agent, layout, "CancelledError")
+                    await _handle_user_interrupt(agent, layout, "CancelledError")
                     isFirstExecution = False
                 else:
                     raise

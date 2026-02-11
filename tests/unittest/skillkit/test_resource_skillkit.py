@@ -712,6 +712,52 @@ class TestResourceSkillkitIntegration(unittest.TestCase):
         self.assertTrue(content.startswith("Error:"))
         self.assertIn("not found", content.lower())
 
+    def test_load_resource_skill_defaults_to_short_mode(self):
+        """_load_resource_skill should return short summary by default."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        available = skillkit.get_available_skills()
+        if not available:
+            self.skipTest("No skills available for testing")
+
+        skill_name = available[0]
+        result = skillkit._load_resource_skill(skill_name)
+
+        self.assertIn(f"### {skill_name}", result)
+        self.assertIn('mode="full"', result)
+        self.assertFalse(result.startswith("[PIN]"))
+
+    def test_load_resource_skill_supports_explicit_full_mode(self):
+        """_load_resource_skill should return pinned full content in full mode."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        from dolphin.core.common.constants import PIN_MARKER
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        available = skillkit.get_available_skills()
+        if not available:
+            self.skipTest("No skills available for testing")
+
+        skill_name = available[0]
+        result = skillkit._load_resource_skill(skill_name, mode="full")
+
+        self.assertTrue(result.startswith(PIN_MARKER))
+
     def test_level3_resource_loading(self):
         """Test Level 3 resource file loading (scripts/references)."""
         if not self.skillkit_available:

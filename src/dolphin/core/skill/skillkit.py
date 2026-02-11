@@ -677,24 +677,37 @@ class Skillkit:
                 f"Expected SkillFunction object with 'func' attribute, got {type(skill)}"
             )
 
+        # Helper to check interrupt from kwargs
+        def check_interrupt():
+            props = kwargs.get("props")
+            if props and "gvp" in props:
+                ctx = props["gvp"]
+                if hasattr(ctx, "check_user_interrupt"):
+                    ctx.check_user_interrupt()
+
+        check_interrupt()
+
+        merged_params = {**skill_params} if skill_params else {}
+        merged_params.update(kwargs)
+
         if inspect.isasyncgenfunction(skill.func):
             # For async generator functions, yield each result
-            # Merge parameter dictionaries to avoid duplicate keyword arguments
-            merged_params = {**skill_params} if skill_params else {}
-            merged_params.update(kwargs)
             async for result in skill.func(**merged_params):
+                check_interrupt()
                 yield result
 
         elif inspect.iscoroutinefunction(skill.func):
             # For regular async functions, await and yield single result
-            # Merge parameter dictionaries to avoid duplicate keyword arguments
-            merged_params = {**skill_params} if skill_params else {}
-            merged_params.update(kwargs)
             result = await skill.func(**merged_params)
+            check_interrupt()
             yield result
         else:
-            # Merge parameter dictionaries to avoid duplicate keyword arguments
-            merged_params = {**skill_params} if skill_params else {}
-            merged_params.update(kwargs)
-            result = skill.func(**merged_params)
+            # For sync functions, run in executor to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            import functools
+
+            # Use functools.partial to pass arguments to the sync function
+            func_with_args = functools.partial(skill.func, **merged_params)
+            result = await loop.run_in_executor(None, func_with_args)
+            check_interrupt()
             yield result

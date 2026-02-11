@@ -345,22 +345,6 @@ class TestBasicCodeBlock(unittest.TestCase):
             )
         self.assertIn("Invalid block format", str(context.exception))
 
-    def test_get_parameter_with_default(self):
-        """测试获取参数默认值功能"""
-        params = {"key1": "value1", "key2": 123}
-
-        # 存在的参数
-        result = self.block.get_parameter_with_default(params, "key1", "default")
-        self.assertEqual(result, "value1")
-
-        # 不存在的参数，返回默认值
-        result = self.block.get_parameter_with_default(params, "key3", "default_value")
-        self.assertEqual(result, "default_value")
-
-        # None 默认值
-        result = self.block.get_parameter_with_default(params, "key4", None)
-        self.assertIsNone(result)
-
     def test_edge_cases(self):
         """测试边界情况"""
         # 空内容

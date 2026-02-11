@@ -6,7 +6,7 @@ import os
 import glob
 import re
 import time
-from typing import Any, List, Union, Optional
+from typing import Any, List, Union, Optional, Set
 
 from dolphin.core.skill.skillkit import SkillFunction, Skillkit
 
@@ -60,6 +60,13 @@ def _normalize_path(value: Any) -> str:
 
 
 class SystemFunctionsSkillKit(Skillkit):
+    _DEFAULT_CACHED_RESULT_LIMIT = 2000
+    _MAX_CACHED_RESULT_LIMIT = 5000
+    _MAX_REFERENCE_ID_CANDIDATES = 10
+    _SKILL_REFERENCE_HINT_PATTERN = re.compile(
+        r"_get_cached_result_detail\(\s*['\"](?P<id>[^'\"]+)['\"]\s*,\s*scope\s*=\s*['\"]skill['\"]"
+    )
+
     def __init__(self, enabled_functions: List[str] | None = None):
         """Initialize system function toolkit
 
@@ -456,7 +463,7 @@ class SystemFunctionsSkillKit(Skillkit):
         reference_id: str,
         scope: str = "auto",
         offset: int = 0,
-        limit: int = 2000,
+        limit: int = _DEFAULT_CACHED_RESULT_LIMIT,
         format: str = "text",
         include_meta: bool = False,
         **kwargs,
@@ -483,7 +490,7 @@ class SystemFunctionsSkillKit(Skillkit):
         if offset < 0 or limit <= 0:
             return "Error: INVALID_ARGUMENT (offset must be >= 0, limit must be > 0)."
 
-        max_limit = 5000
+        max_limit = self._MAX_CACHED_RESULT_LIMIT
         clamped = False
         if limit > max_limit:
             limit = max_limit
@@ -524,10 +531,71 @@ class SystemFunctionsSkillKit(Skillkit):
                 output = getattr(task, "output", None)
             return str(output or "(no output)"), None
 
+        def _extract_text_content(content: Any) -> str:
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                text_parts: list[str] = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(str(block.get("text", "")))
+                return "".join(text_parts)
+            return str(content)
+
+        def _collect_skill_reference_allowlist() -> Set[str]:
+            allowlist: Set[str] = set()
+            messages = None
+
+            context_manager = getattr(context, "context_manager", None)
+            if context_manager is not None and hasattr(context_manager, "to_dph_messages"):
+                try:
+                    messages = context_manager.to_dph_messages()
+                except Exception:
+                    messages = None
+
+            if messages is None and hasattr(context, "get_messages"):
+                try:
+                    messages = context.get_messages()
+                except Exception:
+                    messages = None
+
+            if messages is None or not hasattr(messages, "get_messages"):
+                return allowlist
+
+            for message in messages.get_messages():
+                text_content = _extract_text_content(getattr(message, "content", ""))
+                if not text_content:
+                    continue
+                for match in self._SKILL_REFERENCE_HINT_PATTERN.finditer(text_content):
+                    allowlist.add(match.group("id"))
+
+            return allowlist
+
+        def _validate_skill_reference_id() -> str | None:
+            allowlist = _collect_skill_reference_allowlist()
+            if reference_id in allowlist:
+                return None
+
+            candidates = sorted(allowlist)
+            candidate_text = (
+                ", ".join(candidates[: self._MAX_REFERENCE_ID_CANDIDATES])
+                if candidates
+                else "none"
+            )
+            return (
+                "Error: INVALID_REFERENCE_ID "
+                f"(reference_id '{reference_id}' is not a valid skill reference for this session. "
+                f"Available reference_ids: {candidate_text})"
+            )
+
         def _try_skill() -> tuple[str | None, str | None]:
             hook = getattr(context, "skillkit_hook", None)
             if hook is None:
                 return None, "Error: skillkit_hook not available in context."
+
+            validation_error = _validate_skill_reference_id()
+            if validation_error:
+                return None, validation_error
 
             raw = hook.get_raw_result(reference_id)
             if raw is None:

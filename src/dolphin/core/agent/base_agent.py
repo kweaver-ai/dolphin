@@ -15,6 +15,7 @@ from dolphin.core.logging.logger import get_logger
 from dolphin.core.agent.agent_state import AgentState, AgentEvent, AgentStatus, PauseType
 from dolphin.core.coroutine.step_result import StepResult
 from dolphin.core.common.exceptions import AgentLifecycleException
+from dolphin.core.common.constants import KEY_USER_INTERRUPT_INPUT
 
 
 class AgentEventListener:
@@ -299,7 +300,7 @@ class BaseAgent(ABC):
                         # Prepare updates if it was a user interrupt with pending input
                         updates = None
                         if self._pause_type == PauseType.USER_INTERRUPT and self._pending_user_input:
-                            updates = {"__user_interrupt_input__": self._pending_user_input}
+                            updates = {KEY_USER_INTERRUPT_INPUT: self._pending_user_input}
                             self._pending_user_input = None  # Consume it
                         
                         self._current_frame = await self._on_resume_coroutine(updates)
@@ -711,6 +712,39 @@ class BaseAgent(ABC):
         self._logger.info(f"User interrupt requested for agent {self.name}")
         self._interrupt_event.set()
         return True
+
+    async def mark_user_interrupted(
+        self, reason: str = "Agent paused due to user interrupt"
+    ) -> None:
+        """Mark agent as paused due to user interrupt via the state machine.
+
+        This method centralizes state mutation for user interruptions and avoids
+        direct field assignments from outer layers (CLI/SDK wrappers).
+
+        Args:
+            reason: State transition message for diagnostics.
+
+        Raises:
+            AgentLifecycleException: If current state cannot transition to PAUSED.
+        """
+        if self.state == AgentState.PAUSED:
+            self._pause_type = PauseType.USER_INTERRUPT
+            return
+
+        if self.state != AgentState.RUNNING:
+            raise AgentLifecycleException(
+                "INVALID_STATE",
+                f"Cannot mark user interrupt from state {self.state.value}",
+            )
+
+        previous_pause_type = self._pause_type
+        self._pause_type = PauseType.USER_INTERRUPT
+        try:
+            await self._change_state(AgentState.PAUSED, reason)
+        except Exception:
+            # Roll back to avoid leaving stale pause_type on failed transitions.
+            self._pause_type = previous_pause_type
+            raise
 
     async def resume_with_input(self, user_input: Optional[str] = None) -> bool:
         """Resume execution after user interrupt, optionally with new input.

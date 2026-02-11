@@ -99,7 +99,7 @@ class EnvSkillkit(Skillkit):
             self._executor = LocalExecutor()
         return self._executor
     
-    @context_retention(mode="summary", max_length=500)
+    @context_retention(mode="summary", max_length=1200, detail_hint_min_omitted=1200)
     def _bash(self, cmd: str = "", **kwargs) -> str:
         """Execute a Bash command in the configured environment.
         
@@ -220,9 +220,13 @@ class EnvSkillkit(Skillkit):
         
         return executor.exec_python(cmd, **kwargs)
     
-    def _get_env_info(self) -> str:
+    def _get_env_info(self, **kwargs) -> str:
         """Get information about the current execution environment.
         
+        Args:
+            **kwargs: Optional runtime parameters injected by the skill execution
+                flow (for example ``props``). They are accepted for compatibility.
+
         Returns:
             str: JSON string containing environment details:
                 - type: 'local' or 'vm'

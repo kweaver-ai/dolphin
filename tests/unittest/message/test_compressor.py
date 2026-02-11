@@ -62,12 +62,11 @@ def test_preserves_user_message_when_system_exceeds_budget():
 
 
 def test_preserves_last_user_message():
-    """Ensure user message is preserved when truncating.
+    """Ensure both first and latest user messages are preserved when truncating.
     
-    Note: Due to GLM API requirements, the FIRST user message must be preserved
-    (as it must be the first non-system message). When there are multiple user
-    messages, truncation from the end may drop later user messages but the first
-    one is always preserved.
+    The compressor should preserve:
+    - first user message: required by GLM API
+    - latest user message: current task anchor in long sessions
     """
     ctx = create_test_context()
     strategy = TruncationStrategy()
@@ -94,6 +93,9 @@ def test_preserves_last_user_message():
     # The FIRST user message should always be preserved (required by GLM API)
     assert any("FIRST_USER_MESSAGE" in m.content for m in user_messages), (
         "First user message should be preserved (required by GLM API)"
+    )
+    assert any("LAST_USER_MESSAGE" in m.content for m in user_messages), (
+        "Latest user message should be preserved as task anchor"
     )
     print("  PASS: test_preserves_last_user_message")
 
@@ -454,6 +456,77 @@ def test_sliding_window_tool_calls_pairing():
         )
 
 
+def test_token_estimation_includes_tool_metadata_overhead():
+    """Fast estimation should include tool_calls/tool_call_id structural overhead."""
+    strategy = TruncationStrategy()
+
+    with_tools = Messages()
+    with_tools.add_message(
+        role=MessageRole.ASSISTANT,
+        content="",
+        tool_calls=[{
+            "id": "call_1234567890",
+            "type": "function",
+            "function": {"name": "_bash", "arguments": "{\"cmd\":\"echo hello\"}"},
+        }],
+    )
+    with_tools.add_message(
+        role=MessageRole.TOOL,
+        content="ok",
+        tool_call_id="call_1234567890",
+        metadata={"name": "_bash"},
+    )
+
+    without_tools = Messages()
+    without_tools.add_message(role=MessageRole.ASSISTANT, content="")
+    without_tools.add_message(role=MessageRole.TOOL, content="ok")
+
+    tokens_with_tools = strategy.estimate_tokens(with_tools)
+    tokens_without_tools = strategy.estimate_tokens(without_tools)
+
+    assert tokens_with_tools > tokens_without_tools, (
+        "Token estimation should account for tool metadata overhead"
+    )
+    print("  PASS: test_token_estimation_includes_tool_metadata_overhead")
+
+
+def test_precise_count_used_near_budget_boundary():
+    """Near budget boundary should use precise count and avoid unnecessary compression."""
+
+    class BoundaryAwareTruncationStrategy(TruncationStrategy):
+        def __init__(self):
+            self.precise_count_calls = 0
+
+        def _should_use_precise_count(self, estimated_tokens, budget_tokens):
+            return True
+
+        def _count_tokens_precise(self, context, messages):
+            self.precise_count_calls += 1
+            return 880
+
+    ctx = create_test_context()
+    strategy = BoundaryAwareTruncationStrategy()
+
+    msgs = Messages()
+    msgs.add_message(role=MessageRole.SYSTEM, content="S" * 400)
+    msgs.add_message(role=MessageRole.USER, content="U" * 300)
+    msgs.add_message(role=MessageRole.ASSISTANT, content="A" * 40)
+
+    constraints = ContextConstraints(
+        max_input_tokens=1000,
+        reserve_output_tokens=100,
+        preserve_system=True,
+    )
+
+    result = strategy.compress(context=ctx, constraints=constraints, messages=msgs)
+
+    assert strategy.precise_count_calls == 1, "Precise counting should be triggered near boundary"
+    assert len(result.compressed_messages) == len(msgs), "Messages should stay uncompressed"
+    assert result.original_token_count == 880, "Result should use precise token count"
+    assert result.compression_ratio == 1.0
+    print("  PASS: test_precise_count_used_near_budget_boundary")
+
+
 def main():
     """Run all tests."""
     print("=" * 60)
@@ -469,6 +542,8 @@ def main():
         test_tool_messages_handled_correctly,
         test_user_only_at_beginning_with_many_tool_calls,
         test_tool_calls_pairing_preserved_after_truncation,
+        test_token_estimation_includes_tool_metadata_overhead,
+        test_precise_count_used_near_budget_boundary,
         # test_sliding_window_tool_calls_pairing,  # Disabled: currently fails with AttributeError due to implementation bug
     ]
     
