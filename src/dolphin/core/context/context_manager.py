@@ -4,8 +4,8 @@ Context Manager module for backward compatibility.
 This module provides the ContextEngineer class which is an alias/wrapper
 around MessageCompressor for SDK compatibility.
 
-Note: The compression strategies (TruncationStrategy, SlidingWindowStrategy, 
-LevelStrategy) are now defined in dolphin.core.message.compressor.
+Note: The compression strategies (TruncationStrategy, LevelStrategy)
+are now defined in dolphin.core.message.compressor.
 """
 
 from typing import List, Dict, Optional, TYPE_CHECKING
@@ -18,7 +18,6 @@ from dolphin.core.message.compressor import (
     CompressionResult,
     CompressionStrategy,
     TruncationStrategy,
-    SlidingWindowStrategy,
     LevelStrategy,
 )
 
@@ -37,9 +36,8 @@ logger = get_logger("context_engineer")
 # Re-export for backward compatibility
 __all__ = [
     "CompressionResult",
-    "CompressionStrategy", 
+    "CompressionStrategy",
     "TruncationStrategy",
-    "SlidingWindowStrategy",
     "LevelStrategy",
     "ContextEngineer",
 ]
@@ -65,9 +63,6 @@ class ContextEngineer:
         strategies = {
             "level": LevelStrategy(),
             "truncation": TruncationStrategy(),
-            "sliding_window_5": SlidingWindowStrategy(5),
-            "sliding_window_10": SlidingWindowStrategy(10),
-            "sliding_window_20": SlidingWindowStrategy(20),
         }
         # Merge user-defined policy configurations
         for name, strategy_config in self.config.strategy_configs.items():
@@ -98,11 +93,19 @@ class ContextEngineer:
         # Select Strategy
         strategy_name = strategy_name or self.config.default_strategy
         if strategy_name not in self.strategies:
-            logger.warning(f"Strategy '{strategy_name}' not found, using 'truncation'")
-            strategy_name = "truncation"
-            if strategy_name not in self.strategies:
-                # If there is no truncation at all, create a default one.
-                self.strategies["truncation"] = TruncationStrategy()
+            # Migrate removed sliding_window_* strategies to truncation
+            if strategy_name.startswith("sliding_window"):
+                logger.warning(
+                    "Strategy '%s' has been removed; falling back to 'truncation'.",
+                    strategy_name,
+                )
+                strategy_name = "truncation"
+            else:
+                available = ", ".join(sorted(self.strategies.keys()))
+                raise ValueError(
+                    f"Unsupported context strategy '{strategy_name}'. "
+                    f"Available strategies: {available}."
+                )
 
         strategy = self.strategies[strategy_name]
 

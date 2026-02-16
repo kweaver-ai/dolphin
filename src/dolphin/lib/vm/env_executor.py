@@ -687,8 +687,27 @@ class LocalExecutor(EnvExecutor):
                     '__name__': '__main__',
                 }
 
+                # Preload common stdlib modules so LLM code can use them
+                # without explicit imports.  Modules cannot survive pickle-based
+                # session persistence, so we re-import them every time.
+                import urllib
+                import urllib.request
+                import urllib.parse
+                import json as _json_mod
+                import math as _math_mod
+                import re as _re_mod
+                import datetime as _datetime_mod
+                for _mod_name, _mod_obj in [
+                    ("urllib", urllib),
+                    ("json", _json_mod),
+                    ("math", _math_mod),
+                    ("re", _re_mod),
+                    ("datetime", _datetime_mod),
+                    ("os", os),
+                ]:
+                    namespace.setdefault(_mod_name, _mod_obj)
+
                 # Preload common data-science aliases if available.
-                # This reduces "NameError: name 'np' is not defined" noise in typical analysis workflows.
                 try:
                     import numpy as np  # type: ignore
                     namespace.setdefault("np", np)

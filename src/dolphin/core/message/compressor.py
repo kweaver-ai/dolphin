@@ -428,9 +428,9 @@ class TruncationStrategy(CompressionStrategy):
         all_messages = Messages.combine_messages(
             Messages.combine_messages(
                 Messages.combine_messages(system_messages, first_user_message),
-                latest_user_message,
+                other_messages,
             ),
-            other_messages,
+            latest_user_message,
         )
 
         max_tokens = constraints.max_input_tokens - constraints.reserve_output_tokens
@@ -494,20 +494,20 @@ class TruncationStrategy(CompressionStrategy):
         # Flatten groups back to messages
         compressed_other = self._flatten_groups(compressed_groups)
 
-        # Merge Results: system + first_user + compressed_other
+        # Merge Results: system + first_user + compressed_other + latest_user
         len_system_messages = len(system_messages)
         compressed_messages = system_messages.copy()
         # Add first user message (preserved)
         for msg in first_user_message:
             compressed_messages.add_message(content=msg)
-        # Add latest user message (preserved)
-        for msg in latest_user_message:
-            compressed_messages.add_message(content=msg)
-        # Add compressed other messages
+        # Add compressed other messages (history)
         for msg in compressed_other:
             compressed_messages.add_message(
                 content=msg
             )  # Preserve original message with all attributes
+        # Add latest user message last (current query must be at the end)
+        for msg in latest_user_message:
+            compressed_messages.add_message(content=msg)
         final_tokens = self.estimate_tokens(compressed_messages)
 
         # Count images for logging
@@ -533,108 +533,6 @@ class TruncationStrategy(CompressionStrategy):
             metadata={
                 "truncated_messages": len(other_messages) - len(compressed_other),
                 "preserved_system_messages": len_system_messages,
-                "preserved_first_user": len(first_user_message) > 0,
-                "preserved_latest_user": len(latest_user_message) > 0,
-                "original_images": original_images,
-                "compressed_images": compressed_images,
-                "dropped_images": dropped_images,
-            },
-        )
-
-
-class SlidingWindowStrategy(CompressionStrategy):
-    """Sliding window strategy: retain a fixed number of recent messages"""
-
-    def __init__(self, window_size: int = 10):
-        self.window_size = window_size
-
-    def get_name(self) -> str:
-        return f"sliding_window_{self.window_size}"
-
-    def estimate_tokens(self, messages: Messages) -> int:
-        """Estimate the number of tokens, including both text and image content."""
-        return self._estimate_tokens_with_structure(messages)
-
-    def compress(
-        self,
-        context: Context,
-        constraints: "ContextConstraints",
-        messages: Messages,
-        **kwargs,
-    ) -> CompressionResult:
-        """Sliding Window Compression"""
-        if not messages:
-            return CompressionResult(
-                compressed_messages=Messages(),
-                original_token_count=0,
-                compressed_token_count=0,
-                compression_ratio=1.0,
-                strategy_used=self.get_name(),
-            )
-
-        original_tokens = self.estimate_tokens(messages)
-
-        # Separation system message and first user message
-        system_messages, first_user_message, latest_user_message, other_messages = self.preparation(
-            context, messages, constraints, **kwargs
-        )
-
-        # Group messages to preserve tool_calls/tool pairing
-        groups = self._group_messages(other_messages)
-        
-        # Get the last window_size GROUPS (not individual messages)
-        # This ensures we never break a tool_calls/tool pair
-        windowed_groups = (
-            groups[-self.window_size :]
-            if len(groups) > self.window_size
-            else groups
-        )
-        
-        # Flatten groups back to messages
-        windowed_messages = self._flatten_groups(windowed_groups)
-
-        # Merge Results: system + first_user + windowed
-        compressed_messages = Messages.combine_messages(
-            Messages.combine_messages(
-                Messages.combine_messages(system_messages, first_user_message),
-                latest_user_message,
-            ),
-            windowed_messages,
-        )
-        final_tokens = self.estimate_tokens(compressed_messages)
-
-        # Count images for logging
-        all_messages = Messages.combine_messages(
-            Messages.combine_messages(
-                Messages.combine_messages(system_messages, first_user_message),
-                latest_user_message,
-            ),
-            other_messages,
-        )
-        original_images = self._count_images_in_messages(all_messages)
-        compressed_images = self._count_images_in_messages(compressed_messages)
-        dropped_images = original_images - compressed_images
-        
-        # Enhanced logging with image information
-        if dropped_images > 0:
-            logger.info(
-                f"Sliding window dropped {dropped_images} image(s) "
-                f"(kept {compressed_images}/{original_images}) due to window size limit"
-            )
-
-        return CompressionResult(
-            compressed_messages=compressed_messages,
-            original_token_count=original_tokens,
-            compressed_token_count=final_tokens,
-            compression_ratio=(
-                final_tokens / original_tokens if original_tokens > 0 else 1.0
-            ),
-            strategy_used=self.get_name(),
-            metadata={
-                "window_size": self.window_size,
-                "groups_in_window": len(windowed_groups),
-                "messages_in_window": len(windowed_messages),
-                "preserved_system_messages": len(system_messages),
                 "preserved_first_user": len(first_user_message) > 0,
                 "preserved_latest_user": len(latest_user_message) > 0,
                 "original_images": original_images,
@@ -689,13 +587,13 @@ class LevelStrategy(CompressionStrategy):
             else:  # Last two messages, keep original
                 compressed_other.add_message(content=msg)
 
-        # Combine results: system + first_user + compressed_other
+        # Combine results: system + first_user + compressed_other + latest_user
         compressed_messages = Messages.combine_messages(
             Messages.combine_messages(
                 Messages.combine_messages(system_messages, first_user_message),
-                latest_user_message,
+                compressed_other,
             ),
-            compressed_other,
+            latest_user_message,
         )
         final_tokens = self.estimate_tokens(compressed_messages)
 
@@ -740,9 +638,6 @@ class MessageCompressor:
         strategies = {
             "level": LevelStrategy(),
             "truncation": TruncationStrategy(),
-            "sliding_window_5": SlidingWindowStrategy(5),
-            "sliding_window_10": SlidingWindowStrategy(10),
-            "sliding_window_20": SlidingWindowStrategy(20),
         }
         # Merge user-defined policy configurations
         for name, strategy_config in self.config.strategy_configs.items():
@@ -773,11 +668,19 @@ class MessageCompressor:
         # Select Strategy
         strategy_name = strategy_name or self.config.default_strategy
         if strategy_name not in self.strategies:
-            logger.warning(f"Strategy '{strategy_name}' not found, using 'truncation'")
-            strategy_name = "truncation"
-            if strategy_name not in self.strategies:
-                # If there is no truncation at all, create a default one.
-                self.strategies["truncation"] = TruncationStrategy()
+            # Migrate removed sliding_window_* strategies to truncation
+            if strategy_name.startswith("sliding_window"):
+                logger.warning(
+                    "Strategy '%s' has been removed; falling back to 'truncation'.",
+                    strategy_name,
+                )
+                strategy_name = "truncation"
+            else:
+                available = ", ".join(sorted(self.strategies.keys()))
+                raise ValueError(
+                    f"Unsupported context strategy '{strategy_name}'. "
+                    f"Available strategies: {available}."
+                )
 
         strategy = self.strategies[strategy_name]
 

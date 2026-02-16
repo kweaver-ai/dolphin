@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+import re as _re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from dolphin.core.common.constants import PIN_MARKER
 
 # Default prefix for downgraded tool messages
 DOWNGRADED_TOOL_PREFIX = "[Tool Output]: "
+
+# Regex patterns that identify reasoning models requiring
+# reasoning_content in assistant tool-call messages.
+# Each pattern is matched against the full (lowered) model name with re.search.
+
+_REASONING_MODEL_PATTERNS = [
+    _re.compile(r"^kimi-for-coding\b"),
+]
+
+
+def needs_reasoning_content(model_name: str) -> bool:
+    """Check whether *model_name* belongs to a reasoning-model family that
+    requires ``reasoning_content`` on assistant tool-call messages."""
+    name = model_name.lower()
+    return any(p.search(name) for p in _REASONING_MODEL_PATTERNS)
 
 
 def sanitize_openai_messages(
@@ -14,6 +30,7 @@ def sanitize_openai_messages(
     downgrade_role: str = "user",
     pinned_downgrade_role: str = "assistant",
     downgraded_prefix: str = DOWNGRADED_TOOL_PREFIX,
+    ensure_reasoning_content: bool = False,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Best-effort sanitizer for OpenAI-compatible tool message constraints.
 
@@ -26,6 +43,12 @@ def sanitize_openai_messages(
     - tool_call_id missing or mismatched
 
     This function downgrades orphan tool messages into normal text messages to avoid hard API failures.
+
+    When ``ensure_reasoning_content`` is True, all assistant messages with
+    tool_calls will be ensured to carry a ``reasoning_content`` field (defaulting
+    to ``" "``), because some providers (e.g. Kimi) reject tool-call messages
+    without it when thinking mode is active.  A single space is used because
+    the Kimi API treats empty strings as "missing".
 
     Returns:
     - sanitized_messages: list[dict] safe to send to OpenAI-compatible APIs
@@ -49,6 +72,8 @@ def sanitize_openai_messages(
                 for tc in tool_calls:
                     if isinstance(tc, dict) and tc.get("id"):
                         declared_tool_call_ids.add(tc["id"])
+                if ensure_reasoning_content and "reasoning_content" not in msg:
+                    msg = {**msg, "reasoning_content": " "}
             sanitized.append(msg)
             continue
 
