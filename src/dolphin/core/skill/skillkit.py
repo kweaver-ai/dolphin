@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
 from typing import Any, Callable, List, Tuple, Dict, Optional
@@ -702,12 +703,9 @@ class Skillkit:
             check_interrupt()
             yield result
         else:
-            # For sync functions, run in executor to avoid blocking the event loop
-            loop = asyncio.get_event_loop()
-            import functools
-
-            # Use functools.partial to pass arguments to the sync function
-            func_with_args = functools.partial(skill.func, **merged_params)
-            result = await loop.run_in_executor(None, func_with_args)
+            # Sync skill functions typically access the Context object which is
+            # NOT thread-safe, so we call them directly in the event-loop thread
+            # instead of offloading to a thread-pool executor.
+            result = skill.func(**merged_params)
             check_interrupt()
             yield result

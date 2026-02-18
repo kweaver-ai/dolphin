@@ -733,6 +733,65 @@ class TestContinueChatPauseSemantics:
             flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
 
 
+    @pytest.mark.asyncio
+    async def test_continue_chat_from_completed_state_user_interrupt_causes_lifecycle_exception(self):
+        """BUG REPRO (P1): continue_chat from COMPLETED state + user_interrupt → AgentLifecycleException.
+
+        After arun() completes normally the agent is in COMPLETED state.
+        Calling continue_chat() skips the PAUSED branch and never transitions
+        to RUNNING.  If a UserInterrupt is raised during execution,
+        mark_user_interrupted() attempts COMPLETED→PAUSED which is illegal,
+        raising AgentLifecycleException instead of yielding _status="interrupted".
+        """
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState
+        from dolphin.core.common.exceptions import UserInterrupt
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_completed_then_interrupt",
+                    content="/prompt/ test -> result",
+                )
+
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    raise UserInterrupt("user pressed ctrl-c")
+                    yield  # noqa: make it async generator
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+
+                # Simulate post-arun() state: COMPLETED
+                agent.status.state = AgentState.COMPLETED
+
+                # This SHOULD yield {"_status": "interrupted"} gracefully,
+                # but currently raises AgentLifecycleException because
+                # mark_user_interrupted() cannot transition COMPLETED→PAUSED.
+                results = []
+                async for item in agent.continue_chat(message="new question"):
+                    results.append(item)
+
+                assert len(results) == 1
+                assert results[0].get("_status") == "interrupted"
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+
 class TestDeltaModeIntegrationWithContinueChat:
     """Integration tests for delta mode with continue_chat."""
 

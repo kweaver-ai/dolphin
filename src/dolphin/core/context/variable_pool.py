@@ -131,7 +131,7 @@ class VariablePool:
         """
         # Automatically recognize all variables starting with an underscore as built-in variables
         underscore_vars = {
-            name for name in self.variable_pool.keys() if name.startswith("_")
+            name for name in self.variable_pool.keys() if isinstance(name, str) and name.startswith("_")
         }
 
         # Extra internal variables (not starting with underscore)
@@ -153,7 +153,7 @@ class VariablePool:
         return {
             name: var.to_dict()
             for name, var in self.variable_pool.items()
-            if name not in internal_vars
+            if isinstance(name, str) and name not in internal_vars
         }
 
     def get_all_variables_values(self):
@@ -181,6 +181,8 @@ class VariablePool:
         return self.variable_pool.keys()
 
     def set_var(self, name, value):
+        if not isinstance(name, str):
+            return
         if isinstance(value, Var):
             self.variable_pool[name] = value
         else:

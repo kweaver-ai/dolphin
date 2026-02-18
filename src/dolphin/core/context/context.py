@@ -422,7 +422,10 @@ class Context:
         # 2. If not found, we fallback to the internal '_history' (KEY_HISTORY).
         if name == "history":
             val = self.variable_pool.get_var_value("history")
-            if val is not None:
+            # Only honour user-defined "history" when it carries a meaningful
+            # value (non-None and non-empty-string).  An empty string assignment
+            # like ``-> history`` should not shadow the internal _history.
+            if val is not None and val != "":
                 return val
             # Return internal conversation history if user hasn't overridden it
             return self.variable_pool.get_var_value(KEY_HISTORY, default_value)

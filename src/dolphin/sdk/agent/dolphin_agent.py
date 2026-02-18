@@ -246,18 +246,35 @@ class DolphinAgent(BaseAgent):
                 kwargs.setdefault("preserve_context", True)
                 if message is None and self._pending_user_input:
                     message = self._pending_user_input
+                # Clear the interrupt event so the next execution cycle does
+                # not immediately re-trigger the interrupt guard.
+                if hasattr(self, "clear_interrupt"):
+                    self.clear_interrupt()
 
             # continue_chat serves as resume action for non-tool pause.
             self._pending_user_input = None
             self._resume_handle = None
             self._pause_type = None
             await self._change_state(AgentState.RUNNING, "Agent resumed via continue_chat()")
+        elif self.state in (AgentState.COMPLETED, AgentState.INITIALIZED):
+            # After arun() completes the agent is COMPLETED; after init it is
+            # INITIALIZED.  Transition through INITIALIZED→RUNNING so that
+            # interrupt handling (mark_user_interrupted) can legally reach PAUSED.
+            # Validate parameters before state transition to avoid stuck RUNNING state.
+            if stream_mode not in ("full", "delta"):
+                raise DolphinAgentException(
+                    "INVALID_PARAMETER",
+                    f"stream_mode must be 'full' or 'delta', got '{stream_mode}'"
+                )
+            if self.state == AgentState.COMPLETED:
+                await self._change_state(AgentState.INITIALIZED, "Reinitializing for continue_chat()")
+            await self._change_state(AgentState.RUNNING, "Agent running via continue_chat()")
 
         # Pass message through kwargs
         if message:
             kwargs["content"] = message
 
-        # Validate stream_mode
+        # Validate stream_mode (for PAUSED and other states that transitioned above)
         if stream_mode not in ("full", "delta"):
             raise DolphinAgentException(
                 "INVALID_PARAMETER",
@@ -376,7 +393,7 @@ class DolphinAgent(BaseAgent):
 
             stage = prog.get("stage", "")
             stage_id = prog.get("id", stage)  # Use ID if available
-            current_answer = prog.get("answer", "")
+            current_answer = prog.get("answer") or ""
 
             # Calculate delta
             last_text = last_answer.get(stage_id, "")

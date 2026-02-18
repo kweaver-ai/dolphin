@@ -274,6 +274,23 @@ def test_user_only_at_beginning_with_many_tool_calls():
     print("  PASS: test_user_only_at_beginning_with_many_tool_calls")
 
 
+def test_date_and_knowledge_check_with_none_content():
+    """_date_in_system_message / _knowledge_in_system_message must not crash on content=None."""
+    from dolphin.core.common.enums import SingleMessage
+
+    strategy = TruncationStrategy()
+
+    # Bypass add_message assertion by constructing SingleMessage directly
+    msgs = Messages()
+    msg = SingleMessage(role=MessageRole.SYSTEM, content="")
+    msg.content = None  # Simulate corrupted message
+    msgs.messages.append(msg)
+
+    # Should not raise TypeError: argument of type 'NoneType' is not iterable
+    assert strategy._date_in_system_message(msgs) is False
+    assert strategy._knowledge_in_system_message(msgs) is False
+
+
 def validate_tool_pairing(messages: Messages) -> None:
     """
     Validate that every 'tool' message has a preceding 'assistant' message 

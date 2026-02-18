@@ -233,7 +233,7 @@ class DolphinAgentSnapshot:
                     idx += 1
                     continue
 
-                if "content" not in msg and not self._has_tool_calls(msg):
+                if msg.get("content") is None and not self._has_tool_calls(msg):
                     report.applied = True
                     msg = dict(msg)
                     msg["content"] = ""
@@ -486,7 +486,7 @@ class DolphinAgentSnapshot:
                 idx += 1
                 continue
 
-            if "content" not in msg and not self._has_tool_calls(msg):
+            if msg.get("content") is None and not self._has_tool_calls(msg):
                 issues.append(
                     Issue(
                         code="MISSING_CONTENT",

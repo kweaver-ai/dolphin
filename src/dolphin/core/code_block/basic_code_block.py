@@ -1931,8 +1931,14 @@ class BasicCodeBlock:
                 normalized = str(user_content)
         return f"user:{normalized}"
 
-    def _mark_pending_turn(self) -> None:
-        """Mark the current turn as pending so interrupt paths can be resumed safely."""
+    def _mark_pending_turn(self, preserve_context: bool = False) -> None:
+        """Mark the current turn as pending so interrupt paths can be resumed safely.
+
+        Args:
+            preserve_context: When True (resume from interrupt), keep the existing
+                pending turn so the original interrupted question is persisted in
+                history.  When False (new turn), overwrite any stale pending turn.
+        """
         user_content = self._resolve_turn_user_content()
         if not user_content:
             return
@@ -1940,9 +1946,17 @@ class BasicCodeBlock:
         fingerprint = self._build_turn_fingerprint(user_content)
         pending_turn = self._get_pending_turn()
         if pending_turn:
-            if pending_turn.get("fingerprint") != fingerprint:
-                logger.debug("Pending turn already exists; keeping existing pending metadata.")
-            return
+            if pending_turn.get("fingerprint") == fingerprint:
+                return  # idempotent — same turn, nothing to do
+            if preserve_context:
+                # Resuming from interrupt: the existing pending turn carries
+                # the original user question that should eventually be committed
+                # to history.  Keep it as-is.
+                logger.debug("Pending turn fingerprint mismatch during resume; keeping existing pending metadata.")
+                return
+            # New turn with different content: overwrite the stale entry so
+            # _update_history_and_cleanup pairs the correct question with its answer.
+            logger.debug("Pending turn fingerprint mismatch; overwriting stale pending metadata.")
 
         self.context.set_variable(
             KEY_PENDING_TURN,

@@ -48,6 +48,7 @@ from dolphin.core.common.constants import (
 )
 from dolphin.core.context.context import Context
 from dolphin.core.logging.logger import console, console_skill_response
+from dolphin.core.common.exceptions import UserInterrupt
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.context.var_output import SourceType
@@ -107,6 +108,10 @@ class ExploreBlock(BasicCodeBlock):
         self.should_stop_exploration = False
         self.no_tool_call_count = 0  # Count consecutive rounds without tool calls
         self.pending_content = None  # Store content without tool_call for merging
+        
+        # Safety guard: track exploration iterations to prevent infinite loops
+        self._iteration_count = 0
+        self._max_iterations = MAX_SKILL_CALL_TIMES
         
         # Session-level tool call batch counter for stable ID generation
         # Incremented each time LLM returns tool calls (per batch, not per tool)
@@ -219,11 +224,19 @@ class ExploreBlock(BasicCodeBlock):
         self._make_init_messages()
         self._mark_pending_turn()
 
-        async for ret in self._execute_main():
-            yield ret
-
-        # Update history and cleanup buckets after execution
-        self._update_history_and_cleanup()
+        _exec_error: Optional[BaseException] = None
+        try:
+            async for ret in self._execute_main():
+                yield ret
+        except BaseException as e:
+            _exec_error = e
+            raise
+        finally:
+            # UserInterrupt is a recoverable interruption — the caller will
+            # resume with preserve_context=True, so we must keep the pending
+            # turn intact for the resumed round to commit.
+            if not isinstance(_exec_error, UserInterrupt):
+                self._update_history_and_cleanup()
 
     def _parse_hook_config(self) -> None:
         """Parse on_stop hook configuration from params."""
@@ -306,10 +319,11 @@ class ExploreBlock(BasicCodeBlock):
         )
 
     def _reset_for_retry(self) -> None:
-        """Reset exploration state before retry (preserving message history)."""
+        """Reset exploration state including iteration counter for safety guards before retry (preserving message history)."""
         self.should_stop_exploration = False
         self.times = 0
         self.no_tool_call_count = 0
+        self._iteration_count = 0
         self.strategy.reset_deduplicator()
 
     async def _stream_exploration_with_assignment(
@@ -318,7 +332,8 @@ class ExploreBlock(BasicCodeBlock):
         """Execute exploration with streaming yield, maintaining assign_type output logic."""
         has_add = False if self.assign_type == ">>" else None
 
-        while True:
+        while self._iteration_count < self._max_iterations:
+            self._iteration_count += 1
             self.context.check_user_interrupt()
 
             async for ret in self._explore_once(no_cache=True):
@@ -327,6 +342,16 @@ class ExploreBlock(BasicCodeBlock):
 
             if not await self._should_continue_explore():
                 break
+        else:
+            # Loop completed without hitting break - we hit max iterations
+            logger.warning(
+                f"Exploration exceeded maximum iterations ({self._max_iterations}). "
+                f"Forcing termination to prevent infinite loop."
+            )
+            raise RuntimeError(
+                f"Exploration exceeded maximum iterations limit ({self._max_iterations}). "
+                f"The agent may be stuck in an infinite loop or unable to complete the task."
+            )
 
     def _write_output_var(
         self,
@@ -1447,6 +1472,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         self.should_stop_exploration = False
         self.no_tool_call_count = 0
         self.pending_content = None  # Reset pending content
+        self._iteration_count = 0
 
         # 4. Setup buckets
         self._setup_system_bucket()
@@ -1479,22 +1505,40 @@ Please reconsider your approach and improve your answer based on the feedback ab
         ):
             self.context.set_history_bucket(history_messages)
 
-        self._mark_pending_turn()
+        self._mark_pending_turn(preserve_context=preserve_context)
 
         # 5. Run exploration loop
-        while True:
-            # Checkpoint: Check user interrupt before each exploration turn
-            if self.context:
-                self.context.check_user_interrupt()
+        _exec_error: Optional[BaseException] = None
+        try:
+            while self._iteration_count < self._max_iterations:
+                self._iteration_count += 1
+                # Checkpoint: Check user interrupt before each exploration turn
+                if self.context:
+                    self.context.check_user_interrupt()
 
-            async for ret in self._explore_once(no_cache=True):
-                yield ret
+                async for ret in self._explore_once(no_cache=True):
+                    yield ret
 
-            if not await self._should_continue_explore():
-                break
-
-        # 6. Cleanup
-        self._update_history_and_cleanup()
+                if not await self._should_continue_explore():
+                    break
+            else:
+                # Loop completed without hitting break - we hit max iterations
+                logger.warning(
+                    f"Exploration exceeded maximum iterations ({self._max_iterations}). "
+                    f"Forcing termination to prevent infinite loop."
+                )
+                raise RuntimeError(
+                    f"Exploration exceeded maximum iterations limit ({self._max_iterations}). "
+                    f"The agent may be stuck in an infinite loop or unable to complete the task."
+                )
+        except BaseException as e:
+            _exec_error = e
+            raise
+        finally:
+            # 6. Cleanup — skip on UserInterrupt so the pending turn is
+            # preserved for the resumed round (preserve_context=True).
+            if not isinstance(_exec_error, UserInterrupt):
+                self._update_history_and_cleanup()
 
     # ===================== continue_exploration helpers =====================
 

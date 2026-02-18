@@ -178,7 +178,7 @@ class CompressionStrategy(ABC):
     def _date_in_system_message(self, system_messages: Messages) -> bool:
         """Determine whether the system message contains a date. If it does, return True; otherwise, return False."""
         for msg in system_messages:
-            if self.DATE_PREFIX in msg.content:
+            if msg.content and self.DATE_PREFIX in msg.content:
                 return True
         return False
 
@@ -262,7 +262,7 @@ class CompressionStrategy(ABC):
     def _knowledge_in_system_message(self, system_messages: Messages) -> bool:
         """Determine whether the system message contains knowledge. If it does, return True; otherwise, return False."""
         for msg in system_messages:
-            if self.MEMORY_PREFIX in msg.content:
+            if msg.content and self.MEMORY_PREFIX in msg.content:
                 return True
         return False
 
@@ -677,10 +677,14 @@ class MessageCompressor:
                 strategy_name = "truncation"
             else:
                 available = ", ".join(sorted(self.strategies.keys()))
-                raise ValueError(
-                    f"Unsupported context strategy '{strategy_name}'. "
-                    f"Available strategies: {available}."
+                logger.warning(
+                    "Unknown context strategy '%s' (available: %s); falling back to 'truncation'.",
+                    strategy_name,
+                    available,
                 )
+                strategy_name = "truncation"
+                if strategy_name not in self.strategies:
+                    self.strategies["truncation"] = TruncationStrategy()
 
         strategy = self.strategies[strategy_name]
 

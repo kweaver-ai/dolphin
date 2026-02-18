@@ -229,3 +229,60 @@ def test_reordered_tool_responses_keep_original_timestamps():
         "2026-02-01T09:00:00",
         "2026-02-01T10:00:00",
     ]
+
+
+def test_stale_pending_turn_not_overwritten_on_fingerprint_mismatch():
+    """BUG REPRO (P2): _mark_pending_turn keeps stale pending turn when fingerprint differs.
+
+    Scenario:
+    1. Turn-1 interrupted → pending turn saved with user_content="old question"
+    2. Turn-2 starts with new input "new question" → _mark_pending_turn called
+    3. Fingerprint differs but code returns early, keeping the OLD pending turn
+    4. _update_history_and_cleanup uses pending_user_content ("old question")
+       paired with the NEW answer → history mismatch
+    """
+    from dolphin.core.code_block.basic_code_block import BasicCodeBlock
+    from dolphin.core.common.constants import KEY_HISTORY, KEY_PENDING_TURN
+    from dolphin.core.context.context import Context
+
+    context = Context()
+    block = BasicCodeBlock(context=context)
+
+    # Step 1: Simulate interrupted Turn-1 leaving a stale pending turn
+    old_question = "old question from interrupted turn"
+    context.set_variable(KEY_PENDING_TURN, {
+        "turn_id": "2026-01-01T00:00:00",
+        "user_content": old_question,
+        "fingerprint": BasicCodeBlock._build_turn_fingerprint(old_question),
+    })
+
+    # Step 2: Turn-2 starts with a completely different question
+    new_question = "new question for this turn"
+    block.content = new_question
+
+    # _mark_pending_turn with preserve_context=False (new turn) should overwrite
+    block._mark_pending_turn(preserve_context=False)
+
+    # Verify: pending turn should now reflect the NEW question
+    pending = context.get_var_value(KEY_PENDING_TURN)
+    assert pending is not None
+    assert pending["user_content"] == new_question, (
+        f"Expected pending turn to be updated to new question, "
+        f"but got stale content: {pending['user_content']!r}"
+    )
+
+    # Step 3: Show the downstream impact — _update_history_and_cleanup
+    # would persist the wrong user_content in history
+    block.recorder = MagicMock()
+    block.recorder.get_answer.return_value = "answer to the NEW question"
+    block._update_history_and_cleanup()
+
+    history = context.get_var_value(KEY_HISTORY)
+    assert isinstance(history, list) and len(history) >= 2
+
+    user_msg = history[0]
+    assert user_msg["role"] == "user"
+    assert user_msg["content"] == new_question, (
+        f"History user content should match the current turn's question, "
+        f"but got stale: {user_msg['content']!r}"
+    )

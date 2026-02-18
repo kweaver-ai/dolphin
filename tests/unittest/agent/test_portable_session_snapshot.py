@@ -679,3 +679,40 @@ def test_repair_applied_true_when_only_value_degradation():
     _, report = agent.snapshot.repair_portable_session(state)
     assert report["applied"] is True
     assert len(report["degraded_fields"]) > 0
+
+
+def test_repair_fixes_content_none_to_empty_string():
+    """repair should treat content=None the same as missing content and backfill ''."""
+    agent, _ = _build_agent_with_context()
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "s",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": None},
+            {"role": "assistant", "content": "reply"},
+        ],
+    }
+    repaired, report = agent.snapshot.repair_portable_session(state)
+    assert report["applied"] is True
+    assert repaired["history_messages"][0]["content"] == ""
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == []
+
+
+def test_import_handles_content_none_without_crash():
+    """import with repair=True must not crash on content=None messages."""
+    agent, context = _build_agent_with_context()
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_none_content",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": None},
+            {"role": "assistant", "content": "ok"},
+        ],
+    }
+    report = agent.snapshot.import_portable_session(state, repair=True)
+    assert report["issues_after"] == []
+    history = context.get_history_messages(normalize=True).get_messages_as_dict()
+    assert history[0]["content"] == ""

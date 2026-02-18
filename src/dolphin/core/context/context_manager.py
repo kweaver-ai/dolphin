@@ -21,6 +21,11 @@ from dolphin.core.message.compressor import (
     LevelStrategy,
 )
 
+# Deprecated: SlidingWindowStrategy has been removed.  This alias keeps
+# existing code that imports it from this module working at runtime, but
+# new code should use TruncationStrategy or LevelStrategy instead.
+SlidingWindowStrategy = TruncationStrategy
+
 if TYPE_CHECKING:
     from dolphin.core.config.global_config import (
         ContextConstraints,
@@ -38,6 +43,7 @@ __all__ = [
     "CompressionResult",
     "CompressionStrategy",
     "TruncationStrategy",
+    "SlidingWindowStrategy",  # deprecated alias → TruncationStrategy
     "LevelStrategy",
     "ContextEngineer",
 ]
@@ -102,10 +108,14 @@ class ContextEngineer:
                 strategy_name = "truncation"
             else:
                 available = ", ".join(sorted(self.strategies.keys()))
-                raise ValueError(
-                    f"Unsupported context strategy '{strategy_name}'. "
-                    f"Available strategies: {available}."
+                logger.warning(
+                    "Unknown context strategy '%s' (available: %s); falling back to 'truncation'.",
+                    strategy_name,
+                    available,
                 )
+                strategy_name = "truncation"
+                if strategy_name not in self.strategies:
+                    self.strategies["truncation"] = TruncationStrategy()
 
         strategy = self.strategies[strategy_name]
 
