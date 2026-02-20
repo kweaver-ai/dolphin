@@ -4,6 +4,7 @@ import unittest
 
 from dolphin.core.common.enums import Messages, MessageRole
 from dolphin.core.context.context import Context
+from dolphin.core.common.constants import KEY_HISTORY
 
 
 class TestHistorySnapshotPollution(unittest.TestCase):
@@ -16,7 +17,7 @@ class TestHistorySnapshotPollution(unittest.TestCase):
 
         history_messages = Messages()
         history_messages.add_message(role=MessageRole.USER, content="你好")
-        ctx.set_variable("history", history_messages)
+        ctx.set_variable(KEY_HISTORY, history_messages)
 
         snapshot = ctx.export_runtime_state(frame_id="frame-1")
 

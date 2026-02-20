@@ -36,6 +36,11 @@ KEY_MAX_ANSWER_CONTENT_LENGTH = "_max_answer_len"
 # Executor internal status variables (prefixed with underscore to avoid conflicts)
 KEY_STATUS = "_status"
 KEY_PREVIOUS_STATUS = "_previous_status"
+KEY_HISTORY = "_history"
+KEY_PENDING_TURN = "_pending_turn"
+# Internal updates key for carrying user interrupt recovery input.
+# This is consumed by resume flow and should not be persisted as a user variable.
+KEY_USER_INTERRUPT_INPUT = "__user_interrupt_input__"
 
 MSG_DUPLICATE_SKILL_CALLS = [
     "发现工具重复调用，请检查历史记录，重新思考问题、解决进展及下面计划，我的思考如下:",

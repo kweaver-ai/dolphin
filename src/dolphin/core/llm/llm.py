@@ -15,7 +15,7 @@ from dolphin.core.common.constants import (
 )
 from dolphin.core.context.context import Context
 from dolphin.core.logging.logger import get_logger
-from dolphin.core.llm.message_sanitizer import sanitize_and_log
+from dolphin.core.llm.message_sanitizer import needs_reasoning_content, sanitize_and_log
 
 logger = get_logger("llm")
 
@@ -210,7 +210,8 @@ class LLMModelFactory(LLM):
 
         # Sanitize messages BEFORE cache check to ensure consistent cache keys
         sanitized_messages = sanitize_and_log(
-            messages.get_messages_as_dict(), logger.warning
+            messages.get_messages_as_dict(), logger.warning,
+            ensure_reasoning_content=needs_reasoning_content(llm_instance_config.model_name),
         )
 
         if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
@@ -413,7 +414,8 @@ class LLMOpenai(LLM):
 
         # Sanitize messages BEFORE cache check to ensure consistent cache keys
         sanitized_messages = sanitize_and_log(
-            messages.get_messages_as_dict(), logger.warning
+            messages.get_messages_as_dict(), logger.warning,
+            ensure_reasoning_content=needs_reasoning_content(llm_instance_config.model_name),
         )
 
         if not no_cache and not flags.is_enabled(flags.DISABLE_LLM_CACHE):
@@ -451,6 +453,9 @@ class LLMOpenai(LLM):
         tool_parser = ToolCallsParser()
 
         async for chunk in response:
+            if not chunk.choices:
+                await self.update_usage(chunk)
+                continue
             delta = chunk.choices[0].delta
             if hasattr(delta, "content") and delta.content is not None:
                 accu_answer += delta.content

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
 from typing import Any, Callable, List, Tuple, Dict, Optional
@@ -677,24 +678,34 @@ class Skillkit:
                 f"Expected SkillFunction object with 'func' attribute, got {type(skill)}"
             )
 
+        # Helper to check interrupt from kwargs
+        def check_interrupt():
+            props = kwargs.get("props")
+            if props and "gvp" in props:
+                ctx = props["gvp"]
+                if hasattr(ctx, "check_user_interrupt"):
+                    ctx.check_user_interrupt()
+
+        check_interrupt()
+
+        merged_params = {**skill_params} if skill_params else {}
+        merged_params.update(kwargs)
+
         if inspect.isasyncgenfunction(skill.func):
             # For async generator functions, yield each result
-            # Merge parameter dictionaries to avoid duplicate keyword arguments
-            merged_params = {**skill_params} if skill_params else {}
-            merged_params.update(kwargs)
             async for result in skill.func(**merged_params):
+                check_interrupt()
                 yield result
 
         elif inspect.iscoroutinefunction(skill.func):
             # For regular async functions, await and yield single result
-            # Merge parameter dictionaries to avoid duplicate keyword arguments
-            merged_params = {**skill_params} if skill_params else {}
-            merged_params.update(kwargs)
             result = await skill.func(**merged_params)
+            check_interrupt()
             yield result
         else:
-            # Merge parameter dictionaries to avoid duplicate keyword arguments
-            merged_params = {**skill_params} if skill_params else {}
-            merged_params.update(kwargs)
+            # Sync skill functions typically access the Context object which is
+            # NOT thread-safe, so we call them directly in the event-loop thread
+            # instead of offloading to a thread-pool executor.
             result = skill.func(**merged_params)
+            check_interrupt()
             yield result

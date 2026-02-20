@@ -15,12 +15,13 @@ from dolphin.core.common.object_type import ObjectTypeFactory
 from dolphin.core.parser.parser import Parser
 
 from dolphin.core.agent.base_agent import BaseAgent
-from dolphin.core.agent.agent_state import AgentState
+from dolphin.core.agent.agent_state import AgentState, PauseType
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.coroutine.step_result import StepResult
 import dolphin.core.executor.dolphin_executor as dolphin_language
 from dolphin.core.executor.dolphin_executor import DolphinExecutor
-from dolphin.core.common.exceptions import DolphinAgentException
+from dolphin.core.common.exceptions import DolphinAgentException, UserInterrupt
+from dolphin.sdk.agent.dolphin_agent_snapshot import DolphinAgentSnapshot
 
 
 class DolphinAgent(BaseAgent):
@@ -115,6 +116,7 @@ class DolphinAgent(BaseAgent):
         # Normalize output variable parameters to avoid sharing issues caused by mutable default arguments
         self.output_variables = output_variables or []  # Store output variable list
         self.header_info = {}  # Store parsed header information
+        self.snapshot = DolphinAgentSnapshot(self)
 
         # Initialize components (completed in the _initialize method)
 
@@ -230,11 +232,49 @@ class DolphinAgent(BaseAgent):
         if self.executor is None:
             await self.initialize()
 
+        # State-aware pause semantics:
+        # - Tool interrupts must be resumed via resume() first.
+        # - User interrupts default to preserve context and continue as a new turn.
+        if self.state == AgentState.PAUSED:
+            if self._pause_type == PauseType.TOOL_INTERRUPT:
+                raise DolphinAgentException(
+                    "NEED_RESUME",
+                    "Agent paused due to tool interrupt; call resume() before continue_chat().",
+                )
+
+            if self._pause_type == PauseType.USER_INTERRUPT:
+                kwargs.setdefault("preserve_context", True)
+                if message is None and self._pending_user_input:
+                    message = self._pending_user_input
+                # Clear the interrupt event so the next execution cycle does
+                # not immediately re-trigger the interrupt guard.
+                if hasattr(self, "clear_interrupt"):
+                    self.clear_interrupt()
+
+            # continue_chat serves as resume action for non-tool pause.
+            self._pending_user_input = None
+            self._resume_handle = None
+            self._pause_type = None
+            await self._change_state(AgentState.RUNNING, "Agent resumed via continue_chat()")
+        elif self.state in (AgentState.COMPLETED, AgentState.INITIALIZED):
+            # After arun() completes the agent is COMPLETED; after init it is
+            # INITIALIZED.  Transition through INITIALIZED→RUNNING so that
+            # interrupt handling (mark_user_interrupted) can legally reach PAUSED.
+            # Validate parameters before state transition to avoid stuck RUNNING state.
+            if stream_mode not in ("full", "delta"):
+                raise DolphinAgentException(
+                    "INVALID_PARAMETER",
+                    f"stream_mode must be 'full' or 'delta', got '{stream_mode}'"
+                )
+            if self.state == AgentState.COMPLETED:
+                await self._change_state(AgentState.INITIALIZED, "Reinitializing for continue_chat()")
+            await self._change_state(AgentState.RUNNING, "Agent running via continue_chat()")
+
         # Pass message through kwargs
         if message:
             kwargs["content"] = message
 
-        # Validate stream_mode
+        # Validate stream_mode (for PAUSED and other states that transitioned above)
         if stream_mode not in ("full", "delta"):
             raise DolphinAgentException(
                 "INVALID_PARAMETER",
@@ -246,36 +286,72 @@ class DolphinAgent(BaseAgent):
 
         # Direct passthrough pattern (like achat), with optional wrapping
         # This ensures streaming works correctly by yielding each result immediately
-        async for result in self.executor.continue_exploration(**kwargs):
-            # Interrupt: wrap in consistent format with _status="interrupted"
-            if isinstance(result, dict) and result.get("status") == "interrupted":
-                yield {
-                    "_status": "interrupted",
-                    "_progress": [],
-                    "_interrupt": result  # Preserve original interrupt info
-                }
-                return
+        try:
+            async for result in self.executor.continue_exploration(**kwargs):
+                # Interrupt: wrap in consistent format with _status="interrupted"
+                if isinstance(result, dict) and result.get("status") == "interrupted":
+                    interrupt_type = result.get("interrupt_type")
+                    self._resume_handle = result.get("handle")
+                    if interrupt_type in ("tool_confirmation", "tool_interrupt"):
+                        self._pause_type = PauseType.TOOL_INTERRUPT
+                        if self.state != AgentState.PAUSED:
+                            await self._change_state(
+                                AgentState.PAUSED, "Agent paused due to tool interrupt in continue_chat()"
+                            )
+                    elif interrupt_type == "user_interrupt":
+                        await self.mark_user_interrupted(
+                            "Agent paused due to user interrupt in continue_chat()"
+                        )
+                        # Clear interrupt event to avoid immediate re-trigger on next turn.
+                        self.clear_interrupt()
+                    else:
+                        self._logger.warning("Unknown interrupt_type=%s, treating as generic pause", interrupt_type)
+                        self._pause_type = None
+                        if self.state != AgentState.PAUSED:
+                            await self._change_state(
+                                AgentState.PAUSED, "Agent interrupted in continue_chat()"
+                            )
+                    yield {
+                        "_status": "interrupted",
+                        "_progress": [],
+                        "_interrupt": result  # Preserve original interrupt info
+                    }
+                    return
 
-            # Streaming mode: get context variables (contains _progress)
-            ctx = self.executor.context if self.executor else None
-            if ctx is not None and stream_variables:
-                if self.output_variables is not None and len(self.output_variables) > 0:
-                    data = ctx.get_variables_values(self.output_variables)
+                # Streaming mode: get context variables (contains _progress)
+                ctx = self.executor.context if self.executor else None
+                if ctx is not None and stream_variables:
+                    if self.output_variables is not None and len(self.output_variables) > 0:
+                        data = ctx.get_variables_values(self.output_variables)
+                    else:
+                        data = ctx.get_all_variables_values()
+
+                    # Apply delta mode if requested
+                    if stream_mode == "delta" and "_progress" in data:
+                        data = self._apply_delta_mode(data, last_answer)
+
+                    # data already contains _status and _progress from context
+                    yield data
                 else:
-                    data = ctx.get_all_variables_values()
-
-                # Apply delta mode if requested
-                if stream_mode == "delta" and "_progress" in data:
-                    data = self._apply_delta_mode(data, last_answer)
-
-                # data already contains _status and _progress from context
-                yield data
-            else:
-                # Non-streaming or no context: wrap raw result
-                yield {
-                    "_status": "running",
-                    "_progress": [result] if isinstance(result, dict) else []
-                }
+                    # Non-streaming or no context: wrap raw result
+                    yield {
+                        "_status": "running",
+                        "_progress": [result] if isinstance(result, dict) else []
+                    }
+        except UserInterrupt:
+            self._resume_handle = None
+            await self.mark_user_interrupted("Agent paused due to user interrupt in continue_chat()")
+            # Clear interrupt event to avoid immediate re-trigger on next turn.
+            self.clear_interrupt()
+            yield {
+                "_status": "interrupted",
+                "_progress": [],
+                "_interrupt": {
+                    "status": "interrupted",
+                    "interrupt_type": "user_interrupt",
+                },
+            }
+            return
 
         # Final state: mark as completed
         try:
@@ -317,7 +393,7 @@ class DolphinAgent(BaseAgent):
 
             stage = prog.get("stage", "")
             stage_id = prog.get("id", stage)  # Use ID if available
-            current_answer = prog.get("answer", "")
+            current_answer = prog.get("answer") or ""
 
             # Calculate delta
             last_text = last_answer.get(stage_id, "")

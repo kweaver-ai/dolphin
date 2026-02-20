@@ -24,7 +24,7 @@ from dolphin.core.common.constants import (
     get_msg_duplicate_output,
 )
 from dolphin.core.logging.logger import console
-from dolphin.core.llm.message_sanitizer import sanitize_and_log
+from dolphin.core.llm.message_sanitizer import needs_reasoning_content, sanitize_and_log
 
 """1. Calculate token usage and update the global variable pool; if the usage variable does not exist in the global variable pool, add it first.
 2. Uniformly call models supported by the anydata model factory:
@@ -158,6 +158,7 @@ class LLMClient:
             sanitized_messages = sanitize_and_log(
                 compression_result.compressed_messages.get_messages_as_dict(),
                 self.context.warn,
+                ensure_reasoning_content=needs_reasoning_content(model_config.model_name),
             )
 
             # Build request payload
@@ -317,7 +318,7 @@ class LLMClient:
             ttc_mode: TTC mode configuration, including parameters such as name and control_vars
             output_var: Name of the output variable for storing results
             lang_mode: Language mode, such as "prompt", "judge", or "explore"
-            context_strategy: Name of the context compression strategy, such as "truncation" or "sliding_window_10"
+            context_strategy: Name of the context compression strategy, such as "truncation" or "level"
 
         Returns:
             async generator providing content chunks

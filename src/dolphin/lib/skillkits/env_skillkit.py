@@ -99,7 +99,7 @@ class EnvSkillkit(Skillkit):
             self._executor = LocalExecutor()
         return self._executor
     
-    @context_retention(mode="summary", max_length=500)
+    @context_retention(mode="summary", max_length=1200, detail_hint_min_omitted=1200)
     def _bash(self, cmd: str = "", **kwargs) -> str:
         """Execute a Bash command in the configured environment.
         
@@ -185,28 +185,37 @@ class EnvSkillkit(Skillkit):
         - Remote VM (if vm config is present)
         - Docker container (if docker config is present)
         
-        Supports session state persistence, running like Jupyter notebooks.
-        
+        Supports session state persistence for simple variables (strings,
+        numbers, lists, dicts).  However, **imported modules do NOT persist
+        across calls** — you must include all necessary `import` statements
+        in every invocation.  Common stdlib modules (json, urllib, os, re,
+        math, datetime) and data-science libraries (np, pd) are pre-loaded
+        and always available without importing.
+
         Args:
             cmd (str): The Python code to execute.
                       Assign results to 'return_value' for explicit returns.
             **kwargs: Additional parameters:
                 - cwd: Working directory for execution
                 - session_id: Session identifier for state persistence
-        
+
         Returns:
             str: Execution result including stdout and return_value if set
-        
+
         Examples:
             # Simple calculation
             _python("x = 1 + 2; print(x)")
-            
+
             # Using return_value
             _python("return_value = [1, 2, 3]")
-            
+
             # Stateful execution (variables persist)
             _python("data = load_data()")
             _python("result = process(data)")  # 'data' is available
+
+            # Pre-loaded modules (no import needed)
+            _python("data = json.loads(text)")
+            _python("resp = urllib.request.urlopen(url)")
         """
         executor = self._get_executor()
         
@@ -220,9 +229,13 @@ class EnvSkillkit(Skillkit):
         
         return executor.exec_python(cmd, **kwargs)
     
-    def _get_env_info(self) -> str:
+    def _get_env_info(self, **kwargs) -> str:
         """Get information about the current execution environment.
         
+        Args:
+            **kwargs: Optional runtime parameters injected by the skill execution
+                flow (for example ``props``). They are accepted for compatibility.
+
         Returns:
             str: JSON string containing environment details:
                 - type: 'local' or 'vm'

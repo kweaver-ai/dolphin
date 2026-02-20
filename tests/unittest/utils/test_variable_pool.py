@@ -333,5 +333,19 @@ class TestVariablePool(unittest.TestCase):
         )  # Trying to access path on non-dict value
 
 
+    def test_get_user_variables_with_none_key(self):
+        """get_user_variables must not crash when variable_pool contains a None key."""
+        self.pool.variable_pool[None] = Var("bad")
+        # Should not raise AttributeError: 'NoneType' object has no attribute 'startswith'
+        result = self.pool.get_user_variables()
+        # None key should not appear in user variables
+        self.assertNotIn(None, result)
+
+    def test_set_var_rejects_none_key(self):
+        """set_var should silently ignore None as variable name."""
+        self.pool.set_var(None, "value")
+        self.assertFalse(self.pool.contain_var(None))
+
+
 if __name__ == "__main__":
     unittest.main()

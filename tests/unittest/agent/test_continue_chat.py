@@ -5,7 +5,7 @@ Tests the new continue_chat() method that replaces achat() with consistent API f
 
 import asyncio
 import warnings
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -48,6 +48,7 @@ class TestContinueChatFlagRequirement:
             assert "INVALID_FLAG_STATE" in str(exc_info.value.code)
         finally:
             flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
 
     @pytest.mark.asyncio
     async def test_continue_chat_works_when_v2_disabled(self, agent):
@@ -322,6 +323,7 @@ class TestContinueChatInterrupt:
     async def test_continue_chat_yields_interrupt_info(self):
         """continue_chat should yield interrupt info when tool is interrupted."""
         from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState
         from dolphin.sdk.agent.dolphin_agent import DolphinAgent
 
         original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
@@ -356,6 +358,7 @@ class TestContinueChatInterrupt:
                 mock_executor.continue_exploration = mock_continue
                 agent.executor = mock_executor
                 agent.output_variables = None
+                agent.status.state = AgentState.RUNNING
 
                 # Collect results
                 results = []
@@ -368,6 +371,423 @@ class TestContinueChatInterrupt:
                 # Should have received interrupt-related data
                 # The exact format depends on implementation
                 assert len(results) > 0, "Should yield at least one result when tool is interrupted"
+                assert results[0].get("_status") == "interrupted"
+                assert "status" not in results[0]
+                assert "interrupt" not in results[0]
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+
+class TestContinueChatPauseSemantics:
+    """Tests for state-aware pause semantics in continue_chat."""
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_user_interrupt_defaults_to_preserve_context_true(self):
+        """PAUSED + USER_INTERRUPT should default preserve_context=True."""
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState, PauseType
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_pause_user_interrupt",
+                    content="/prompt/ test -> result",
+                )
+
+                captured_kwargs = {}
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    captured_kwargs.update(kwargs)
+                    yield {"status": "completed"}
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+
+                agent.status.state = AgentState.PAUSED
+                agent._pause_type = PauseType.USER_INTERRUPT
+                agent._resume_handle = MagicMock()
+
+                async for _ in agent.continue_chat(message="continue"):
+                    pass
+
+                assert captured_kwargs.get("preserve_context") is True
+                assert agent.state == AgentState.RUNNING
+                assert agent._pause_type is None
+                assert agent._resume_handle is None
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_user_interrupt_respects_explicit_preserve_context(self):
+        """Explicit preserve_context should not be overridden in USER_INTERRUPT path."""
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState, PauseType
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_pause_user_explicit",
+                    content="/prompt/ test -> result",
+                )
+
+                captured_kwargs = {}
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    captured_kwargs.update(kwargs)
+                    yield {"status": "completed"}
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+
+                agent.status.state = AgentState.PAUSED
+                agent._pause_type = PauseType.USER_INTERRUPT
+
+                async for _ in agent.continue_chat(
+                    message="continue",
+                    preserve_context=False,
+                ):
+                    pass
+
+                assert captured_kwargs.get("preserve_context") is False
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_tool_interrupt_requires_resume(self):
+        """PAUSED + TOOL_INTERRUPT should fail-fast with NEED_RESUME."""
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState, PauseType
+        from dolphin.core.common.exceptions import DolphinAgentException
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_pause_tool_interrupt",
+                    content="/prompt/ test -> result",
+                )
+
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+                continue_called = {"value": False}
+
+                async def mock_continue(*args, **kwargs):
+                    continue_called["value"] = True
+                    yield {"status": "completed"}
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+
+                agent.status.state = AgentState.PAUSED
+                agent._pause_type = PauseType.TOOL_INTERRUPT
+
+                with pytest.raises(DolphinAgentException) as exc_info:
+                    async for _ in agent.continue_chat(message="continue"):
+                        pass
+
+                assert exc_info.value.code == "NEED_RESUME"
+                assert "resume" in str(exc_info.value).lower()
+                assert continue_called["value"] is False
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_non_paused_does_not_inject_preserve_context(self):
+        """Non-paused states should keep preserve_context unset by default."""
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_non_paused_default",
+                    content="/prompt/ test -> result",
+                )
+
+                captured_kwargs = {}
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    captured_kwargs.update(kwargs)
+                    yield {"status": "completed"}
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+                agent.status.state = AgentState.RUNNING
+
+                async for _ in agent.continue_chat(message="continue"):
+                    pass
+
+                assert "preserve_context" not in captured_kwargs
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_user_interrupt_yields_interrupted_event_and_pauses(self):
+        """UserInterrupt in continue_chat should yield interrupted event and pause agent."""
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState, PauseType
+        from dolphin.core.common.exceptions import UserInterrupt
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_user_interrupt_state_sync",
+                    content="/prompt/ test -> result",
+                )
+
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    raise UserInterrupt("manual interrupt in continue_chat")
+                    yield
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+                agent.status.state = AgentState.RUNNING
+
+                with patch.object(agent, "clear_interrupt", wraps=agent.clear_interrupt) as mock_clear_interrupt:
+                    results = []
+                    async for item in agent.continue_chat(message="continue"):
+                        results.append(item)
+
+                assert agent.state == AgentState.PAUSED
+                assert agent._pause_type == PauseType.USER_INTERRUPT
+                assert len(results) == 1
+                assert results[0].get("_status") == "interrupted"
+                assert results[0].get("_interrupt", {}).get("interrupt_type") == "user_interrupt"
+                assert "type" not in results[0].get("_interrupt", {})
+                assert mock_clear_interrupt.called
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_user_interrupt_result_clears_interrupt_event(self):
+        """User interrupt result payload should clear interrupt event and pause agent."""
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState, PauseType
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_user_interrupt_payload_path",
+                    content="/prompt/ test -> result",
+                )
+
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    yield {
+                        "status": "interrupted",
+                        "interrupt_type": "user_interrupt",
+                    }
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+                agent.status.state = AgentState.RUNNING
+                agent.get_interrupt_event().set()
+
+                with patch.object(
+                    agent, "clear_interrupt", wraps=agent.clear_interrupt
+                ) as mock_clear_interrupt:
+                    results = []
+                    async for item in agent.continue_chat(message="continue"):
+                        results.append(item)
+
+                assert len(results) == 1
+                assert results[0].get("_status") == "interrupted"
+                assert results[0].get("_interrupt", {}).get("interrupt_type") == "user_interrupt"
+                assert agent.state == AgentState.PAUSED
+                assert agent._pause_type == PauseType.USER_INTERRUPT
+                assert mock_clear_interrupt.called
+                assert agent.get_interrupt_event().is_set() is False
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_clears_pending_user_input_after_resume(self):
+        """continue_chat should consume pending user input when resuming from USER_INTERRUPT."""
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState, PauseType
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_pending_user_input_cleanup",
+                    content="/prompt/ test -> result",
+                )
+
+                captured_kwargs = {}
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    captured_kwargs.update(kwargs)
+                    yield {"status": "completed"}
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+
+                agent.status.state = AgentState.PAUSED
+                agent._pause_type = PauseType.USER_INTERRUPT
+                agent._resume_handle = MagicMock()
+
+                await agent.resume_with_input("resume-with-input message")
+                assert agent._pending_user_input == "resume-with-input message"
+
+                async for _ in agent.continue_chat(message="continue"):
+                    pass
+
+                assert agent._pending_user_input is None
+                assert captured_kwargs.get("preserve_context") is True
+        finally:
+            flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
+
+
+    @pytest.mark.asyncio
+    async def test_continue_chat_from_completed_state_user_interrupt_causes_lifecycle_exception(self):
+        """BUG REPRO (P1): continue_chat from COMPLETED state + user_interrupt → AgentLifecycleException.
+
+        After arun() completes normally the agent is in COMPLETED state.
+        Calling continue_chat() skips the PAUSED branch and never transitions
+        to RUNNING.  If a UserInterrupt is raised during execution,
+        mark_user_interrupted() attempts COMPLETED→PAUSED which is illegal,
+        raising AgentLifecycleException instead of yielding _status="interrupted".
+        """
+        from dolphin.core import flags
+        from dolphin.core.agent.agent_state import AgentState
+        from dolphin.core.common.exceptions import UserInterrupt
+        from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+
+        original = flags.is_enabled(flags.EXPLORE_BLOCK_V2)
+        flags.set_flag(flags.EXPLORE_BLOCK_V2, False)
+
+        try:
+            with patch(
+                "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax",
+                return_value=None,
+            ):
+                agent = DolphinAgent(
+                    name="test_completed_then_interrupt",
+                    content="/prompt/ test -> result",
+                )
+
+                mock_executor = MagicMock()
+                mock_context = MagicMock()
+                mock_context.get_all_variables_values = MagicMock(
+                    return_value={"_progress": []}
+                )
+                mock_executor.context = mock_context
+
+                async def mock_continue(*args, **kwargs):
+                    raise UserInterrupt("user pressed ctrl-c")
+                    yield  # noqa: make it async generator
+
+                mock_executor.continue_exploration = mock_continue
+                agent.executor = mock_executor
+                agent.output_variables = None
+
+                # Simulate post-arun() state: COMPLETED
+                agent.status.state = AgentState.COMPLETED
+
+                # This SHOULD yield {"_status": "interrupted"} gracefully,
+                # but currently raises AgentLifecycleException because
+                # mark_user_interrupted() cannot transition COMPLETED→PAUSED.
+                results = []
+                async for item in agent.continue_chat(message="new question"):
+                    results.append(item)
+
+                assert len(results) == 1
+                assert results[0].get("_status") == "interrupted"
         finally:
             flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
 
@@ -452,4 +872,3 @@ class TestDeltaModeIntegrationWithContinueChat:
                 assert all(isinstance(r, dict) for r in results), "All results from continue_chat should be dictionaries"
         finally:
             flags.set_flag(flags.EXPLORE_BLOCK_V2, original)
-

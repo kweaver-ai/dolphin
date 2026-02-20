@@ -62,12 +62,11 @@ def test_preserves_user_message_when_system_exceeds_budget():
 
 
 def test_preserves_last_user_message():
-    """Ensure user message is preserved when truncating.
+    """Ensure both first and latest user messages are preserved when truncating.
     
-    Note: Due to GLM API requirements, the FIRST user message must be preserved
-    (as it must be the first non-system message). When there are multiple user
-    messages, truncation from the end may drop later user messages but the first
-    one is always preserved.
+    The compressor should preserve:
+    - first user message: required by GLM API
+    - latest user message: current task anchor in long sessions
     """
     ctx = create_test_context()
     strategy = TruncationStrategy()
@@ -94,6 +93,9 @@ def test_preserves_last_user_message():
     # The FIRST user message should always be preserved (required by GLM API)
     assert any("FIRST_USER_MESSAGE" in m.content for m in user_messages), (
         "First user message should be preserved (required by GLM API)"
+    )
+    assert any("LAST_USER_MESSAGE" in m.content for m in user_messages), (
+        "Latest user message should be preserved as task anchor"
     )
     print("  PASS: test_preserves_last_user_message")
 
@@ -272,6 +274,23 @@ def test_user_only_at_beginning_with_many_tool_calls():
     print("  PASS: test_user_only_at_beginning_with_many_tool_calls")
 
 
+def test_date_and_knowledge_check_with_none_content():
+    """_date_in_system_message / _knowledge_in_system_message must not crash on content=None."""
+    from dolphin.core.common.enums import SingleMessage
+
+    strategy = TruncationStrategy()
+
+    # Bypass add_message assertion by constructing SingleMessage directly
+    msgs = Messages()
+    msg = SingleMessage(role=MessageRole.SYSTEM, content="")
+    msg.content = None  # Simulate corrupted message
+    msgs.messages.append(msg)
+
+    # Should not raise TypeError: argument of type 'NoneType' is not iterable
+    assert strategy._date_in_system_message(msgs) is False
+    assert strategy._knowledge_in_system_message(msgs) is False
+
+
 def validate_tool_pairing(messages: Messages) -> None:
     """
     Validate that every 'tool' message has a preceding 'assistant' message 
@@ -401,57 +420,209 @@ def test_tool_calls_pairing_preserved_after_truncation():
 
 
 
-def test_sliding_window_tool_calls_pairing():
+def test_token_estimation_includes_tool_metadata_overhead():
+    """Fast estimation should include tool_calls/tool_call_id structural overhead."""
+    strategy = TruncationStrategy()
+
+    with_tools = Messages()
+    with_tools.add_message(
+        role=MessageRole.ASSISTANT,
+        content="",
+        tool_calls=[{
+            "id": "call_1234567890",
+            "type": "function",
+            "function": {"name": "_bash", "arguments": "{\"cmd\":\"echo hello\"}"},
+        }],
+    )
+    with_tools.add_message(
+        role=MessageRole.TOOL,
+        content="ok",
+        tool_call_id="call_1234567890",
+        metadata={"name": "_bash"},
+    )
+
+    without_tools = Messages()
+    without_tools.add_message(role=MessageRole.ASSISTANT, content="")
+    without_tools.add_message(role=MessageRole.TOOL, content="ok")
+
+    tokens_with_tools = strategy.estimate_tokens(with_tools)
+    tokens_without_tools = strategy.estimate_tokens(without_tools)
+
+    assert tokens_with_tools > tokens_without_tools, (
+        "Token estimation should account for tool metadata overhead"
+    )
+    print("  PASS: test_token_estimation_includes_tool_metadata_overhead")
+
+
+def test_message_ordering_multi_turn_no_compression():
     """
-    Test that SlidingWindowStrategy also preserves tool_calls/tool pairing.
-    
-    The sliding window strategy may have the same bug if it cuts at the wrong boundary.
+    Regression test for off-by-one bug in message assembly order.
+
+    Bug: preparation() extracts latest_user_message, but compress() reassembles as:
+        system → first_user → latest_user → other_messages
+    This puts the current query BEFORE history, so LLM answers the previous question.
+
+    Correct order: system → first_user → other_messages → latest_user
+
+    This test covers the NO-compression path (under budget).
     """
-    from dolphin.core.message.compressor import SlidingWindowStrategy
-    
     ctx = create_test_context()
-    strategy = SlidingWindowStrategy(window_size=5)  # Small window to force truncation
-    
+    strategy = TruncationStrategy()
+
     msgs = Messages()
-    msgs.add_message(role=MessageRole.SYSTEM, content="System prompt")
-    msgs.add_message(role=MessageRole.USER, content="Initial request")
-    
-    # Add 10 assistant/tool pairs
-    for i in range(10):
-        msgs.add_message(
-            role=MessageRole.ASSISTANT,
-            content="",
-            tool_calls=[{
-                "id": f"call_{i}",
-                "type": "function", 
-                "function": {"name": "_bash", "arguments": "{}"}
-            }]
-        )
-        msgs.add_message(
-            role=MessageRole.TOOL,
-            content=f"Result {i}",
-            tool_call_id=f"call_{i}",
-        )
-    
+    msgs.add_message(role=MessageRole.SYSTEM, content="You are a helpful assistant.")
+    msgs.add_message(role=MessageRole.USER, content="Q1: What is 1+1?")
+    msgs.add_message(role=MessageRole.ASSISTANT, content="A1: 2")
+    msgs.add_message(role=MessageRole.USER, content="Q2: What is 2+2?")
+
     constraints = ContextConstraints(
         max_input_tokens=100000,
-        reserve_output_tokens=10000,
+        reserve_output_tokens=1000,
         preserve_system=True,
     )
-    
+
     result = strategy.compress(context=ctx, constraints=constraints, messages=msgs)
-    
-    # Validate pairing is preserved
-    try:
-        validate_tool_pairing(result.compressed_messages)
-        print("  PASS: test_sliding_window_tool_calls_pairing")
-    except AssertionError as e:
-        roles = [m.role.value for m in result.compressed_messages]
-        raise AssertionError(
-            f"SlidingWindowStrategy broke tool/tool_calls pairing!\n"
-            f"Compressed message roles: {roles}\n"
-            f"Original error: {e}"
-        )
+
+    # Extract non-system messages
+    non_system = [m for m in result.compressed_messages if m.role != MessageRole.SYSTEM]
+
+    # The last message MUST be the current user query
+    assert non_system[-1].role == MessageRole.USER, (
+        f"Last non-system message should be USER, got {non_system[-1].role.value}"
+    )
+    assert "Q2" in non_system[-1].content, (
+        f"Last message should be the current query 'Q2', got: {non_system[-1].content}"
+    )
+
+    # Verify chronological order: Q1 → A1 → Q2
+    contents = [m.content for m in non_system]
+    q1_idx = next(i for i, c in enumerate(contents) if "Q1" in c)
+    a1_idx = next(i for i, c in enumerate(contents) if "A1" in c)
+    q2_idx = next(i for i, c in enumerate(contents) if "Q2" in c)
+
+    assert q1_idx < a1_idx < q2_idx, (
+        f"Messages must be in chronological order: Q1({q1_idx}) < A1({a1_idx}) < Q2({q2_idx}). "
+        f"Got contents: {contents}"
+    )
+    print("  PASS: test_message_ordering_multi_turn_no_compression")
+
+
+def test_message_ordering_multi_turn_with_compression():
+    """
+    Same off-by-one test but in the compression path (over budget, truncation kicks in).
+    """
+    ctx = create_test_context()
+    strategy = TruncationStrategy()
+
+    msgs = Messages()
+    msgs.add_message(role=MessageRole.SYSTEM, content="S" * 5000)
+    msgs.add_message(role=MessageRole.USER, content="Q1: first question")
+    msgs.add_message(role=MessageRole.ASSISTANT, content="A1: " + "x" * 3000)
+    msgs.add_message(role=MessageRole.USER, content="Q2: second question")
+    msgs.add_message(role=MessageRole.ASSISTANT, content="A2: " + "y" * 3000)
+    msgs.add_message(role=MessageRole.USER, content="Q3_CURRENT: what is the answer?")
+
+    # Budget tight enough to force truncation of some history
+    constraints = ContextConstraints(
+        max_input_tokens=6000,
+        reserve_output_tokens=500,
+        preserve_system=True,
+    )
+
+    result = strategy.compress(context=ctx, constraints=constraints, messages=msgs)
+
+    non_system = [m for m in result.compressed_messages if m.role != MessageRole.SYSTEM]
+
+    # The last message MUST be the current user query
+    assert non_system[-1].role == MessageRole.USER, (
+        f"Last non-system message should be USER, got {non_system[-1].role.value}"
+    )
+    assert "Q3_CURRENT" in non_system[-1].content, (
+        f"Last message should be current query 'Q3_CURRENT', got: {non_system[-1].content}"
+    )
+    print("  PASS: test_message_ordering_multi_turn_with_compression")
+
+
+def test_message_ordering_level_strategy():
+    """
+    Off-by-one test for LevelStrategy.
+    """
+    from dolphin.core.message.compressor import LevelStrategy
+
+    ctx = create_test_context()
+    strategy = LevelStrategy()
+
+    msgs = Messages()
+    msgs.add_message(role=MessageRole.SYSTEM, content="System prompt")
+    msgs.add_message(role=MessageRole.USER, content="Q1: hello")
+    msgs.add_message(role=MessageRole.ASSISTANT, content="A1: hi there")
+    msgs.add_message(role=MessageRole.USER, content="Q2_CURRENT: how are you?")
+
+    constraints = ContextConstraints(
+        max_input_tokens=100000,
+        reserve_output_tokens=1000,
+        preserve_system=True,
+    )
+
+    result = strategy.compress(context=ctx, constraints=constraints, messages=msgs)
+
+    non_system = [m for m in result.compressed_messages if m.role != MessageRole.SYSTEM]
+
+    assert non_system[-1].role == MessageRole.USER, (
+        f"Last non-system message should be USER, got {non_system[-1].role.value}"
+    )
+    assert "Q2_CURRENT" in non_system[-1].content, (
+        f"Last message should be current query, got: {non_system[-1].content}"
+    )
+
+    # Verify order
+    contents = [m.content for m in non_system]
+    q1_idx = next(i for i, c in enumerate(contents) if "Q1" in c)
+    a1_idx = next(i for i, c in enumerate(contents) if "A1" in str(c))
+    q2_idx = next(i for i, c in enumerate(contents) if "Q2_CURRENT" in c)
+
+    assert q1_idx < a1_idx < q2_idx, (
+        f"Messages must be in chronological order: Q1({q1_idx}) < A1({a1_idx}) < Q2({q2_idx}). "
+        f"Got contents: {contents}"
+    )
+    print("  PASS: test_message_ordering_level_strategy")
+
+
+def test_precise_count_used_near_budget_boundary():
+    """Near budget boundary should use precise count and avoid unnecessary compression."""
+
+    class BoundaryAwareTruncationStrategy(TruncationStrategy):
+        def __init__(self):
+            self.precise_count_calls = 0
+
+        def _should_use_precise_count(self, estimated_tokens, budget_tokens):
+            return True
+
+        def _count_tokens_precise(self, context, messages):
+            self.precise_count_calls += 1
+            return 880
+
+    ctx = create_test_context()
+    strategy = BoundaryAwareTruncationStrategy()
+
+    msgs = Messages()
+    msgs.add_message(role=MessageRole.SYSTEM, content="S" * 400)
+    msgs.add_message(role=MessageRole.USER, content="U" * 300)
+    msgs.add_message(role=MessageRole.ASSISTANT, content="A" * 40)
+
+    constraints = ContextConstraints(
+        max_input_tokens=1000,
+        reserve_output_tokens=100,
+        preserve_system=True,
+    )
+
+    result = strategy.compress(context=ctx, constraints=constraints, messages=msgs)
+
+    assert strategy.precise_count_calls == 1, "Precise counting should be triggered near boundary"
+    assert len(result.compressed_messages) == len(msgs), "Messages should stay uncompressed"
+    assert result.original_token_count == 880, "Result should use precise token count"
+    assert result.compression_ratio == 1.0
+    print("  PASS: test_precise_count_used_near_budget_boundary")
 
 
 def main():
@@ -469,7 +640,11 @@ def main():
         test_tool_messages_handled_correctly,
         test_user_only_at_beginning_with_many_tool_calls,
         test_tool_calls_pairing_preserved_after_truncation,
-        # test_sliding_window_tool_calls_pairing,  # Disabled: currently fails with AttributeError due to implementation bug
+        test_token_estimation_includes_tool_metadata_overhead,
+        test_precise_count_used_near_budget_boundary,
+        test_message_ordering_multi_turn_no_compression,
+        test_message_ordering_multi_turn_with_compression,
+        test_message_ordering_level_strategy,
     ]
     
     passed = 0

@@ -229,7 +229,7 @@ class ExploreBlockV2(BasicCodeBlock):
             use_history_flag = self.history.lower() == "true"
 
         if use_history_flag:
-            history_messages = self.context.get_history_messages()
+            history_messages = self.context.get_history_messages(projected=True)
             return history_messages or Messages()
         return None
 

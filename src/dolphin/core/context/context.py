@@ -12,6 +12,7 @@ from dolphin.core.common.constants import (
     KEY_MAX_ANSWER_CONTENT_LENGTH,
     KEY_SESSION_ID,
     KEY_USER_ID,
+    KEY_HISTORY,
     MAX_ANSWER_CONTENT_LENGTH,
     MAX_LOG_LENGTH,
     MAX_OUTPUT_EVENTS,
@@ -42,6 +43,27 @@ logger = get_logger("context")
 
 
 class Context:
+    """Runtime conversation state container.
+
+    Architecture notes:
+    - `context_manager` is the single source of truth for model-facing messages.
+      It stores bucketed messages (`_system`, `_history`, `_query`, `_scratchpad`)
+      and assembles them via `to_dph_messages()`.
+    - Tool-call and tool-result messages are preserved in `_scratchpad` during a
+      running explore session and are visible to subsequent LLM turns in the same
+      session.
+    - `reset_for_block()` clears transient buckets (`_scratchpad`, `_system`,
+      `_query`) at the start of a new block, so those messages are not guaranteed
+      to survive across block boundaries.
+    - Cross-turn persistence primarily relies on `_history` in the variable pool.
+      Current default history persistence is lightweight (mainly user/assistant,
+      plus pinned content), not a full native tool message chain.
+    - `trajectory` is an optional execution record for debugging/replay and can
+      keep complete staged messages (including tool interactions) when enabled.
+    - Context-window pruning/compression for final LLM requests is handled by the
+      message compressor in the LLM client layer, not by this class itself.
+    """
+
     def __init__(
         self,
         config: Optional[GlobalConfig] = None,
@@ -240,30 +262,37 @@ class Context:
     def get_global_types(self):
         return self.global_types
 
-    def get_history_messages(self, normalize: bool = True):
+    def get_history_messages(self, normalize: bool = True, projected: bool = False):
         """Get history, default normalized to Messages without modifying the original storage structure of the variable pool.
 
         Args:
             normalize: Whether to convert history into a Messages object
+            projected: When True, apply HistoryProjector to trim older turns
+                       (drops tool chains from old turns, keeps recent ones intact).
+                       Only effective when normalize=True.
 
         Returns:
             Messages or the original stored history
         """
-        history_raw = self.get_var_value("history")
+        history_raw = self.get_var_value(KEY_HISTORY)
         if not normalize:
             return history_raw
 
         if isinstance(history_raw, Messages):
-            return history_raw.copy()
-
-        normalized = Messages()
-        if history_raw is None:
-            return normalized
-        if isinstance(history_raw, list):
-            normalized.extend_plain_messages(history_raw)
+            result = history_raw.copy()
+        elif history_raw is None:
+            result = Messages()
+        elif isinstance(history_raw, list):
+            result = Messages()
+            result.extend_plain_messages(history_raw)
         else:
             raise ValueError(f"Invalid history format: {type(history_raw)}, expected list or Messages object.")
-        return normalized
+
+        if projected and result.get_messages():
+            from dolphin.core.context.history_projector import HistoryProjector
+            result = HistoryProjector().project(result)
+
+        return result
 
     def set_variable(self, name, value):
         if name == KEY_USER_ID:
@@ -384,6 +413,24 @@ class Context:
                 return enabled
         except Exception:
             pass
+
+        # --- Backward Compatibility Layer ---
+        # To prevent the system internal conversation history from being overwritten by 
+        # user assignments like '-> history', the internal key was renamed to '_history'.
+        # However, to avoid breaking existing code or snapshots:
+        # 1. If 'history' is requested, we first check if there is a user-defined 'history'.
+        # 2. If not found, we fallback to the internal '_history' (KEY_HISTORY).
+        if name == "history":
+            val = self.variable_pool.get_var_value("history")
+            # Only honour user-defined "history" when it carries a meaningful
+            # value (non-None and non-empty-string).  An empty string assignment
+            # like ``-> history`` should not shadow the internal _history.
+            if val is not None and val != "":
+                return val
+            # Return internal conversation history if user hasn't overridden it
+            return self.variable_pool.get_var_value(KEY_HISTORY, default_value)
+        # ------------------------------------
+
         return self.variable_pool.get_var_value(name, default_value)
 
     def get_var_path_value(self, varpath, default_value=None):

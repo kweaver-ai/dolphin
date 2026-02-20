@@ -125,6 +125,40 @@ class TestCoroutineExecution(unittest.IsolatedAsyncioTestCase):
             "Data injected by user!",
         )
 
+    async def test_user_interrupt_resume_injects_user_input_into_scratchpad(self):
+        """User-interrupt resume should append recovery input to scratchpad bucket."""
+        from dolphin.core.coroutine import ResumeHandle
+        from dolphin.core.coroutine.execution_frame import WaitReason
+        from dolphin.core.common.constants import KEY_USER_INTERRUPT_INPUT
+        from dolphin.core.context_engineer.config.settings import BuildInBucket
+
+        frame = await self.executor.start_coroutine('"seed" -> seed\n')
+        frame.status = FrameStatus.WAITING_FOR_INTERVENTION
+        frame.wait_reason = WaitReason.USER_INTERRUPT
+        self.executor.state_registry.update_frame(frame)
+
+        handle = ResumeHandle.create_user_interrupt_handle(
+            frame_id=frame.frame_id,
+            snapshot_id=frame.context_snapshot_id,
+            current_block=frame.block_pointer,
+        )
+
+        updates = {KEY_USER_INTERRUPT_INPUT: "please continue from here"}
+        with patch.object(self.executor, "_restore_context"):
+            with patch.object(
+                self.executor.context,
+                "add_user_message",
+                wraps=self.executor.context.add_user_message,
+            ) as mock_add_user_message:
+                resumed_frame = await self.executor.resume_coroutine(handle, updates=updates)
+
+        self.assertEqual(resumed_frame.status, FrameStatus.RUNNING)
+        self.assertTrue(mock_add_user_message.called)
+        self.assertEqual(
+            mock_add_user_message.call_args.kwargs.get("bucket"),
+            BuildInBucket.SCRATCHPAD.value,
+        )
+
     @patch("dolphin.core.llm.llm_client.LLMClient.mf_chat_stream")
     async def test_prompt_block_execution(self, mock_mf_chat_stream):
         # Mock LLM response for prompt block

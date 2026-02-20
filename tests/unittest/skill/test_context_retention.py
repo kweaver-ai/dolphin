@@ -39,6 +39,7 @@ class TestSkillContextRetention:
         config = SkillContextRetention()
         assert config.mode == ContextRetentionMode.FULL
         assert config.max_length == 2000
+        assert config.detail_hint_min_omitted == 0
         assert config.summary_prompt is None
         assert config.ttl_turns == -1
         assert config.reference_hint is None
@@ -48,12 +49,14 @@ class TestSkillContextRetention:
         config = SkillContextRetention(
             mode=ContextRetentionMode.SUMMARY,
             max_length=500,
+            detail_hint_min_omitted=1000,
             summary_prompt="Summarize this",
             ttl_turns=5,
             reference_hint="Custom hint",
         )
         assert config.mode == ContextRetentionMode.SUMMARY
         assert config.max_length == 500
+        assert config.detail_hint_min_omitted == 1000
         assert config.summary_prompt == "Summarize this"
         assert config.ttl_turns == 5
         assert config.reference_hint == "Custom hint"
@@ -84,10 +87,22 @@ class TestSummaryContextStrategy:
 
     def test_reference_hint_included(self):
         """Reference ID should be included in hint when provided."""
-        result = "A" * 200
+        result = "A" * 1000
         processed = self.strategy.process(result, self.config, reference_id="ref_123")
         assert "ref_123" in processed
         assert "_get_cached_result_detail" in processed
+
+    def test_reference_hint_omitted_when_under_threshold(self):
+        """Reference hint should be skipped when omission is below threshold."""
+        config = SkillContextRetention(
+            mode=ContextRetentionMode.SUMMARY,
+            max_length=100,
+            detail_hint_min_omitted=500,
+        )
+        result = "A" * 200  # omitted is 120, below threshold
+        processed = self.strategy.process(result, config, reference_id="ref_123")
+        assert "ref_123" not in processed
+        assert "_get_cached_result_detail" not in processed
 
     def test_head_tail_preserved(self):
         """Head and tail of content should be preserved."""
@@ -209,6 +224,7 @@ class TestContextRetentionDecorator:
         assert config is not None
         assert config.mode == ContextRetentionMode.SUMMARY
         assert config.max_length == 500
+        assert config.detail_hint_min_omitted == 0
 
     def test_decorator_with_all_params(self):
         """Decorator should handle all parameters."""

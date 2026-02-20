@@ -197,6 +197,10 @@ async for result in agent.continue_chat(
                     print(delta, end="", flush=True)
 ```
 
+`continue_chat()` 在 Agent 处于暂停态时具备状态感知行为：
+- 若为用户中断暂停（`PAUSED + USER_INTERRUPT`），默认使用 `preserve_context=True`。
+- 若为工具中断暂停（`PAUSED + TOOL_INTERRUPT`），会以 `NEED_RESUME` 快速失败，需先调用 `resume(updates)`。
+
 ---
 
 ## stream_mode: 自动增量计算（v2.1+ 推荐）
