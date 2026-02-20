@@ -840,7 +840,11 @@ class DolphinAgentSnapshot:
                     degraded_fields=degraded_fields,
                     action_name=action_name,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "to_dict() failed for %s at %s: %s",
+                    type(value).__name__, path, exc,
+                )
                 dropped_fields.append(
                     {
                         "path": path,
