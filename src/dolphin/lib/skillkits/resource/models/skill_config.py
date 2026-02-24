@@ -46,6 +46,7 @@ class ResourceSkillConfig:
     allowed_extensions: List[str] = field(
         default_factory=lambda: list(_DEFAULT_ALLOWED_EXTENSIONS)
     )
+    variables: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "ResourceSkillConfig":
@@ -70,6 +71,7 @@ class ResourceSkillConfig:
             max_cache_size=resource_config.get("max_cache_size", _DEFAULT_MAX_CACHE_SIZE),
             max_scan_depth=resource_config.get("max_scan_depth", _DEFAULT_MAX_SCAN_DEPTH),
             allowed_extensions=resource_config.get("allowed_extensions", _DEFAULT_ALLOWED_EXTENSIONS),
+            variables=resource_config.get("variables", {}),
         )
 
     def get_resolved_directories(self, base_path: Optional[Path] = None) -> List[Path]:
@@ -112,4 +114,5 @@ class ResourceSkillConfig:
             "max_cache_size": self.max_cache_size,
             "max_scan_depth": self.max_scan_depth,
             "allowed_extensions": self.allowed_extensions,
+            "variables": self.variables,
         }
