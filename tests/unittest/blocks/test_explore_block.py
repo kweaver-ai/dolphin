@@ -33,6 +33,15 @@ from dolphin.core.skill.skill_function import SkillFunction
 from dolphin.core.skill.skillset import Skillset
 
 
+def _async_gen(fn):
+    """Wrap an async function into an async generator (for mocking skill_run)."""
+    async def wrapper(*args, **kwargs):
+        await fn(*args, **kwargs)
+        return
+        yield  # pragma: no cover — makes this an async generator
+    return wrapper
+
+
 def mock_search(query: str, max_results: int = 10):
     """
     Mock search function for testing
@@ -743,6 +752,301 @@ class TestPromptModeToolResponseFormat(unittest.TestCase):
         roles = [m['role'] for m in messages_dict]
         self.assertIn('assistant', roles)
         self.assertIn('user', roles)
+
+
+class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
+    """Tests that _execute_tool_call always adds tool response even under exceptions."""
+
+    def _build_block(self) -> ExploreBlock:
+        context_manager = ContextManager()
+        global_config = GlobalConfig()
+        context = Context(config=global_config, context_manager=context_manager)
+        context._calc_all_skills()
+
+        block = ExploreBlock(context=context)
+        block.recorder = MagicMock()
+        block.recorder.get_progress_answers.return_value = {}
+        block.recorder.get_answer.return_value = "ok"
+        block.strategy.get_deduplicator = MagicMock(return_value=MagicMock())
+        block.strategy.append_tool_response_message = MagicMock()
+        block._process_skill_result_with_hook = MagicMock(return_value=("result", {}))
+        return block
+
+    def test_finally_block_adds_response_on_generic_exception(self):
+        """Generic exception in skill_run is caught and tool response is still added."""
+        block = self._build_block()
+
+        @_async_gen
+        async def mock_skill_run(*args, **kwargs):
+            raise RuntimeError("network error")
+
+        block.skill_run = mock_skill_run
+
+        stream_item = StreamItem()
+        stream_item.answer = "calling tool"
+        tool_call = ToolCall(id="call_err", name="_tool", arguments={})
+
+        async def run():
+            async for _ in block._execute_tool_call(stream_item, tool_call):
+                pass
+
+        # Generic exceptions are caught (not re-raised) by _execute_tool_call
+        asyncio.run(run())
+
+        # Tool response should have been added in the except branch
+        self.assertGreaterEqual(
+            block.strategy.append_tool_response_message.call_count, 1,
+            "Tool response must be added even on generic exception"
+        )
+
+    def test_tool_interrupt_adds_error_response_and_reraises(self):
+        """ToolInterrupt adds error tool response and re-raises."""
+        from dolphin.core.utils.tools import ToolInterrupt
+
+        block = self._build_block()
+
+        @_async_gen
+        async def mock_skill_run(*args, **kwargs):
+            raise ToolInterrupt("silent rounds exceeded")
+
+        block.skill_run = mock_skill_run
+
+        stream_item = StreamItem()
+        stream_item.answer = "calling tool"
+        tool_call = ToolCall(id="call_ti", name="_tool", arguments={})
+
+        async def run():
+            async for _ in block._execute_tool_call(stream_item, tool_call):
+                pass
+
+        with self.assertRaises(ToolInterrupt):
+            asyncio.run(run())
+
+        # Verify error response was added before re-raise
+        block.strategy.append_tool_response_message.assert_called()
+        call_args = block.strategy.append_tool_response_message.call_args
+        self.assertIn("interrupted", call_args[0][2].lower())
+
+    def test_user_interrupt_in_check_still_adds_tool_response(self):
+        """check_user_interrupt() raising UserInterrupt must still add tool response.
+
+        Previously check_user_interrupt was outside the try block, leaving orphan
+        tool_calls. Now it's inside try so the except/finally can add a response.
+        """
+        block = self._build_block()
+
+        block.context.check_user_interrupt = MagicMock(
+            side_effect=UserInterrupt("manual stop")
+        )
+
+        stream_item = StreamItem()
+        stream_item.answer = "calling"
+        tool_call = ToolCall(id="call_orphan", name="_tool", arguments={})
+
+        async def run():
+            async for _ in block._execute_tool_call(stream_item, tool_call):
+                pass
+
+        with self.assertRaises(UserInterrupt):
+            asyncio.run(run())
+
+        # After fix: tool response must be added even when UserInterrupt fires
+        self.assertGreaterEqual(
+            block.strategy.append_tool_response_message.call_count, 1,
+            "UserInterrupt must not leave orphan tool_call without response"
+        )
+
+
+class TestExecuteToolCallsSequential(unittest.TestCase):
+    """Tests for _execute_tool_calls_sequential multi-tool execution."""
+
+    def _build_block(self) -> ExploreBlock:
+        context_manager = ContextManager()
+        global_config = GlobalConfig()
+        context = Context(config=global_config, context_manager=context_manager)
+        context._calc_all_skills()
+
+        block = ExploreBlock(context=context)
+        block.recorder = MagicMock()
+        block.recorder.get_progress_answers.return_value = {}
+        block.recorder.get_answer.return_value = "ok"
+        block._process_skill_result_with_hook = MagicMock(return_value=("result", {}))
+        return block
+
+    def test_all_tools_succeed(self):
+        """All tool calls execute successfully in sequence."""
+        block = self._build_block()
+
+        call_log = []
+
+        @_async_gen
+        async def mock_skill_run(*args, **kwargs):
+            call_log.append(kwargs.get("skill_name"))
+
+        block.skill_run = mock_skill_run
+
+        stream_item = StreamItem()
+        stream_item.answer = "call tools"
+        tool_calls = [
+            ToolCall(id="call_1", name="_tool_a", arguments={"x": 1}),
+            ToolCall(id="call_2", name="_tool_b", arguments={"y": 2}),
+        ]
+
+        async def run():
+            async for _ in block._execute_tool_calls_sequential(stream_item, tool_calls):
+                pass
+
+        asyncio.run(run())
+        self.assertEqual(call_log, ["_tool_a", "_tool_b"])
+
+    def test_unparseable_arguments_skipped_with_error_response(self):
+        """Tool calls with arguments=None are skipped with error response."""
+        block = self._build_block()
+        block.strategy.append_tool_response_message = MagicMock()
+
+        call_log = []
+
+        @_async_gen
+        async def mock_skill_run(*args, **kwargs):
+            call_log.append(kwargs.get("skill_name"))
+
+        block.skill_run = mock_skill_run
+
+        stream_item = StreamItem()
+        stream_item.answer = "call tools"
+        tool_calls = [
+            ToolCall(id="call_bad", name="_bad_tool", arguments=None),
+            ToolCall(id="call_good", name="_good_tool", arguments={}),
+        ]
+
+        async def run():
+            async for _ in block._execute_tool_calls_sequential(stream_item, tool_calls):
+                pass
+
+        asyncio.run(run())
+
+        # Bad tool was skipped, good tool executed
+        self.assertEqual(call_log, ["_good_tool"])
+        # Error response added for bad tool
+        error_calls = [
+            c for c in block.strategy.append_tool_response_message.call_args_list
+            if "call_bad" in str(c)
+        ]
+        self.assertTrue(len(error_calls) > 0, "Error response should be added for unparseable arguments")
+
+    def test_duplicate_tool_calls_skipped(self):
+        """Duplicate tool calls exceeding MAX_DUPLICATE_COUNT are skipped."""
+        block = self._build_block()
+        block.strategy.append_tool_response_message = MagicMock()
+
+        call_log = []
+
+        @_async_gen
+        async def mock_skill_run(*args, **kwargs):
+            call_log.append(kwargs.get("skill_name"))
+
+        block.skill_run = mock_skill_run
+
+        # Pre-fill the deduplicator so the next identical call exceeds threshold
+        dedup = block.strategy.get_deduplicator()
+        skill_call_key = ("_search", {"q": "test"})
+        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT):
+            dedup.add(skill_call_key)
+
+        stream_item = StreamItem()
+        stream_item.answer = "call tools"
+        tool_calls = [
+            ToolCall(id="call_dup", name="_search", arguments={"q": "test"}),
+            ToolCall(id="call_ok", name="_date", arguments={}),
+        ]
+
+        async def run():
+            async for _ in block._execute_tool_calls_sequential(stream_item, tool_calls):
+                pass
+
+        asyncio.run(run())
+
+        # _search was skipped (duplicate), _date executed
+        self.assertEqual(call_log, ["_date"])
+
+    def test_tool_interrupt_stops_remaining_tools_with_responses(self):
+        """ToolInterrupt stops execution but remaining tools must get placeholder responses.
+
+        When ToolInterrupt occurs during tool N, tools N+1..M never execute but
+        must still receive a tool response message to prevent orphan tool_calls.
+        """
+        from dolphin.core.utils.tools import ToolInterrupt
+
+        block = self._build_block()
+        block.strategy.append_tool_response_message = MagicMock()
+
+        call_count = 0
+
+        @_async_gen
+        async def mock_skill_run(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if kwargs.get("skill_name") == "_tool_a":
+                raise ToolInterrupt("limit reached")
+
+        block.skill_run = mock_skill_run
+
+        stream_item = StreamItem()
+        stream_item.answer = "call tools"
+        tool_calls = [
+            ToolCall(id="call_a", name="_tool_a", arguments={}),
+            ToolCall(id="call_b", name="_tool_b", arguments={}),
+        ]
+
+        async def run():
+            async for _ in block._execute_tool_calls_sequential(stream_item, tool_calls):
+                pass
+
+        with self.assertRaises(ToolInterrupt):
+            asyncio.run(run())
+
+        # tool_a executed, tool_b never ran
+        self.assertEqual(call_count, 1)
+
+        # After fix: call_b must have a placeholder response
+        response_ids = [
+            str(c) for c in block.strategy.append_tool_response_message.call_args_list
+        ]
+        has_call_b_response = any("call_b" in r for r in response_ids)
+        self.assertTrue(
+            has_call_b_response,
+            "Remaining tools after ToolInterrupt must get placeholder responses"
+        )
+
+    def test_non_critical_exception_continues_remaining_tools(self):
+        """Non-critical exception in one tool does not block remaining tools."""
+        block = self._build_block()
+
+        call_log = []
+
+        @_async_gen
+        async def mock_skill_run(*args, **kwargs):
+            name = kwargs.get("skill_name")
+            call_log.append(name)
+            if name == "_tool_a":
+                raise ValueError("non-critical error")
+
+        block.skill_run = mock_skill_run
+
+        stream_item = StreamItem()
+        stream_item.answer = "call tools"
+        tool_calls = [
+            ToolCall(id="call_a", name="_tool_a", arguments={}),
+            ToolCall(id="call_b", name="_tool_b", arguments={}),
+        ]
+
+        async def run():
+            async for _ in block._execute_tool_calls_sequential(stream_item, tool_calls):
+                pass
+
+        asyncio.run(run())
+        # Both tools attempted: tool_a failed but tool_b still ran
+        self.assertEqual(call_log, ["_tool_a", "_tool_b"])
 
 
 class TestExploreBlockModeFromDPHSyntax(unittest.TestCase):
