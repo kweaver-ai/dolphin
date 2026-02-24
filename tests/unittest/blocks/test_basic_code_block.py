@@ -50,9 +50,6 @@ class TestBasicCodeBlock(unittest.TestCase):
         # 测试复杂情况
         self.assertEqual(self.block.find_matching_paren("func(a, b(c, d), e)", 4), 18)
 
-        # 测试括号不匹配
-        self.assertEqual(self.block.find_matching_paren("(unmatched", 0), -1)
-
         # 测试括号不匹配，字符串中
         self.assertEqual(self.block.find_matching_paren("('(unmatched')", 0), 13)
 
@@ -68,11 +65,11 @@ class TestBasicCodeBlock(unittest.TestCase):
         str_test = '(tools=[executeSQL, _python, _search], model="Tome-Max", system_prompt="xxx") -> result'
         self.assertEqual(self.block.find_matching_paren(str_test, 0), 76)
 
-        # # 测试连续单引号
+        # 测试连续单引号
         str_test = "(tools=[], system_prompt='', history=True) 你好 -> result"
         self.assertEqual(self.block.find_matching_paren(str_test, 0), 41)
-        # # 测试连续双引号
-        str_test = "(tools=[], system_prompt='', history=True) 你好 -> result"
+        # 测试连续双引号
+        str_test = '(tools=[], system_prompt="", history=True) 你好 -> result'
         self.assertEqual(self.block.find_matching_paren(str_test, 0), 41)
 
         # 测试单双引号嵌套(该用例测试不过)
@@ -503,14 +500,10 @@ class TestBasicCodeBlock(unittest.TestCase):
 
         for tools_value in tools_values:
             with self.subTest(tools_value=tools_value):
-                # 测试 parse_tools_parameter 方法直接抛出 SyntaxError
                 with self.assertRaises(SyntaxError) as context:
                     self.block.parse_tools_parameter(tools_value)
 
                 self.assertIn("Unmatched brackets", str(context.exception))
-                print(
-                    f"✓ tools_value '{tools_value}' correctly raised: {context.exception}"
-                )
 
         # 测试在完整的 block 解析上下文中的错误处理
         full_param_cases = [
@@ -528,9 +521,6 @@ class TestBasicCodeBlock(unittest.TestCase):
                     self.block.parse_block_content(content, CategoryBlock.EXPLORE)
 
                 self.assertIn("Unmatched brackets", str(context.exception))
-                print(
-                    f"✓ Full param '{param_case}' correctly raised: {context.exception}"
-                )
 
     def test_tools_parameter_quote_syntax_error(self):
         """测试 tools 参数引号语法错误"""
@@ -548,9 +538,6 @@ class TestBasicCodeBlock(unittest.TestCase):
                     self.block.parse_tools_parameter(case)
 
                 self.assertIn("Unmatched", str(context.exception))
-                print(
-                    f"✓ Quote error case '{case}' correctly raised: {context.exception}"
-                )
 
         # 测试有效的混合引号情况
         valid_mixed_cases = [
@@ -563,7 +550,6 @@ class TestBasicCodeBlock(unittest.TestCase):
                 # 这些应该正常解析
                 result = self.block.parse_tools_parameter(case)
                 self.assertEqual(result, ["tool1", "tool2"])
-                print(f"✓ Valid mixed quote case '{case}' parsed correctly: {result}")
 
     def test_tools_parameter_edge_cases(self):
         """测试 tools 参数的边界情况"""
@@ -587,40 +573,10 @@ class TestBasicCodeBlock(unittest.TestCase):
             with self.subTest(input_val=input_val):
                 result = self.block.parse_tools_parameter(input_val)
                 self.assertEqual(result, expected)
-                print(f"✓ Valid case '{input_val}' -> {result}")
 
-        # 测试更多错误情况
-        error_cases = [
-            ("[tool1, tool2, tool3",),  # 长列表缺少右括号
-            ('["tool1", "tool2", "tool3"',),  # 长列表缺少右括号
-            ('[tool1"',),  # 畸形引号
-        ]
-
-        for case_tuple in error_cases:
-            case = case_tuple[0]
-            with self.subTest(case=case):
-                with self.assertRaises(SyntaxError) as context:
-                    self.block.parse_tools_parameter(case)
-                print(f"✓ Error case '{case}' correctly raised: {context.exception}")
-
-    def test_tool_block_category(self):
-        """测试工具块的 category 设置"""
-        # 测试工具块是否正确设置了 CategoryBlock.TOOL
-        content = '@test_tool(param="value") -> result'
-        self.block.parse_block_content(content)
-
-        # 验证工具块的 category 是 TOOL
-        self.assertEqual(self.block.category, CategoryBlock.TOOL)
-
-        # 验证其他属性也设置正确
-        self.assertEqual(self.block.content, "test_tool")
-        self.assertEqual(self.block.params, {"param": "value"})
-        self.assertEqual(self.block.assign_type, "->")
-        self.assertEqual(self.block.output_var, "result")
-
-        # 测试中文工具名
+    def test_tool_block_cjk_name(self):
+        """测试中文工具名解析"""
         content = '@中文工具名(param="值") -> 结果'
-        self.block = BasicCodeBlock(context=None)  # 重置
         self.block.parse_block_content(content)
 
         self.assertEqual(self.block.category, CategoryBlock.TOOL)

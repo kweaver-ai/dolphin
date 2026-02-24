@@ -21,6 +21,7 @@ VERBOSE=false
 CONFIG=""
 COVERAGE=false
 PARALLEL=false
+SERIAL=false
 PYTHON_VERSION=""
 FAIL_FAST=false
 
@@ -40,7 +41,7 @@ print_usage() {
     echo "  --agent-only               仅运行agent调用测试"
     echo "  --regular-only             仅运行常规集成测试"
     echo "  --coverage                生成覆盖率报告"
-    echo "  --parallel                并行运行测试"
+    echo "  --parallel                并行运行单元测试 (集成测试默认并行，用--serial切换串行)"
     echo "  --python <version>         指定Python版本 (如3.10, 3.11)"
     echo "  --fail-fast               遇到第一个失败就停止"
     echo "  -h, --help                显示帮助信息"
@@ -84,13 +85,25 @@ print_uv() {
     echo -e "${PURPLE}[UV]${NC} $1"
 }
 
+# Function to get timestamp with sub-second precision (macOS compatible)
+get_timestamp() {
+    # date +%s.%N is not supported on macOS; fallback to python
+    local ts
+    ts=$(date +%s.%N 2>/dev/null)
+    if [ "$ts" = "%N" ] || [[ "$ts" == *"N"* ]]; then
+        # macOS: date +%N is not supported
+        ts=$(python3 -c "import time; print(f'{time.time():.6f}')" 2>/dev/null || date +%s)
+    fi
+    echo "$ts"
+}
+
 # Function to calculate duration (fallback if bc not available)
 calculate_duration() {
     if command -v bc &> /dev/null; then
         echo "$1" | bc -l 2>/dev/null || echo "$1"
     else
         # Simple fallback: use Python for calculation
-        uv run python -c "print($1)" 2>/dev/null || echo "0.0"
+        python3 -c "print($1)" 2>/dev/null || echo "0.0"
     fi
 }
 
@@ -143,17 +156,17 @@ run_integration_tests() {
         cmd="$cmd --verbose"
     fi
 
-    if [ "$FAIL_FAST" = true ]; then
-        cmd="$cmd --fail-fast"
+    if [ "$SERIAL" = true ]; then
+        cmd="$cmd --serial"
     fi
 
     print_info "Executing: $cmd"
     print_info "Working directory: $(pwd)"
 
-    start_time=$(date +%s.%N)
+    start_time=$(get_timestamp)
 
     if eval $cmd; then
-        end_time=$(date +%s.%N)
+        end_time=$(get_timestamp)
         duration=$(calculate_duration "$end_time - $start_time")
         print_success "Integration tests completed successfully (${duration}s)"
 
@@ -168,7 +181,7 @@ run_integration_tests() {
 
         return 0
     else
-        end_time=$(date +%s.%N)
+        end_time=$(get_timestamp)
         duration=$(calculate_duration "$end_time - $start_time")
         print_error "Integration tests failed (${duration}s)"
         return 1
@@ -184,7 +197,6 @@ run_unit_tests() {
     # Add coverage if requested
     if [ "$COVERAGE" = true ]; then
         cmd="uv run coverage run --source=src -m pytest tests/unittest"
-        mv .coverage .coverage.unit
     fi
 
     if [ "$VERBOSE" = true ]; then
@@ -204,10 +216,10 @@ run_unit_tests() {
 
     print_info "Executing: $cmd"
 
-    start_time=$(date +%s.%N)
+    start_time=$(get_timestamp)
 
     if eval $cmd; then
-        end_time=$(date +%s.%N)
+        end_time=$(get_timestamp)
         duration=$(calculate_duration "$end_time - $start_time")
         print_success "Unit tests completed successfully (${duration}s)"
 
@@ -217,12 +229,13 @@ run_unit_tests() {
             uv run coverage report --show-missing
             uv run coverage html -d htmlcov/unit
             print_success "Coverage report generated: htmlcov/unit/index.html"
+            mv .coverage .coverage.unit
         fi
 
         return 0
     else
-        end_time=$(date +%s.%N)
-        duration=$(echo "$end_time - $start_time" | bc -l)
+        end_time=$(get_timestamp)
+        duration=$(calculate_duration "$end_time - $start_time")
         print_error "Unit tests failed (${duration}s)"
         return 1
     fi
@@ -232,8 +245,8 @@ run_unit_tests() {
 check_python_version() {
     if [ ! -z "$PYTHON_VERSION" ]; then
         print_step "Checking Python version..."
-        current_version=$(uv run python --version | grep -oP '\d+\.\d+')
-        target_version=$(echo $PYTHON_VERSION | grep -oP '\d+\.\d+')
+        current_version=$(uv run python --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        target_version=$(echo $PYTHON_VERSION | grep -oE '[0-9]+\.[0-9]+' | head -1)
 
         if [ "$current_version" != "$target_version" ]; then
             print_uv "Switching to Python $PYTHON_VERSION..."
@@ -290,6 +303,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --parallel)
             PARALLEL=true
+            shift
+            ;;
+        --serial)
+            SERIAL=true
             shift
             ;;
         --python)
@@ -364,7 +381,7 @@ case $TEST_TYPE in
         print_step "Running all tests..."
         unit_result=0
         integration_result=0
-        all_start_time=$(date +%s.%N)
+        all_start_time=$(get_timestamp)
 
         # Create coverage combined directory
         if [ "$COVERAGE" = true ]; then
@@ -388,9 +405,8 @@ case $TEST_TYPE in
         if [ "$COVERAGE" = true ] && [ -f ".coverage" ]; then
             if [ -f ".coverage.unit" ]; then
                 mv .coverage .coverage.integration
-                mv .coverage.unit .coverage
                 print_step "Combining coverage reports..."
-                uv run coverage combine .coverage.integration .coverage.unit
+                uv run coverage combine .coverage.unit .coverage.integration
             fi
             uv run coverage report --show-missing
             uv run coverage html -d htmlcov/combined
@@ -398,7 +414,7 @@ case $TEST_TYPE in
         fi
 
         # Summary
-        all_end_time=$(date +%s.%N)
+        all_end_time=$(get_timestamp)
         all_duration=$(calculate_duration "$all_end_time - $all_start_time")
 
         echo ""

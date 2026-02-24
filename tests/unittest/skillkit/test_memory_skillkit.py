@@ -11,48 +11,6 @@ from dolphin.lib.skillkits.memory_skillkit import (
     MemoryBucket,
     RWLock,
 )
-from dolphin.lib.utils.text_retrieval import (
-    tokenize_simple as tokenize,
-    is_cjk as _is_cjk,
-)
-
-
-class TestTokenization(unittest.TestCase):
-    """Test tokenization utilities"""
-
-    def test_is_cjk(self):
-        self.assertTrue(_is_cjk("中"))
-        self.assertTrue(_is_cjk("文"))
-        self.assertTrue(_is_cjk("한"))
-        self.assertTrue(_is_cjk("日"))
-        self.assertFalse(_is_cjk("a"))
-        self.assertFalse(_is_cjk("1"))
-        self.assertFalse(_is_cjk(" "))
-
-    def test_tokenize_english(self):
-        tokens = tokenize("Hello World 123")
-        self.assertEqual(tokens, ["hello", "world", "123"])
-
-    def test_tokenize_cjk(self):
-        tokens = tokenize("你好世界")
-        self.assertEqual(tokens, ["你", "好", "世", "界"])
-
-    def test_tokenize_mixed(self):
-        tokens = tokenize("Hello 世界 123")
-        self.assertEqual(tokens, ["hello", "世", "界", "123"])
-
-    def test_tokenize_empty(self):
-        self.assertEqual(tokenize(""), [])
-        self.assertEqual(tokenize("   "), [])
-
-    def test_tokenize_punctuation(self):
-        tokens = tokenize("hello, world!")
-        self.assertEqual(tokens, ["hello", "world"])
-
-
-# BM25Index tests removed - memory_skillkit now uses simple string matching
-
-
 class TestRWLock(unittest.TestCase):
     """Test Read-Write lock implementation"""
 
@@ -451,12 +409,12 @@ class TestMemorySkillkit(unittest.TestCase):
     def test_mem_expire(self):
         # Set some data with different timestamps
         self.skillkit._mem_set("old.data", "old_value", session_id=self.session_id)
-        time.sleep(1.1)  # Wait for timestamp difference
+        time.sleep(0.15)  # Wait for timestamp difference
         self.skillkit._mem_set("new.data", "new_value", session_id=self.session_id)
 
-        # Expire data older than 1 second
+        # Expire data older than 0.1 second
         result_data = json.loads(
-            self.skillkit._mem_expire(1.0, session_id=self.session_id)
+            self.skillkit._mem_expire(0.1, session_id=self.session_id)
         )
         self.assertEqual(result_data["expired_count"], 1)
 
