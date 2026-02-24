@@ -183,7 +183,6 @@ class LLMClient:
                 sock_connect=30,  # Keep connection timeout
                 sock_read=300,  # Single read timeout (for slow streaming data)
             )
-            print(f"------------------------llm={payload}")
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     model_config.api,
@@ -1110,6 +1109,13 @@ class LLMClient:
                             # Check if the last N chars appear repeatedly in previous content
                             # Pattern length configurable via DOLPHIN_DUPLICATE_PATTERN_LENGTH (default: 50)
                             recent = self.accu_content[-DUPLICATE_PATTERN_LENGTH:]
+
+                            # Skip detection if the pattern is purely whitespace,
+                            # which naturally repeats in formatted text (ASCII tables, aligned code, etc.)
+                            if not recent.strip():
+                                yield chunk
+                                continue
+
                             previous = self.accu_content[:-DUPLICATE_PATTERN_LENGTH]
 
                             # Count overlapping occurrences using optimized regex (6.8x faster than loop)

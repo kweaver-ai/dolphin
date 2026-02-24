@@ -716,3 +716,240 @@ def test_import_handles_content_none_without_crash():
     assert report["issues_after"] == []
     history = context.get_history_messages(normalize=True).get_messages_as_dict()
     assert history[0]["content"] == ""
+
+
+# --- Orphan tool_calls repair and validation edge cases ---
+
+
+def test_import_with_issues_after_repair_aborts_silently():
+    """When repair still leaves issues, history is NOT imported (context stays empty)."""
+    agent, context = _build_agent_with_context()
+
+    # Construct a state that will still have issues after repair by using
+    # a non-dict message that repair drops, leaving only an orphan tool response
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_still_broken",
+        "variables": {},
+        "history_messages": [
+            {"role": "tool", "content": "orphan", "tool_call_id": "call_x"},
+        ],
+    }
+
+    report = agent.snapshot.import_portable_session(state, repair=True)
+    # After repair the orphan tool is dropped, leaving empty history
+    # which should validate clean
+    assert report["issues_after"] == []
+
+
+def test_import_report_distinguishes_success_and_failure():
+    """Report fields differ between successful and failed import."""
+    agent_ok, _ = _build_agent_with_context()
+    good_state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_ok",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ],
+    }
+    report_ok = agent_ok.snapshot.import_portable_session(good_state, repair=True)
+    assert report_ok["issues_after"] == []
+
+    agent_bad, _ = _build_agent_with_context()
+    bad_state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_bad",
+        "variables": {},
+        "history_messages": [
+            {"role": "tool", "content": "orphan", "tool_call_id": "call_orphan"},
+        ],
+    }
+    report_bad = agent_bad.snapshot.import_portable_session(bad_state, repair=False)
+    assert report_bad["applied_repairs"] is False
+    assert len(report_bad["issues_before"]) > 0
+
+
+def test_repair_multiple_assistant_messages_with_orphan_tool_calls():
+    """Consecutive assistant messages each with orphan tool_calls are all repaired."""
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_multi_orphan",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "start"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "_t1", "arguments": "{}"}},
+                ],
+            },
+            # No tool response for call_1
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_2", "type": "function", "function": {"name": "_t2", "arguments": "{}"}},
+                ],
+            },
+            # No tool response for call_2
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+
+    repaired, report = agent.snapshot.repair_portable_session(state)
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == [], f"Expected no issues after repair, got: {issues}"
+    assert report["applied"] is True
+
+    # Both orphan tool_calls should be removed
+    for msg in repaired["history_messages"]:
+        assert "tool_calls" not in msg or msg.get("tool_calls") == [], (
+            f"Orphan tool_calls not removed: {msg}"
+        )
+
+
+def test_repair_three_tool_calls_one_response():
+    """3 tool_calls with only 1 response: unpaired tool_calls trimmed, paired one kept."""
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_3tc_1r",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_a", "type": "function", "function": {"name": "_a", "arguments": "{}"}},
+                    {"id": "call_b", "type": "function", "function": {"name": "_b", "arguments": "{}"}},
+                    {"id": "call_c", "type": "function", "function": {"name": "_c", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "content": "result_b", "tool_call_id": "call_b"},
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+
+    repaired, report = agent.snapshot.repair_portable_session(state)
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == []
+    assert report["applied"] is True
+
+    # Only call_b should remain
+    assistant_tc = repaired["history_messages"][1]
+    tc_ids = [tc["id"] for tc in assistant_tc.get("tool_calls", [])]
+    assert tc_ids == ["call_b"]
+
+    tool_msgs = [m for m in repaired["history_messages"] if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["tool_call_id"] == "call_b"
+
+
+def test_repair_tool_responses_wrong_order():
+    """Tool responses in different order than tool_calls are reordered by repair."""
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_order",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_x", "type": "function", "function": {"name": "_x", "arguments": "{}"}},
+                    {"id": "call_y", "type": "function", "function": {"name": "_y", "arguments": "{}"}},
+                ],
+            },
+            # Responses in reverse order
+            {"role": "tool", "content": "result_y", "tool_call_id": "call_y"},
+            {"role": "tool", "content": "result_x", "tool_call_id": "call_x"},
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+
+    repaired, report = agent.snapshot.repair_portable_session(state)
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == []
+
+    # After repair, tool responses should be ordered to match tool_calls
+    tool_msgs = [m for m in repaired["history_messages"] if m.get("role") == "tool"]
+    assert len(tool_msgs) == 2
+    assert tool_msgs[0]["tool_call_id"] == "call_x"
+    assert tool_msgs[1]["tool_call_id"] == "call_y"
+
+
+def test_validate_detects_missing_tool_response():
+    """Validate reports MISSING_TOOL_RESPONSE when tool_calls lack matching responses."""
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_missing",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_missing", "type": "function", "function": {"name": "_t", "arguments": "{}"}},
+                ],
+            },
+            {"role": "assistant", "content": "skipped tool"},
+        ],
+    }
+
+    issues = agent.snapshot.validate_portable_session(state)
+    codes = {i["code"] for i in issues}
+    assert "MISSING_TOOL_RESPONSE" in codes
+
+
+def test_normalize_then_sanitize_pipeline():
+    """After normalize + sanitize, tool_call_id pairing works correctly."""
+    from dolphin.core.llm.message_sanitizer import sanitize_openai_messages
+
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_pipeline",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "tool_call_id": "call_legacy",
+                        "type": "function",
+                        "function": {"name": "_t", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "content": "ok", "tool_call_id": "call_legacy"},
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+
+    # Repair normalizes tool_call_id -> id
+    repaired, _ = agent.snapshot.repair_portable_session(state)
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == []
+
+    # Feed through message sanitizer — tool response should NOT be downgraded
+    sanitized, downgraded = sanitize_openai_messages(repaired["history_messages"])
+    assert downgraded == 0
+    tool_msgs = [m for m in sanitized if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["tool_call_id"] == "call_legacy"

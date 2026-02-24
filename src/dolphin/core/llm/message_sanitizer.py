@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re as _re
+from collections import Counter, defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from dolphin.core.common.constants import PIN_MARKER
@@ -116,7 +117,71 @@ def sanitize_openai_messages(
         downgraded_msg = {"role": downgrade_role, "content": f"{downgraded_prefix}{content}"}
         sanitized.append(downgraded_msg)
 
-    return sanitized, downgraded
+    # Second pass: strip orphan assistant tool_calls (declared but no matching
+    # tool response).  This prevents hard 400 errors from providers like DashScope
+    # that reject assistant messages with tool_calls lacking tool responses.
+    #
+    # We match in *message order* so that when the same tool_call_id appears in
+    # multiple rounds, a tool response is paired with the closest preceding
+    # (most recent) unmatched declaration rather than the earliest one.
+    #
+    # Algorithm:
+    #   1. Forward scan: record assistant tool_call declarations in a per-id
+    #      stack (list of msg indices).  When a tool response is encountered,
+    #      pop the most-recent unmatched declaration for that id.
+    #   2. Rebuild: keep only the matched declarations in each assistant message.
+
+    # pending[tc_id] = [msg_idx, ...] — indices of assistant messages that
+    # declared this tc_id but haven't been matched yet (oldest first).
+    pending: Dict[str, List[int]] = defaultdict(list)
+    # matched_budget[msg_idx][tc_id] = how many declarations at msg_idx matched
+    matched_budget: Dict[int, Counter[str]] = defaultdict(Counter)
+
+    for idx, msg in enumerate(sanitized):
+        role = msg.get("role")
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        tc_id = tc.get("id")
+                        if isinstance(tc_id, str):
+                            pending[tc_id].append(idx)
+        elif role == "tool":
+            tid = msg.get("tool_call_id")
+            if isinstance(tid, str) and pending.get(tid):
+                # Match to the most recent unmatched declaration (closest preceding)
+                matched_idx = pending[tid].pop()
+                matched_budget[matched_idx][tid] += 1
+
+    result: List[Dict[str, Any]] = []
+    for idx, msg in enumerate(sanitized):
+        if msg.get("role") == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                budget = matched_budget.get(idx, Counter())
+                kept = []
+                for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
+                    tc_id = tc.get("id")
+                    if isinstance(tc_id, str) and budget.get(tc_id, 0) > 0:
+                        budget[tc_id] -= 1
+                        kept.append(tc)
+                dropped = len(tool_calls) - len(kept)
+                if dropped > 0:
+                    downgraded += dropped
+                    if kept:
+                        msg = {**msg, "tool_calls": kept}
+                    else:
+                        msg = {
+                            k: v for k, v in msg.items() if k != "tool_calls"
+                        }
+                        if not msg.get("content"):
+                            msg["content"] = ""
+        result.append(msg)
+
+    return result, downgraded
 
 
 def sanitize_and_log(

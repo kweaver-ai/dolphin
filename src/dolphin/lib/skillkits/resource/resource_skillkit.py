@@ -240,6 +240,7 @@ class ResourceSkillkit(Skillkit):
         
         if cached_content:
             full_content = path_info + cached_content.get_full_content()
+            full_content = self._substitute_variables(full_content)
             return truncate_content(full_content, self.config.max_content_tokens)
 
         # Load from disk
@@ -252,6 +253,7 @@ class ResourceSkillkit(Skillkit):
 
         # Truncate if necessary - include path info at the beginning
         full_content = path_info + content.get_full_content()
+        full_content = self._substitute_variables(full_content)
         return truncate_content(full_content, self.config.max_content_tokens)
 
     def load_skill_short(self, name: str) -> str:
@@ -323,6 +325,15 @@ class ResourceSkillkit(Skillkit):
 
         # Format with file info header
         return f"# {resource_path}\n\n```\n{content}\n```"
+
+    def _substitute_variables(self, content: str) -> str:
+        """Replace $VAR_NAME placeholders with values from config.variables."""
+        variables = self.config.variables
+        if not variables:
+            return content
+        for key, value in variables.items():
+            content = content.replace(f"${key}", str(value))
+        return content
 
     def clear_caches(self) -> None:
         """Clear all internal caches.
