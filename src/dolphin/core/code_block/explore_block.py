@@ -1171,30 +1171,21 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 async for ret in self._execute_tool_call(stream_item, tool_call):
                     yield ret
                 successful_calls += 1
-            except ToolInterrupt as e:
-                # ToolInterrupt is critical - propagate immediately
-                # (e.g., user cancellation, system limit reached)
-                # Add placeholder responses for remaining unexecuted tools
-                # to prevent orphan tool_calls in the message history.
+            except (ToolInterrupt, UserInterrupt) as e:
+                # Critical interrupt - add placeholder responses for remaining
+                # unexecuted tools to prevent orphan tool_calls, then re-raise.
+                reason = "user interrupted" if isinstance(e, UserInterrupt) else str(e)
                 for remaining in tool_calls[i + 1:]:
                     self.strategy.append_tool_response_message(
                         self.context,
                         remaining.id,
-                        "Tool not executed: prior tool was interrupted",
+                        f"Tool {remaining.name} not executed: {reason} "
+                        f"(during {tool_call.name} [{i+1}/{total_calls}])",
                     )
-                logger.info(
-                    f"Tool execution interrupted at {i+1}/{total_calls}, "
-                    f"completed: {successful_calls}, failed: {failed_calls}"
-                )
-                raise
-            except UserInterrupt:
-                # UserInterrupt is critical - add placeholder responses for
-                # remaining tools then re-raise.
-                for remaining in tool_calls[i + 1:]:
-                    self.strategy.append_tool_response_message(
-                        self.context,
-                        remaining.id,
-                        "Tool not executed: user interrupted",
+                if isinstance(e, ToolInterrupt):
+                    logger.info(
+                        f"Tool execution interrupted at {i+1}/{total_calls}, "
+                        f"completed: {successful_calls}, failed: {failed_calls}"
                     )
                 raise
             except Exception as e:
