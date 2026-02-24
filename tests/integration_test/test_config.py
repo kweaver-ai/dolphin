@@ -592,7 +592,7 @@ class IntegrationTest:
 
         # Check empty answer
         if testCase.expectedResult.emptyAnswerCheck:
-            progress_data = actualResult.get("_progress", [])
+            progress_data = actualResult.get("gvp_variables", {}).get("_progress", [])
             results["emptyAnswer"] = self.checkers["emptyAnswer"].check(
                 progress_data, testCase.expectedResult.emptyAnswerCheck
             )
@@ -668,7 +668,7 @@ class IntegrationTest:
 
         # Check empty answer
         if testCase.expectedResult.emptyAnswerCheck:
-            progress_data = actualResult.get("_progress", [])
+            progress_data = actualResult.get("gvp_variables", {}).get("_progress", [])
             if not self.checkers["emptyAnswer"].check(
                 progress_data, testCase.expectedResult.emptyAnswerCheck
             ):

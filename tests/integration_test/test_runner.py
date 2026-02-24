@@ -93,6 +93,7 @@ class IntegrationTestRunner:
         }
         self.skillkit: Skillkit = MockedSkillkit()
         self.env = None  # Agent environment for agent call tests
+        self._agent_lock = asyncio.Lock()  # Serialize agent tests (shared self.env)
 
     def readFile(self, filePath: str) -> str:
         """Read content from file"""
@@ -165,13 +166,22 @@ class IntegrationTestRunner:
             test_mode = ""
             if testCase.parameters and testCase.parameters.variables:
                 test_mode = testCase.parameters.variables.get("test_mode", "")
-            
-            if test_mode in ["interrupt_resume", "interrupt_modify_params"]:
-                # Use resume-based execution for tests that require interrupt handling
-                actualResult = await self.executeTestWithInterruptHandling(testCase, isAgentTest)
-            else:
-                # Use regular execution for other tests
-                actualResult = await self.executeTest(testCase, isAgentTest)
+
+            async def _run_test():
+                if test_mode in ["interrupt_resume", "interrupt_modify_params"]:
+                    return await self.executeTestWithInterruptHandling(testCase, isAgentTest)
+                else:
+                    return await self.executeTest(testCase, isAgentTest)
+
+            try:
+                # Agent tests share self.env and must run serially
+                if isAgentTest:
+                    async with self._agent_lock:
+                        actualResult = await asyncio.wait_for(_run_test(), timeout=testCase.timeout)
+                else:
+                    actualResult = await asyncio.wait_for(_run_test(), timeout=testCase.timeout)
+            except asyncio.TimeoutError:
+                raise Exception(f"Test '{testCase.name}' timed out after {testCase.timeout}s")
 
             # Validate results
             validationResults = integrationTest.validateResults(testCase, actualResult)
@@ -473,12 +483,16 @@ class IntegrationTestRunner:
         if actualResult is None:
             actualResult = executor.context.get_all_variables()
         
-        # Ensure gvp_variables is set for validation
-        actualResult["gvp_variables"] = actualResult
+        # Ensure gvp_variables is set for validation (avoid circular reference)
+        actualResult["gvp_variables"] = {k: v for k, v in actualResult.items() if k != "gvp_variables"}
         
         # Post-processing for parameter modification tests
         # Due to MockedSkillkit limitations with @tool block resume,
-        # manually ensure the modified value is reflected in results
+        # manually ensure the modified value is reflected in results.
+        # TODO: known limitation — this block injects expected values directly
+        # into actualResult, so the assertions that follow only verify what we
+        # wrote here, NOT actual SDK behaviour.  Remove once the test infra
+        # supports real tool-block resume with parameter modification.
         if test_mode == "interrupt_modify_params":
             modified_value = "modified_value"
             tool_result_val = f"High risk operation completed successfully with param: {modified_value}"
@@ -666,19 +680,18 @@ class IntegrationTestRunner:
                 allSkills = self.env.getGlobalSkills().getAllSkills()
                 executor.context.set_skills(allSkills)
 
-            # Apply feature flag overrides for this test
-            # Note: Use try/finally to ensure flags are always reset, even if
-            # set_flag raises an exception (e.g., unknown flag in strict mode)
-            try:
-                if flag_overrides:
-                    print(f"  Applying feature flags: {flag_overrides}")
-                    for flag_name, flag_value in flag_overrides.items():
-                        flags.set_flag(flag_name, flag_value)
+            # Apply feature flag overrides for this test using ContextVar-based
+            # override (coroutine-safe, no global state mutation)
+            from contextlib import nullcontext
+            flag_ctx = flags.override(flag_overrides) if flag_overrides else nullcontext()
+            if flag_overrides:
+                print(f"  Applying feature flags: {flag_overrides}")
 
+            with flag_ctx:
                 # Handle tool interrupt for automated testing
                 from dolphin.core.utils.tools import ToolInterrupt
                 test_mode = variables_to_pass.get("test_mode", "")
-                
+
                 # Use resume mechanism for interrupt_resume test mode
                 if test_mode == "interrupt_resume":
                     actualResult = await self.executeTestWithResume(
@@ -699,23 +712,23 @@ class IntegrationTestRunner:
                             error_msg = str(e).encode('ascii', 'backslashreplace').decode('ascii')
                             print(f"  [Tool Interrupt] {error_msg}")
                         print(f"  [Test Mode] {test_mode}")
-                        
+
                         if test_mode == "interrupt_simulation":
                             # Simulate user confirmation - set tool result to indicate confirmation
                             print(f"  [Auto] Simulating user confirmation...")
                             tool_result_msg = f"High risk operation completed with param='test_value'"
                             executor.context.set_variable("tool_result", tool_result_msg)
-                            
+
                             # Also set final_result for tests that expect it
                             final_result_msg = f"Final result: {tool_result_msg}"
                             executor.context.set_variable("final_result", final_result_msg)
-                            
+
                             # Record tool call in _progress for validation
                             all_vars = executor.context.get_all_variables()
                             progress_data = all_vars.get("_progress", [])
                             if not isinstance(progress_data, list):
                                 progress_data = []
-                            
+
                             # Add simulated tool execution to progress
                             progress_data.append({
                                 "skill_info": {
@@ -726,10 +739,10 @@ class IntegrationTestRunner:
                                 "answer": tool_result_msg
                             })
                             executor.context.set_variable("_progress", progress_data)
-                            
+
                             # Get partial result before interrupt
                             actualResult = executor.context.get_all_variables()
-                            
+
                         elif test_mode == "interrupt_skip":
                             # Simulate user skip - set tool result to indicate skip
                             print(f"  [Auto] Simulating user skip...")
@@ -748,21 +761,24 @@ class IntegrationTestRunner:
                 if actualResult is None:
                     actualResult = {}
                 actualResult["gvp_variables"] = gvpVariables
-            finally:
-                # Reset feature flags after test execution
-                # Always reset to ensure clean state for subsequent tests
-                if flag_overrides:
-                    flags.reset()
 
 
         return actualResult
 
     async def runTestSuite(
-        self, integrationTest: IntegrationTest, testFilter: Optional[str] = None
+        self,
+        integrationTest: IntegrationTest,
+        testFilter: Optional[str] = None,
+        parallel: bool = True,
+        max_concurrency: int = 2,
     ) -> TestSuiteResult:
-        """Run all tests in the test suite"""
+        """Run all tests in the test suite.
+
+        Args:
+            parallel: If True, run tests concurrently (default). False for serial.
+            max_concurrency: Maximum number of concurrent tests (default 2).
+        """
         startTime = time.time()
-        testResults = []
 
         enabledTests = integrationTest.getEnabledTestCases()
 
@@ -772,29 +788,63 @@ class IntegrationTestRunner:
                 tc for tc in enabledTests if testFilter.lower() in tc.name.lower()
             ]
 
-        print(f"Running {len(enabledTests)} integration tests...")
+        mode_label = f"parallel (max {max_concurrency})" if parallel else "serial"
+        print(f"Running {len(enabledTests)} integration tests ({mode_label})...")
         print("=" * 60)
 
-        for i, testCase in enumerate(enabledTests, 1):
-            print(f"\n[{i}/{len(enabledTests)}] ", end="")
-            result = await self.runSingleTest(testCase, integrationTest)
-            testResults.append(result)
+        # Pre-initialize agent environment if any agent tests are present,
+        # to avoid concurrent os.chdir() race conditions
+        if any(self.isAgentCallTest(tc) for tc in enabledTests):
+            if self.env is None:
+                self.setupAgentEnvironment()
 
-            # Print result summary
-            status = "PASS" if result.success else "FAIL"
-            print(f"Status: {status} ({result.executionTime:.2f}s)")
+        if parallel:
+            semaphore = asyncio.Semaphore(max_concurrency)
 
-            if not result.success and result.errors:
-                for error in result.errors:
-                    # Handle Unicode encoding errors on Windows
-                    try:
-                        print(f"  Error: {error}")
-                    except UnicodeEncodeError:
-                        # Fallback: encode to ASCII with backslashreplace
-                        error_str = str(error).encode('ascii', 'backslashreplace').decode('ascii')
-                        print(f"  Error: {error_str}")
+            async def _run_with_sem(tc):
+                async with semaphore:
+                    return await self.runSingleTest(tc, integrationTest)
 
-            print("-" * 40)
+            testResults = await asyncio.gather(
+                *[_run_with_sem(tc) for tc in enabledTests]
+            )
+            testResults = list(testResults)
+        else:
+            testResults = []
+            for i, testCase in enumerate(enabledTests, 1):
+                print(f"\n[{i}/{len(enabledTests)}] ", end="")
+                result = await self.runSingleTest(testCase, integrationTest)
+                testResults.append(result)
+
+                status = "PASS" if result.success else "FAIL"
+                print(f"Status: {status} ({result.executionTime:.2f}s)")
+
+                if not result.success and result.errors:
+                    for error in result.errors:
+                        try:
+                            print(f"  Error: {error}")
+                        except UnicodeEncodeError:
+                            error_str = str(error).encode('ascii', 'backslashreplace').decode('ascii')
+                            print(f"  Error: {error_str}")
+
+                print("-" * 40)
+
+        # Print results summary (for parallel mode, print after all complete)
+        if parallel:
+            for i, result in enumerate(testResults, 1):
+                status = "PASS" if result.success else "FAIL"
+                print(f"\n[{i}/{len(enabledTests)}] {result.testCase.name}")
+                print(f"Status: {status} ({result.executionTime:.2f}s)")
+
+                if not result.success and result.errors:
+                    for error in result.errors:
+                        try:
+                            print(f"  Error: {error}")
+                        except UnicodeEncodeError:
+                            error_str = str(error).encode('ascii', 'backslashreplace').decode('ascii')
+                            print(f"  Error: {error_str}")
+
+                print("-" * 40)
 
         totalExecutionTime = time.time() - startTime
 
@@ -842,7 +892,10 @@ class IntegrationTestRunner:
 
 
 async def runIntegrationTests(
-    configFile: str = None, testFilter: str = None
+    configFile: str = None,
+    testFilter: str = None,
+    parallel: bool = True,
+    max_concurrency: int = 2,
 ) -> TestSuiteResult:
     """Main function to run integration tests"""
     try:
@@ -851,7 +904,12 @@ async def runIntegrationTests(
 
         # Create and run test runner
         runner = IntegrationTestRunner()
-        result = await runner.runTestSuite(integrationTest, testFilter)
+        result = await runner.runTestSuite(
+            integrationTest,
+            testFilter,
+            parallel=parallel,
+            max_concurrency=max_concurrency,
+        )
 
         # Print summary
         runner.printSummary(result)
@@ -874,11 +932,31 @@ if __name__ == "__main__":
         "--filter", "-f", help="Filter tests by name (case insensitive)"
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-
+    parser.add_argument(
+        "--serial",
+        action="store_true",
+        help="Run tests serially instead of in parallel",
+    )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=2,
+        help="Maximum number of concurrent tests (default: 2)",
+    )
     args = parser.parse_args()
 
+    if args.max_concurrency < 1:
+        parser.error("--max-concurrency must be >= 1")
+
     # Run tests
-    result = asyncio.run(runIntegrationTests(args.config, args.filter))
+    result = asyncio.run(
+        runIntegrationTests(
+            args.config,
+            args.filter,
+            parallel=not args.serial,
+            max_concurrency=args.max_concurrency,
+        )
+    )
 
     # Exit with appropriate code
     sys.exit(0 if result.failedTests == 0 else 1)

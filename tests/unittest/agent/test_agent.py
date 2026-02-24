@@ -254,6 +254,7 @@ class TestBaseAgent:
         # 尝试从未初始化状态运行（会自动初始化）
         async for _ in agent.arun():
             pass
+        assert agent.state == AgentState.COMPLETED
 
         # 重新创建agent进行其他测试
         agent = MockAgent("test_agent2")
@@ -428,8 +429,6 @@ test_tool -> result
         skills = object()
         agent = DolphinAgent(content="/PROMPT/\nhello", global_skills=skills)
         assert hasattr(agent, "global_skills")
-        assert hasattr(agent, "global_skills")
-        assert agent.global_skills is skills
         assert agent.global_skills is skills
 
     @pytest.mark.asyncio
@@ -566,29 +565,6 @@ class TestConvenienceFunctions:
         ):
             agent = create_agent_from_template("basic_dolphin", "test")
             assert isinstance(agent, MockAgent)
-
-
-class TestCompatibility:
-    """测试兼容性"""
-
-    def setup_method(self):
-        """创建测试用的DPH文件"""
-        self.temp_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".dph", delete=False
-        )
-        self.temp_file.write(
-            """
-@DESC
-测试兼容性Agent
-"""
-        )
-        self.temp_file.close()
-
-    def teardown_method(self):
-        """清理测试文件"""
-        os.unlink(self.temp_file.name)
-
-    # compatibility模块已被移除，相关测试已删除
 
 
 if __name__ == "__main__":

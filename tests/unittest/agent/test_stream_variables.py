@@ -3,18 +3,30 @@
 Tests the complete arun(stream_variables=True) flow with real LLM execution
 using config/global.yaml configuration. These tests validate the actual behavior
 with live LLM API calls, providing more realistic coverage than mock-based tests.
+
+NOTE: These tests are skipped by default in unit test runs because they require
+real LLM API access. Run with: pytest --run-llm tests/unittest/agent/test_stream_variables.py
 """
 
 import pytest
 import asyncio
 import os
-from typing import Dict, Any
 
-from dolphin.sdk.agent.dolphin_agent import DolphinAgent
-from dolphin.core.agent.agent_state import AgentState
-from dolphin.core.config.global_config import GlobalConfig
-from dolphin.core.coroutine.execution_frame import FrameStatus
-from dolphin.core.coroutine.resume_handle import ResumeHandle
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("RUN_LLM_TESTS"),
+    reason="Skipped by default: requires real LLM API. Set RUN_LLM_TESTS=1 to run.",
+)
+
+# Defer production imports to avoid collection-time failures when dependencies are missing.
+# Imported lazily via the _imports fixture below.
+
+
+def _lazy_imports():
+    """Import production modules on demand (not at collection time)."""
+    from dolphin.sdk.agent.dolphin_agent import DolphinAgent
+    from dolphin.core.agent.agent_state import AgentState
+
+    return DolphinAgent, AgentState
 
 
 # Get project root and config path
@@ -25,6 +37,8 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "config", "global.yaml")
 @pytest.fixture
 def global_config():
     """Load global configuration from config/global.yaml"""
+    from dolphin.core.config.global_config import GlobalConfig
+
     if not os.path.exists(CONFIG_PATH):
         pytest.skip(f"Config file not found: {CONFIG_PATH}")
     return GlobalConfig.from_yaml(CONFIG_PATH)
@@ -33,7 +47,8 @@ def global_config():
 @pytest.mark.asyncio
 async def test_stream_variables_basic_execution(global_config):
     """Test basic stream_variables=True with real LLM execution"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+
     # Simple DPH content that generates multiple variable updates
     dph_content = """
 @DESC
@@ -96,7 +111,8 @@ Simple test agent that updates variables progressively
 @pytest.mark.asyncio
 async def test_stream_variables_with_llm_call(global_config):
     """Test stream_variables with actual LLM call"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+
     dph_content = """
 @DESC
 Test agent that makes an LLM call and streams variable updates
@@ -144,7 +160,8 @@ Test agent that makes an LLM call and streams variable updates
 @pytest.mark.asyncio
 async def test_stream_variables_progressive_updates(global_config):
     """Test that stream_variables captures progressive variable updates"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+
     dph_content = """
 @DESC
 Test agent with multiple progressive variable updates
@@ -200,7 +217,8 @@ Test agent with multiple progressive variable updates
 @pytest.mark.asyncio
 async def test_stream_variables_false_no_streaming(global_config):
     """Test that stream_variables=False does not stream intermediate updates"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+
     dph_content = """
 @DESC
 Test agent for verifying non-streaming mode
@@ -243,7 +261,8 @@ Test agent for verifying non-streaming mode
 @pytest.mark.asyncio
 async def test_stream_variables_error_handling(global_config):
     """Test that errors are properly propagated in stream_variables mode"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+
     # DPH content with syntax error (invalid syntax)
     invalid_dph_content = """
 @DESC
@@ -281,7 +300,8 @@ INVALID SYNTAX HERE WITHOUT ARROW
 @pytest.mark.asyncio
 async def test_stream_variables_output_filtering(global_config):
     """Test that output_variables parameter correctly filters returned variables"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+
     dph_content = """
 @DESC
 Test agent with multiple variables
@@ -329,7 +349,9 @@ Test agent with multiple variables
 @pytest.mark.asyncio
 async def test_stream_variables_with_tool_interrupt(global_config):
     """Test stream_variables with tool interrupt and resume"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+    from dolphin.core.coroutine.resume_handle import ResumeHandle
+
     # DPH content that will trigger tool interrupt with judge block
     # Using a judge block with manual intervention requirement
     dph_content = """
@@ -427,7 +449,8 @@ Test agent with tool interrupt and resume functionality
 @pytest.mark.asyncio
 async def test_stream_variables_interrupt_then_complete(global_config):
     """Test that stream_variables correctly handles interrupt->resume->complete flow"""
-    
+    DolphinAgent, AgentState = _lazy_imports()
+
     # Simple test that simulates interrupt behavior without actual tools
     dph_content = """
 @DESC

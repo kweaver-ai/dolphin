@@ -43,7 +43,6 @@ lib = [
     "mcp>=1.0.0,<2.0.0",
     "sqlalchemy>=2.0.0,<3.0.0",
     "oracledb>=2.2.0,<3.0.0",
-    "rank-bm25>=0.2.0,<1.0.0",
     "paramiko>=3.5.0",
     "cryptography>=43.0.0",
     "pandas",
@@ -61,12 +60,18 @@ full = [
     "kweaver-dolphin[cli]",
 ]
 
-# pip install kweaver-dolphin[dev] - 开发依赖
-dev = [
-    "kweaver-dolphin[full]",
+# pip install kweaver-dolphin[test] - 测试依赖
+test = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
+]
+
+# pip install kweaver-dolphin[dev] - 开发依赖
+dev = [
+    "kweaver-dolphin[full]",
+    "kweaver-dolphin[test]",
     "ruff>=0.1.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
@@ -114,6 +119,19 @@ markers = [
     "threading: Thread safety testing markers",
 ]
 
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "*/migrations/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]
+
 [tool.black]
 line-length = 88
 target-version = ['py310']
@@ -148,4 +166,5 @@ test = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
 ]

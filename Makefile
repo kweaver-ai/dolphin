@@ -1,4 +1,4 @@
-.PHONY: clean install-dev install-prod build build-only dev-setup test test-unit test-integration test-integration-filter test-legacy help lint format uv-sync uv-clean docs-serve docs-build
+.PHONY: clean install-dev install-prod build build-only dev-setup test test-unit test-integration test-integration-filter help lint format uv-sync uv-clean docs-serve docs-build
 
 clean:
 	rm -rf dist
@@ -40,7 +40,7 @@ test:
 	bash tests/run_tests.sh all
 
 test-unit:
-	bash tests/run_tests.sh unit
+	bash tests/run_tests.sh unit --parallel
 
 test-integration:
 	bash tests/run_tests.sh integration
@@ -49,9 +49,6 @@ test-integration-filter:
 	@echo "使用方法: make test-integration-filter FILTER=<pattern>"
 	@echo "示例: make test-integration-filter FILTER=poem"
 	bash tests/run_tests.sh integration -f $(FILTER)
-
-test-legacy:
-	uv run python run_tests.py --legacy
 
 test-verbose:
 	bash tests/run_tests.sh all -v
@@ -120,7 +117,6 @@ help:
 	@echo "  test-unit            - 仅运行单元测试"
 	@echo "  test-integration     - 仅运行集成测试"
 	@echo "  test-integration-filter FILTER=<pattern> - 过滤集成测试"
-	@echo "  test-legacy          - 运行遗留测试"
 	@echo "  test-verbose         - 详细模式运行所有测试"
 	@echo ""
 	@echo "🎨 代码质量:"
