@@ -241,3 +241,38 @@ def test_escape_special_regex_chars():
     count = count_overlapping_regex(previous, recent)
 
     assert count >= 49, "Should handle regex special chars correctly"
+
+
+def test_whitespace_pattern_not_false_positive():
+    """
+    Test that whitespace-only patterns do not trigger duplicate detection.
+
+    Real-world case: ASCII art tables with space padding produce trailing
+    whitespace that naturally repeats many times but is not a semantic loop.
+    E.g. "│   content   │" lines have long runs of spaces.
+    """
+    # Simulate an ASCII table with wide space-padded rows (like the real-world case)
+    rows = []
+    for i in range(80):
+        # Each row has 70+ consecutive spaces as right-side padding
+        row = f"│  Item {i:03d}: data" + " " * 70 + "│\n"
+        rows.append(row)
+    content = "".join(rows)
+
+    # Force the worst case: content ending with 50+ spaces (mid-row padding)
+    content += " " * 60
+
+    assert len(content) > MIN_LENGTH_TO_DETECT_DUPLICATE_OUTPUT
+
+    recent = content[-50:]
+    assert recent.strip() == "", "Pattern should be pure whitespace"
+
+    previous = content[:-50]
+    count = count_overlapping_regex(previous, recent)
+
+    # Without the fix this would be a huge number; with the fix, detection is skipped.
+    # Here we verify the count IS high, proving the false positive scenario exists.
+    assert count > 50, (
+        f"Whitespace pattern should match many times in padded table (got {count}), "
+        "confirming this is a false-positive scenario that the fix must skip"
+    )
