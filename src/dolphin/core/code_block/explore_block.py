@@ -44,6 +44,7 @@ from dolphin.core.common.enums import (
 from dolphin.core.common.constants import (
     MAX_SKILL_CALL_TIMES,
     MAX_PLAN_SILENT_ROUNDS,
+    MAX_PLAN_POLLING_ROUNDS,
     get_msg_duplicate_skill_call,
 )
 from dolphin.core.context.context import Context
@@ -121,6 +122,8 @@ class ExploreBlock(BasicCodeBlock):
         # meaningful progress on the active plan (e.g., repeatedly calling unrelated tools).
         self.plan_silent_max_rounds: int = MAX_PLAN_SILENT_ROUNDS
         self._plan_silent_rounds: int = 0
+        self.plan_polling_max_rounds: int = MAX_PLAN_POLLING_ROUNDS
+        self._plan_polling_rounds: int = 0
         self._plan_last_signature: Optional[tuple] = None
         self._last_tool_name: Optional[str] = None
         self._current_round_tools: List[str] = []  # Track all tools called in current round
@@ -170,16 +173,13 @@ class ExploreBlock(BasicCodeBlock):
             # PlanExecMode.from_str handles validation and mapping (seq/para/etc.)
             self.params["exec_mode"] = PlanExecMode.from_str(str(exec_mode_param))
 
-        # Optional: override plan silent rounds limit via DPH params.
-        silent_max = self.params.get("plan_silent_max_rounds")
-        if silent_max is not None:
-            try:
-                silent_max_int = int(silent_max)
-                if silent_max_int < 0:
-                    raise ValueError("plan_silent_max_rounds must be >= 0")
-                self.plan_silent_max_rounds = silent_max_int
-            except Exception as e:
-                raise ValueError(f"Invalid plan_silent_max_rounds: {silent_max}") from e
+        # NOTE: plan_silent_max_rounds / plan_polling_max_rounds are intentionally
+        # NOT parsed from self.params here. They use global constants
+        # (MAX_PLAN_SILENT_ROUNDS / MAX_PLAN_POLLING_ROUNDS) set in __init__.
+        # A previous version (commit b626047) supported per-block override via
+        # DPH params, but that was removed during refactoring. If per-block
+        # override is needed again, add parsing logic here.
+
 
     async def execute(
         self,
@@ -879,8 +879,6 @@ Please reconsider your approach and improve your answer based on the feedback ab
                     f"({len(stream_item.answer)} chars) to context"
                 )
             raise
-        finally:
-            pass
 
         if not self.context.is_cli_mode():
             console("\n", verbose=self.context.is_verbose())
@@ -926,17 +924,16 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 self._append_assistant_message(stream_item.answer)
                 self.context.debug(f"no valid skill call, answer[{stream_item.answer}]")
 
-            # If plan mode is active, do NOT stop immediately.
-            # Instead, keep exploration running so the agent can poll progress
-            # (e.g., via _check_progress / _wait) until tasks reach terminal states.
+            # Always signal stop when no tool call is found.
+            # The decision to continue despite this flag is made by
+            # _should_continue_explore_in_plan_mode(), which checks for
+            # task progress, plan tool usage, and silent round limits.
+            self.should_stop_exploration = True
             if hasattr(self.context, "has_active_plan") and await self.context.has_active_plan():
-                self.should_stop_exploration = False
-                self.context.debug("No tool call, but plan is active; continuing exploration")
+                self.context.debug("No tool call with active plan; will check plan continuation logic")
                 # Avoid tight looping while waiting for running tasks to make progress.
-                # This small backoff gives subtasks time to update their status.
                 await asyncio.sleep(0.2)
             else:
-                self.should_stop_exploration = True
                 self.context.debug("No tool call, stopping exploration")
             return
 
@@ -1358,19 +1355,37 @@ Please reconsider your approach and improve your answer based on the feedback ab
         Raises:
             ToolInterrupt: If silent rounds exceed threshold
         """
-        if not self.plan_silent_max_rounds or self.plan_silent_max_rounds <= 0:
+        silent_enabled = self.plan_silent_max_rounds and self.plan_silent_max_rounds > 0
+        polling_enabled = self.plan_polling_max_rounds and self.plan_polling_max_rounds > 0
+
+        if not silent_enabled and not polling_enabled:
             return
 
-        # Reset or increment silent rounds counter
-        if has_progress or used_plan_tool:
+        # Reset or increment counters.
+        # - has_progress: real task state change → reset both counters
+        # - used_plan_tool (no progress): agent is polling → reset silent, increment polling
+        # - neither: agent is doing unrelated work → increment silent
+        if has_progress:
             self._plan_silent_rounds = 0
+            self._plan_polling_rounds = 0
+        elif used_plan_tool:
+            self._plan_silent_rounds = 0
+            self._plan_polling_rounds += 1
         else:
             self._plan_silent_rounds += 1
+            self._plan_polling_rounds = 0
 
         # Update last signature for next round comparison
         self._plan_last_signature = current_signature
 
-        if self._plan_silent_rounds >= self.plan_silent_max_rounds:
+        # Check polling limit: too many rounds of plan-tool usage without progress
+        if polling_enabled and self._plan_polling_rounds >= self.plan_polling_max_rounds:
+            raise ToolInterrupt(
+                "Plan mode terminated: polling without progress for too many rounds. "
+                "Tasks may be stuck or unable to complete."
+            )
+
+        if silent_enabled and self._plan_silent_rounds >= self.plan_silent_max_rounds:
             raise ToolInterrupt(
                 "Plan mode terminated: no task status progress for too many rounds. "
                 "Use _wait() or _check_progress() instead of repeatedly calling unrelated tools."
@@ -1604,99 +1619,38 @@ Please reconsider your approach and improve your answer based on the feedback ab
             self._inject_context_to_skillkits()
     
     def _inject_context_to_skillkits(self):
-        """Inject execution context to skillkits that need it (e.g., PlanSkillkit).
-
-        This allows skillkits to access runtime context for operations like
-        task registry management, variable forking, etc.
-        """
+        """Inject execution context to skillkits that need it (e.g., PlanSkillkit)."""
         if not self.skills or not self.context:
             return
 
-        skill_list = self._resolve_skill_list()
-        if not skill_list:
+        # Resolve skills to a list of SkillFunction objects
+        if hasattr(self.skills, 'getSkills'):
+            skill_list = self.skills.getSkills()
+        elif isinstance(self.skills, list) and self.skills and isinstance(self.skills[0], str):
+            current_skillkit = self.context.get_skillkit()
+            if not current_skillkit:
+                return
+            available_skills = current_skillkit.getSkills()
+            owner_names = SkillMatcher.get_owner_skillkits(available_skills)
+            skill_list = [
+                skill for pattern in self.skills
+                for skill in available_skills
+                if SkillMatcher.match_skill(skill, pattern, owner_names=owner_names)
+            ]
+        elif isinstance(self.skills, list):
+            skill_list = self.skills
+        else:
             return
 
-        self._inject_to_unique_skillkits(skill_list)
-
-    def _resolve_skill_list(self) -> list:
-        """Convert self.skills to a unified list of SkillFunction objects.
-
-        Returns:
-            List of SkillFunction objects, or empty list if conversion fails
-        """
-        # Case 1: Skillset object with getSkills() method
-        if hasattr(self.skills, 'getSkills'):
-            return self.skills.getSkills()
-
-        # Case 2: String list (e.g., ["plan_skillkit.*", "search.*"])
-        if isinstance(self.skills, list) and self.skills and isinstance(self.skills[0], str):
-            return self._resolve_skill_patterns_to_functions()
-
-        # Case 3: Already a list of SkillFunction objects
-        return self.skills if isinstance(self.skills, list) else []
-
-    def _resolve_skill_patterns_to_functions(self) -> list:
-        """Resolve skill name patterns to SkillFunction objects.
-
-        Returns:
-            List of matched SkillFunction objects
-        """
-        current_skillkit = self.context.get_skillkit()
-        if not current_skillkit:
-            return []
-
-        available_skills = current_skillkit.getSkills()
-        owner_names = SkillMatcher.get_owner_skillkits(available_skills)
-
-        # Match requested patterns against available skills
-        matched_skills = []
-        for pattern in self.skills:
-            for skill in available_skills:
-                if SkillMatcher.match_skill(skill, pattern, owner_names=owner_names):
-                    matched_skills.append(skill)
-
-        return matched_skills
-
-    def _inject_to_unique_skillkits(self, skill_list: list):
-        """Inject context to unique skillkit instances.
-
-        Args:
-            skill_list: List of SkillFunction objects
-
-        Note:
-            Uses skillkit instance ID to avoid duplicate injections
-        """
-        processed_skillkits = set()
-
+        # Inject context to each unique skillkit instance
+        processed = set()
         for skill in skill_list:
-            skillkit = self._get_skillkit_from_skill(skill)
-            if not skillkit:
+            skillkit = getattr(skill, 'owner_skillkit', None)
+            if not skillkit or not hasattr(skillkit, 'setContext'):
                 continue
-
-            skillkit_id = id(skillkit)
-            if skillkit_id in processed_skillkits:
-                continue
-
-            skillkit.setContext(self.context)
-            processed_skillkits.add(skillkit_id)
-
-    def _get_skillkit_from_skill(self, skill):
-        """Extract skillkit from a skill object if it supports context injection.
-
-        Args:
-            skill: Skill object (typically SkillFunction)
-
-        Returns:
-            Skillkit instance if valid, None otherwise
-        """
-        if not hasattr(skill, 'owner_skillkit'):
-            return None
-
-        skillkit = skill.owner_skillkit
-        if not skillkit or not hasattr(skillkit, 'setContext'):
-            return None
-
-        return skillkit
+            if id(skillkit) not in processed:
+                skillkit.setContext(self.context)
+                processed.add(id(skillkit))
 
     def _resolve_mode(self, kwargs: dict):
         """Resolve exploration mode from kwargs or inherit from context."""
