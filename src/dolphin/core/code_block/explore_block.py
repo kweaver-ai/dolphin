@@ -1278,8 +1278,17 @@ Please reconsider your approach and improve your answer based on the feedback ab
         registry = getattr(self.context, "task_registry", None)
         has_progress, current_signature = await self._check_plan_progress_with_signature(registry)
 
+        # Check whether tasks are still active (PENDING / RUNNING).
+        # When active tasks exist we must NOT terminate early — the agent
+        # needs further rounds to poll (_check_progress / _wait) until
+        # those tasks reach a terminal state.  Termination in that case is
+        # handled solely by the silent-rounds / polling-rounds guards in
+        # _update_plan_silent_rounds().
+        has_active_tasks = await self.context.has_active_plan()
+
         # Early return: agent stopped without progress or plan tool usage
-        if self.should_stop_exploration:
+        # Only terminate immediately when NO tasks are still active.
+        if self.should_stop_exploration and not has_active_tasks:
             if not has_progress and not used_plan_tool:
                 logger.warning(
                     "Plan mode: Agent stopped without task progress or plan tool usage. "
@@ -1297,8 +1306,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
         # Update silent rounds tracking and check limit (also updates signature)
         self._update_plan_silent_rounds(current_signature, has_progress, used_plan_tool)
 
-        # Early return: no progress and agent wants to stop
-        if self.should_stop_exploration and not has_progress:
+        # Early return: no progress and agent wants to stop — again, only
+        # when there are no active tasks left.
+        if self.should_stop_exploration and not has_progress and not has_active_tasks:
             logger.warning(
                 "Plan mode: Stopping - no tool calls and no task progress. "
                 "Prevents infinite loops from repeated responses."

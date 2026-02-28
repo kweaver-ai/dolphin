@@ -795,8 +795,7 @@ class MessageCompressor:
             scratchpad_messages.add_message(content=msg)
 
         try:
-            if len(history_messages) > 0:
-                self.context.set_history_bucket(history_messages)
+            self.context.set_history_bucket(history_messages)
             # Replace SCRATCHPAD with the compressed surviving tail.
             # This both prevents monotonic growth (old uncompressed content
             # is replaced) and preserves current-turn tool context.

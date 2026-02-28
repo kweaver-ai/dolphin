@@ -8,7 +8,7 @@ import re
 import time
 from typing import Any, List, Union, Optional, Set
 
-from dolphin.core.skill.context_retention import context_retention
+from dolphin.core.skill.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
 from dolphin.core.skill.skillkit import SkillFunction, Skillkit
 
 """System function configuration mapping:
@@ -164,7 +164,7 @@ class SystemFunctionsSkillKit(Skillkit):
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
         return file_path
 
-    @context_retention(mode="summary", max_length=2000, detail_hint_min_omitted=1200)
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
     def _read_file(self, file_path: str, **kwargs) -> str:
         """Read file
 
@@ -190,7 +190,7 @@ class SystemFunctionsSkillKit(Skillkit):
         except Exception as e:
             raise RuntimeError(f"Failed to read file: {file_path}: {e}") from e
 
-    @context_retention(mode="summary", max_length=2000, detail_hint_min_omitted=1200)
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
     def _read_folder(
         self,
         folder_path: str,
@@ -287,7 +287,7 @@ class SystemFunctionsSkillKit(Skillkit):
 
         return "\n\n".join(result_parts)
 
-    @context_retention(mode="summary", max_length=2000, detail_hint_min_omitted=1200)
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
     def _grep(
         self,
         target_path: str,

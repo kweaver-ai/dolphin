@@ -224,14 +224,15 @@ class TestExploreBlockPlanConstraint:
             )
 
     @pytest.mark.asyncio
-    async def test_plan_mode_terminates_on_no_tool_call_no_progress(self):
-        """With should_stop_exploration=True, no progress, no plan tool:
-        _should_continue_explore returns False."""
+    async def test_plan_mode_terminates_on_no_tool_call_no_progress_all_done(self):
+        """With should_stop_exploration=True, no progress, no plan tool,
+        and all tasks in terminal state: _should_continue_explore returns False."""
         config = GlobalConfig()
         context = Context(config=config)
         await context.enable_plan()
         task = Task(id="task_1", name="Test Task", prompt="Test prompt")
         await context.task_registry.add_task(task)
+        await context.task_registry.update_status("task_1", TaskStatus.COMPLETED)
 
         block = ExploreBlock(context=context)
         block.should_stop_exploration = True
@@ -240,8 +241,10 @@ class TestExploreBlockPlanConstraint:
         block._plan_last_signature = signature
         block._current_round_tools = []
 
+        # All tasks done → no active plan → should terminate
+        assert await context.has_active_plan() is False
         assert await block._should_continue_explore() is False, (
-            "Should terminate: no tool call, no progress, no plan tool"
+            "Should terminate: no tool call, no progress, no plan tool, all tasks done"
         )
 
     @pytest.mark.asyncio
@@ -340,3 +343,111 @@ class TestExploreBlockPlanConstraint:
             new_sig, has_progress=True, used_plan_tool=True
         )
         assert block._plan_polling_rounds == 0
+
+    # ===================== Bug 3: running tasks ignored on termination =====================
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_continues_with_running_task_no_tool_call_no_signature_change(self):
+        """BUG REPRO: With a RUNNING task, should_stop_exploration=True, and
+        signature unchanged (not first round), _should_continue_explore should
+        return True — but it incorrectly returns False.
+
+        Root cause: _should_continue_explore_in_plan_mode only checks
+        has_progress (signature change) and used_plan_tool, but never checks
+        whether tasks are still RUNNING.  A RUNNING task whose status hasn't
+        changed produces has_progress=False, and if the model emitted no tool
+        call (should_stop_exploration=True, used_plan_tool=False), L1282-1288
+        immediately terminates the loop.
+        """
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        # Simulate non-first round: set signature to current (RUNNING) state
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+        block._current_round_tools = []
+
+        # Precondition: plan IS active (task is RUNNING)
+        assert await context.has_active_plan() is True
+
+        # BUG: currently returns False (premature termination)
+        # EXPECTED: should return True because a task is still RUNNING
+        result = await block._should_continue_explore()
+        assert result is True, (
+            "Should NOT terminate while tasks are still RUNNING, even if "
+            "signature is unchanged and model made no tool call this round"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_continues_with_pending_task_no_tool_call_no_signature_change(self):
+        """Same bug as above, but with PENDING task.
+
+        A PENDING task also means the plan is active and should not be
+        terminated prematurely.
+        """
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        # Task stays PENDING (default)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+        block._current_round_tools = []
+
+        assert await context.has_active_plan() is True
+
+        result = await block._should_continue_explore()
+        assert result is True, (
+            "Should NOT terminate while tasks are still PENDING"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_L1301_terminates_despite_plan_tool_used(self):
+        """BUG REPRO for L1301: Even when used_plan_tool=True lets us pass
+        L1282, L1301 still terminates because it only checks
+        `should_stop_exploration and not has_progress`.
+
+        Scenario: model called _check_progress (plan tool) in previous rounds
+        but this round emitted no tool call.  should_stop_exploration=True,
+        signature unchanged.  L1282 passes (used_plan_tool=False this round),
+        but L1301 catches it.
+
+        This also means the silent-rounds tolerance at L1290-1295 is dead code
+        — L1301 always fires first.
+        """
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        block.plan_silent_max_rounds = 3  # tolerant setting
+        block._plan_silent_rounds = 0     # first silent round
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+        block._current_round_tools = []
+
+        assert await context.has_active_plan() is True
+
+        # BUG: L1301 returns False despite _plan_silent_rounds < plan_silent_max_rounds
+        result = await block._should_continue_explore()
+        assert result is True, (
+            "Should NOT terminate on first silent round when silent_max_rounds=3 "
+            "and tasks are still RUNNING"
+        )

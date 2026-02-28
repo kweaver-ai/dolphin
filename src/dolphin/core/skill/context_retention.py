@@ -11,11 +11,18 @@ class ContextRetentionMode(Enum):
     REFERENCE = "reference" # Keep only reference_id, fetch full via cache
 
 
+# Default max chars kept in LLM context for SUMMARY mode (head + tail).
+# Balances context budget vs. avoiding repeated reads of truncated content.
+# Reference: Claude Code ~30k chars, Codex CLI ~10KB, Cursor ~250 lines.
+# Oversized results can still be fetched via _get_cached_result_detail().
+DEFAULT_SUMMARY_MAX_LENGTH = 8000
+
+
 @dataclass
 class SkillContextRetention:
     """Skill context retention configuration"""
     mode: ContextRetentionMode = ContextRetentionMode.FULL
-    max_length: int = 2000  # Only used by SUMMARY mode
+    max_length: int = DEFAULT_SUMMARY_MAX_LENGTH  # Only used by SUMMARY mode
     detail_hint_min_omitted: int = 0  # SUMMARY: minimum omitted chars to add detail hint
     summary_prompt: Optional[str] = None
     ttl_turns: int = -1
@@ -138,7 +145,7 @@ def get_context_retention_strategy(mode: ContextRetentionMode) -> ContextRetenti
 
 def context_retention(
     mode: str = "full",
-    max_length: int = 2000,
+    max_length: int = DEFAULT_SUMMARY_MAX_LENGTH,
     detail_hint_min_omitted: int = 0,
     summary_prompt: str = None,
     ttl_turns: int = -1,
