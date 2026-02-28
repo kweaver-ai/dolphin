@@ -37,6 +37,8 @@ KEY_MAX_ANSWER_CONTENT_LENGTH = "_max_answer_len"
 KEY_STATUS = "_status"
 KEY_PREVIOUS_STATUS = "_previous_status"
 KEY_HISTORY = "_history"
+KEY_HISTORY_COMPACT_ON_PERSIST = "_history_compact_on_persist"
+KEY_HISTORY_COMPACT_RECENT_TURNS = "_history_compact_recent_turns"
 KEY_PENDING_TURN = "_pending_turn"
 # Internal updates key for carrying user interrupt recovery input.
 # This is consumed by resume flow and should not be persisted as a user variable.

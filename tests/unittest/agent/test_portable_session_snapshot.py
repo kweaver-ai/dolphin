@@ -238,7 +238,7 @@ def test_import_portable_session_repair_and_restore_context():
         ],
     }
 
-    report = agent.snapshot.import_portable_session(bad_state, repair=True)
+    report = agent.snapshot.import_portable_session(bad_state, repair=True, trusted=False)
     assert report["applied_repairs"] is True
     assert report["issues_after"] == []
 
@@ -263,7 +263,7 @@ def test_import_portable_session_repair_false_keeps_issues():
         ],
     }
 
-    report = agent.snapshot.import_portable_session(bad_state, repair=False)
+    report = agent.snapshot.import_portable_session(bad_state, repair=False, trusted=False)
     assert report["applied_repairs"] is False
     assert report["issues_before"]
     assert context.get_session_id() == old_session_id
@@ -491,7 +491,7 @@ def test_import_does_not_crash_on_missing_role_or_content():
             {"role": "assistant", "content": "ok"},
         ],
     }
-    report = agent.snapshot.import_portable_session(state, repair=True)
+    report = agent.snapshot.import_portable_session(state, repair=True, trusted=False)
     assert report["applied_repairs"] is True
     assert report["issues_after"] == []
     history = context.get_history_messages(normalize=True).get_messages_as_dict()
@@ -584,7 +584,7 @@ def test_portable_session_roundtrip_with_repair_via_file(tmp_path: Path):
     _bind_context(restored, restored_ctx)
 
     loaded_state = json.loads(snapshot_file.read_text(encoding="utf-8"))
-    report = restored.snapshot.import_portable_session(loaded_state, repair=True)
+    report = restored.snapshot.import_portable_session(loaded_state, repair=True, trusted=False)
 
     assert report["applied_repairs"] is True
     assert report["issues_after"] == []
@@ -624,7 +624,7 @@ def test_import_repair_assistant_with_only_unpaired_tool_calls():
         ],
     }
 
-    report = agent.snapshot.import_portable_session(state, repair=True)
+    report = agent.snapshot.import_portable_session(state, repair=True, trusted=False)
     assert report["issues_after"] == [], (
         "import should succeed after repair backfills content on stripped assistant"
     )
@@ -712,7 +712,7 @@ def test_import_handles_content_none_without_crash():
             {"role": "assistant", "content": "ok"},
         ],
     }
-    report = agent.snapshot.import_portable_session(state, repair=True)
+    report = agent.snapshot.import_portable_session(state, repair=True, trusted=False)
     assert report["issues_after"] == []
     history = context.get_history_messages(normalize=True).get_messages_as_dict()
     assert history[0]["content"] == ""
@@ -736,7 +736,7 @@ def test_import_with_issues_after_repair_aborts_silently():
         ],
     }
 
-    report = agent.snapshot.import_portable_session(state, repair=True)
+    report = agent.snapshot.import_portable_session(state, repair=True, trusted=False)
     # After repair the orphan tool is dropped, leaving empty history
     # which should validate clean
     assert report["issues_after"] == []
@@ -754,7 +754,7 @@ def test_import_report_distinguishes_success_and_failure():
             {"role": "assistant", "content": "hello"},
         ],
     }
-    report_ok = agent_ok.snapshot.import_portable_session(good_state, repair=True)
+    report_ok = agent_ok.snapshot.import_portable_session(good_state, repair=True, trusted=False)
     assert report_ok["issues_after"] == []
 
     agent_bad, _ = _build_agent_with_context()
@@ -766,7 +766,7 @@ def test_import_report_distinguishes_success_and_failure():
             {"role": "tool", "content": "orphan", "tool_call_id": "call_orphan"},
         ],
     }
-    report_bad = agent_bad.snapshot.import_portable_session(bad_state, repair=False)
+    report_bad = agent_bad.snapshot.import_portable_session(bad_state, repair=False, trusted=False)
     assert report_bad["applied_repairs"] is False
     assert len(report_bad["issues_before"]) > 0
 

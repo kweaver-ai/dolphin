@@ -10,6 +10,8 @@ from dolphin.core import flags
 from dolphin.core.common.constants import (
     KEY_STATUS,
     KEY_HISTORY,
+    KEY_HISTORY_COMPACT_ON_PERSIST,
+    KEY_HISTORY_COMPACT_RECENT_TURNS,
     KEY_PENDING_TURN,
     PIN_MARKER,
 )
@@ -1934,6 +1936,84 @@ class BasicCodeBlock:
         )
         return []
 
+    def _is_history_compaction_enabled(self) -> bool:
+        """Check whether history compaction should run before persisting KEY_HISTORY."""
+        enabled = self.context.get_var_value(KEY_HISTORY_COMPACT_ON_PERSIST)
+        if isinstance(enabled, bool):
+            return enabled
+        if isinstance(enabled, (int, float)):
+            return bool(enabled)
+        if isinstance(enabled, str):
+            return enabled.strip().lower() in {"1", "true", "yes", "on"}
+        return False
+
+    def _get_history_compaction_recent_turns(self) -> int:
+        """Get configured recent-turn window for persisted history compaction."""
+        raw_value = self.context.get_var_value(KEY_HISTORY_COMPACT_RECENT_TURNS)
+        if raw_value is None:
+            return 3
+
+        try:
+            recent_turns = int(raw_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid history compaction recent_turns value: %s. Falling back to 3.",
+                raw_value,
+            )
+            return 3
+
+        if recent_turns < 1:
+            logger.warning(
+                "history compaction recent_turns must be >= 1, got %s. Falling back to 3.",
+                recent_turns,
+            )
+            return 3
+        return recent_turns
+
+    def _compact_history_for_persist(self, history_list: list[dict]) -> list[dict]:
+        """Compact old tool chains before persisting history when enabled."""
+        if not self._is_history_compaction_enabled():
+            return history_list
+
+        if not history_list:
+            return history_list
+
+        try:
+            from dolphin.core.context.history_projector import (
+                HistoryProjector,
+                ProjectionConfig,
+            )
+
+            normalized_for_projection: list[dict] = []
+            for msg in history_list:
+                if not isinstance(msg, dict):
+                    continue
+                normalized_msg = dict(msg)
+                metadata = dict(normalized_msg.get("metadata") or {})
+                if "pinned" in normalized_msg and "pinned" not in metadata:
+                    metadata["pinned"] = normalized_msg["pinned"]
+                if "source" in normalized_msg and "source" not in metadata:
+                    metadata["source"] = normalized_msg["source"]
+                if metadata:
+                    normalized_msg["metadata"] = metadata
+                normalized_for_projection.append(normalized_msg)
+
+            history_messages = Messages()
+            history_messages.extend_plain_messages(normalized_for_projection)
+            recent_turns = self._get_history_compaction_recent_turns()
+            projector = HistoryProjector(ProjectionConfig(recent_turns=recent_turns))
+            compacted = projector.project(history_messages).get_messages_as_dict()
+            logger.debug(
+                "History compaction applied before persist: %s -> %s messages (recent_turns=%s).",
+                len(history_list),
+                len(compacted),
+                recent_turns,
+            )
+            return compacted
+        except Exception as e:
+            logger.warning("Failed to compact history before persist: %s", e)
+            return history_list
+
     def _get_pending_turn(self) -> Optional[Dict[str, Any]]:
         """Get pending turn metadata if present and valid."""
         pending_turn = self.context.get_var_value(KEY_PENDING_TURN)
@@ -2060,7 +2140,8 @@ class BasicCodeBlock:
                 }
             )
 
-            self.context.set_variable(KEY_HISTORY, history_list)
+            history_to_persist = self._compact_history_for_persist(history_list)
+            self.context.set_variable(KEY_HISTORY, history_to_persist)
             self._clear_pending_turn()
             logger.debug("Cleanup: History variable updated.")
         elif pending_turn and not answer_content:

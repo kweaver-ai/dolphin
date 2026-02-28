@@ -27,12 +27,19 @@ def test_read_file_valid_utf8_no_warning(tmp_path):
     assert content == "hello世界"
 
 
-def test_read_file_missing_path_raises_runtime_error(tmp_path):
+def test_read_file_missing_path_returns_error_message(tmp_path):
     skillkit = SystemFunctionsSkillKit()
 
     missing_path = tmp_path / "missing.txt"
-    with pytest.raises(RuntimeError):
-        skillkit._read_file(str(missing_path))
+    result = skillkit._read_file(str(missing_path))
+    assert result.startswith("[ERROR] File not found:")
+
+
+def test_read_file_directory_returns_error_message(tmp_path):
+    skillkit = SystemFunctionsSkillKit()
+
+    result = skillkit._read_file(str(tmp_path))
+    assert result.startswith("[ERROR] Path is a directory")
 
 def test_read_file_normalizes_path_formats(tmp_path, monkeypatch):
     skillkit = SystemFunctionsSkillKit()

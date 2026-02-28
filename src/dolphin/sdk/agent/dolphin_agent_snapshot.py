@@ -141,14 +141,25 @@ class DolphinAgentSnapshot:
             state: Portable session state dict (will be deep-copied before mutation).
         """
         working = copy.deepcopy(state) if isinstance(state, dict) else {}
-        return self._repair_portable_session_inplace(working)
+        return self._repair_portable_session_inplace(working, _already_copied=True)
 
     def _repair_portable_session_inplace(
-        self, working: Dict[str, Any]
+        self, working: Dict[str, Any], *, _already_copied: bool = False,
+        _issues_before: Optional[List[Issue]] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Internal repair that mutates *working* in-place (caller owns the data)."""
+        """Internal repair that mutates *working* in-place (caller owns the data).
+
+        Args:
+            _already_copied: If True, skip deepcopy (caller already copied).
+            _issues_before: Pre-computed issues to avoid redundant validation.
+        """
+        if not _already_copied:
+            working = copy.deepcopy(working)
         report = RepairReport()
-        issues_before = self._validate_portable_session_issues(working)
+        if _issues_before is not None:
+            issues_before = _issues_before
+        else:
+            issues_before = self._validate_portable_session_issues(working)
         report.issues_before = [issue.to_dict() for issue in issues_before]
 
         if not isinstance(working.get("schema_version"), str):
@@ -293,38 +304,47 @@ class DolphinAgentSnapshot:
         return working, report.to_dict()
 
     def import_portable_session(
-        self, state: Dict[str, Any], *, repair: bool = True
+        self, state: Dict[str, Any], *, repair: bool = True, trusted: bool = True
     ) -> Dict[str, Any]:
         """Import portable session state into current agent context.
 
         The top-level session_id is authoritative; KEY_SESSION_ID in variables
         is skipped to avoid ambiguous overwrites.
+
+        Args:
+            state: Portable session state dict.
+            repair: When True (and trusted=False), attempt to repair validation issues.
+            trusted: When True, skip validation/deepcopy/repair for performance.
+                     Use for data from internal JSON deserialization with checksum
+                     verification. Set to False for untrusted external input.
         """
         context = self._get_context_or_raise()
         report = RestoreReport()
 
-        working_state = copy.deepcopy(state) if isinstance(state, dict) else {}
-        issues_before = self._validate_portable_session_issues(working_state)
-        report.issues_before = [issue.to_dict() for issue in issues_before]
+        if trusted:
+            working_state = state if isinstance(state, dict) else {}
+            self._normalize_history_tool_call_ids(working_state)
+        else:
+            working_state = copy.deepcopy(state) if isinstance(state, dict) else {}
+            issues_before = self._validate_portable_session_issues(working_state)
+            report.issues_before = [issue.to_dict() for issue in issues_before]
 
-        if issues_before and repair:
-            working_state, repair_report = self._repair_portable_session_inplace(
-                working_state
-            )
-            report.applied_repairs = bool(repair_report.get("applied"))
-            report.repaired = report.applied_repairs
-            report.dropped_fields.extend(repair_report.get("dropped_fields", []))
-        elif issues_before and not repair:
-            return report.to_dict()
+            if issues_before and repair:
+                working_state, repair_report = self._repair_portable_session_inplace(
+                    working_state, _already_copied=True, _issues_before=issues_before
+                )
+                report.applied_repairs = bool(repair_report.get("applied"))
+                report.repaired = report.applied_repairs
+                report.dropped_fields.extend(repair_report.get("dropped_fields", []))
+            elif issues_before and not repair:
+                return report.to_dict()
 
-        # Normalize tool_call_id -> id in assistant tool_calls so that
-        # downstream sanitize_openai_messages() can properly pair tool messages.
-        self._normalize_history_tool_call_ids(working_state)
+            self._normalize_history_tool_call_ids(working_state)
 
-        issues_after = self._validate_portable_session_issues(working_state)
-        report.issues_after = [issue.to_dict() for issue in issues_after]
-        if issues_after:
-            return report.to_dict()
+            issues_after = self._validate_portable_session_issues(working_state)
+            report.issues_after = [issue.to_dict() for issue in issues_after]
+            if issues_after:
+                return report.to_dict()
 
         session_id = working_state.get("session_id") or ""
         context.set_session_id(str(session_id))

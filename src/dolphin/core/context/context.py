@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
 from dolphin.core.common.enums import MessageRole, SkillInfo, Messages, SkillType
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.common.constants import (
+    KEY_HISTORY_COMPACT_RECENT_TURNS,
     KEY_MAX_ANSWER_CONTENT_LENGTH,
     KEY_SESSION_ID,
     KEY_USER_ID,
@@ -289,8 +290,19 @@ class Context:
             raise ValueError(f"Invalid history format: {type(history_raw)}, expected list or Messages object.")
 
         if projected and result.get_messages():
-            from dolphin.core.context.history_projector import HistoryProjector
-            result = HistoryProjector().project(result)
+            from dolphin.core.context.history_projector import (
+                HistoryProjector,
+                ProjectionConfig,
+            )
+            recent_turns = self.get_var_value(KEY_HISTORY_COMPACT_RECENT_TURNS)
+            if recent_turns is not None:
+                try:
+                    config = ProjectionConfig(recent_turns=int(recent_turns))
+                except (TypeError, ValueError):
+                    config = None
+            else:
+                config = None
+            result = HistoryProjector(config).project(result)
 
         return result
 

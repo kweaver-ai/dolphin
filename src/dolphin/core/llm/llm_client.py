@@ -5,6 +5,8 @@ from typing import Optional
 
 from dolphin.core.common.exceptions import ModelException
 import aiohttp
+import httpcore
+import openai
 
 from dolphin.core.common.enums import Messages
 from dolphin.core.config.global_config import TypeAPI
@@ -1204,6 +1206,10 @@ class LLMClient:
                 TimeoutError,
                 ValueError,
                 RuntimeError,
+                OSError,
+                httpcore.RemoteProtocolError,
+                openai.APIConnectionError,
+                openai.APITimeoutError,
             ) as e:
                 # Check if this is a multimodal-related error
                 error_str = str(e)

@@ -77,7 +77,7 @@ class SimpleTokenizer(BaseTokenizer):
         """
         if not text:
             return 0
-        return int(len(text) / self.avg_chars_per_token)
+        return max(1, int(len(text) / self.avg_chars_per_token))
 
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count based on character length.
@@ -92,7 +92,7 @@ class SimpleTokenizer(BaseTokenizer):
         """
         if not text:
             return 0
-        return int(len(text) / self.avg_chars_per_token)
+        return max(1, int(len(text) / self.avg_chars_per_token))
 
 
 class TiktokenTokenizer(BaseTokenizer):

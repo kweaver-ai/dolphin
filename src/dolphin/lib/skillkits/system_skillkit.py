@@ -175,6 +175,10 @@ class SystemFunctionsSkillKit(Skillkit):
             str: File content
         """
         file_path = _normalize_path(file_path)
+        if not os.path.exists(file_path):
+            return f"[ERROR] File not found: {file_path}"
+        if os.path.isdir(file_path):
+            return f"[ERROR] Path is a directory, not a file: {file_path}"
         try:
             with open(file_path, "rb") as f:
                 data = f.read()
