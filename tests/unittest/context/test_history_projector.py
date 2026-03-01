@@ -165,6 +165,19 @@ class TestToolChainTrimming(unittest.TestCase):
             self.assertNotEqual(m.role, MessageRole.TOOL)
             self.assertFalse(m.has_tool_calls())
 
+    def test_recent_turns_zero_trims_all_tool_chains(self):
+        """With recent_turns=0, all turns are projected in trimmed mode."""
+        history = self._build_history()
+        proj = HistoryProjector(ProjectionConfig(recent_turns=0))
+        result = proj.project(history)
+
+        msgs = result.get_messages()
+        # 3 old/trimmed turns: user + assistant_final each.
+        self.assertEqual(len(msgs), 6)
+        for m in msgs:
+            self.assertNotEqual(m.role, MessageRole.TOOL)
+            self.assertFalse(m.has_tool_calls())
+
 
 # ─── Test: tool_calls + tool pairs never split ────────────────────────────
 
@@ -819,6 +832,10 @@ class TestProjectionConfig(unittest.TestCase):
     def test_custom_recent_turns(self):
         config = ProjectionConfig(recent_turns=5)
         self.assertEqual(config.recent_turns, 5)
+
+    def test_zero_recent_turns(self):
+        config = ProjectionConfig(recent_turns=0)
+        self.assertEqual(config.recent_turns, 0)
 
 
 if __name__ == "__main__":

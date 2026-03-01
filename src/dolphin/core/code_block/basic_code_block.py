@@ -1962,9 +1962,9 @@ class BasicCodeBlock:
             )
             return 3
 
-        if recent_turns < 1:
+        if recent_turns < 0:
             logger.warning(
-                "history compaction recent_turns must be >= 1, got %s. Falling back to 3.",
+                "history compaction recent_turns must be >= 0, got %s. Falling back to 3.",
                 recent_turns,
             )
             return 3
