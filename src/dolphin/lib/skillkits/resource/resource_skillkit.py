@@ -372,8 +372,10 @@ class ResourceSkillkit(Skillkit):
     def _load_resource_skill(self, skill_name: str, mode: str = "short", **kwargs) -> str:
         """Load a resource skill in short or full mode.
 
-        Default behavior is short mode for lower context overhead.
-        Use mode="full" to load complete SKILL.md instructions.
+        Default is short mode to reduce context overhead — when many skills
+        are registered, preloading full content for each would consume
+        significant context budget.  The LLM can request mode="full" for
+        skills it actually needs.
 
         Args:
             skill_name (str): Name of the skill to load

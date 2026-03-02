@@ -703,7 +703,6 @@ class LocalExecutor(EnvExecutor):
                     ("math", _math_mod),
                     ("re", _re_mod),
                     ("datetime", _datetime_mod),
-                    ("os", os),
                 ]:
                     namespace.setdefault(_mod_name, _mod_obj)
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import inspect
 import json
 from typing import Any, Callable, List, Tuple, Dict, Optional

@@ -304,7 +304,7 @@ class DolphinAgentSnapshot:
         return working, report.to_dict()
 
     def import_portable_session(
-        self, state: Dict[str, Any], *, repair: bool = True, trusted: bool = True
+        self, state: Dict[str, Any], *, repair: bool = True, trusted: bool = False
     ) -> Dict[str, Any]:
         """Import portable session state into current agent context.
 

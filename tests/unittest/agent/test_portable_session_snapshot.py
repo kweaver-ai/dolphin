@@ -269,6 +269,25 @@ def test_import_portable_session_repair_false_keeps_issues():
     assert context.get_session_id() == old_session_id
 
 
+def test_import_portable_session_default_trusted_false_repairs_invalid_history_type():
+    """Default import path should validate and repair untrusted external snapshots."""
+    agent, context = _build_agent_with_context()
+
+    bad_state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_repaired_default",
+        "variables": {"foo": "bar"},
+        "history_messages": "invalid_history_type",
+    }
+
+    report = agent.snapshot.import_portable_session(bad_state, repair=True)
+    assert report["applied_repairs"] is True
+    assert report["issues_after"] == []
+    assert context.get_session_id() == "sess_repaired_default"
+    assert context.get_var_value("foo") == "bar"
+    assert context.get_history_messages(normalize=True).get_messages_as_dict() == []
+
+
 def test_import_portable_session_skips_session_id_in_variables():
     """Top-level session_id is authoritative; KEY_SESSION_ID in variables is skipped."""
     agent, context = _build_agent_with_context()

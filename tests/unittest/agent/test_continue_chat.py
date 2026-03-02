@@ -453,8 +453,11 @@ class TestDeltaModeIntegrationWithContinueChat:
     """Integration tests for delta mode with continue_chat."""
 
     @pytest.mark.asyncio
-    async def test_continue_chat_delta_mode_adds_delta_field(self, disable_explore_v2, dolphin_agent):
-        """continue_chat with stream_mode='delta' should add delta field."""
+    async def test_continue_chat_delta_mode_yields_results(self, disable_explore_v2, dolphin_agent):
+        """continue_chat with stream_mode='delta' should yield dict results.
+
+        TODO: add assertions verifying that delta fields are present in results.
+        """
         agent = dolphin_agent(content="/prompt/ test -> result", name="test_delta_integration")
 
         call_count = [0]

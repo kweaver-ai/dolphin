@@ -297,7 +297,15 @@ class Context:
             recent_turns = self.get_var_value(KEY_HISTORY_COMPACT_RECENT_TURNS)
             if recent_turns is not None:
                 try:
-                    config = ProjectionConfig(recent_turns=int(recent_turns))
+                    parsed_recent_turns = int(recent_turns)
+                    if parsed_recent_turns < 0:
+                        logger.warning(
+                            "history projection recent_turns must be >= 0, got %s. Falling back to 3.",
+                            parsed_recent_turns,
+                        )
+                        config = ProjectionConfig()
+                    else:
+                        config = ProjectionConfig(recent_turns=parsed_recent_turns)
                 except (TypeError, ValueError):
                     config = None
             else:

@@ -776,6 +776,25 @@ class TestGetHistoryProjected(unittest.TestCase):
         # Recent turns (3,4,5): 4 msgs each = 12
         self.assertEqual(len(msgs), 16)
 
+    def test_projected_negative_recent_turns_falls_back_to_default(self):
+        """Negative recent_turns should fallback to default 3 for projection."""
+        ctx = Context()
+        ctx.set_variable(KEY_HISTORY_COMPACT_RECENT_TURNS, -1)
+        history_list = []
+        for i in range(1, 6):
+            tc = [{"id": f"call_{i}", "type": "function",
+                   "function": {"name": f"t{i}", "arguments": "{}"}}]
+            history_list.extend([
+                _user(f"Q{i}"),
+                _assistant_tc(f"think_{i}", tc),
+                _tool(f"res_{i}", f"call_{i}"),
+                _assistant(f"A{i}"),
+            ])
+        ctx.set_variable(KEY_HISTORY, history_list)
+
+        projected = ctx.get_history_messages(projected=True)
+        self.assertEqual(len(projected.get_messages()), 16)
+
     def test_projected_false_returns_full(self):
         """projected=False should not trim anything."""
         ctx = Context()

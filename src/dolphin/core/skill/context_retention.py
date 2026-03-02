@@ -12,9 +12,10 @@ class ContextRetentionMode(Enum):
 
 
 # Default max chars kept in LLM context for SUMMARY mode (head + tail).
-# Balances context budget vs. avoiding repeated reads of truncated content.
+# Set to 8000 to reduce repeated full-content reads (e.g. _bash output),
+# at the cost of higher per-tool token usage.  Oversized results can
+# still be fetched via _get_cached_result_detail().
 # Reference: Claude Code ~30k chars, Codex CLI ~10KB, Cursor ~250 lines.
-# Oversized results can still be fetched via _get_cached_result_detail().
 DEFAULT_SUMMARY_MAX_LENGTH = 8000
 
 
