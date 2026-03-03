@@ -240,7 +240,7 @@ class ResourceSkillkit(Skillkit):
         
         if cached_content:
             full_content = path_info + cached_content.get_full_content()
-            full_content = self._substitute_variables(full_content)
+            full_content = self._substitute_variables(full_content, extra_vars={"SKILL_DIR": str(skill_dir)})
             return truncate_content(full_content, self.config.max_content_tokens)
 
         # Load from disk
@@ -253,7 +253,7 @@ class ResourceSkillkit(Skillkit):
 
         # Truncate if necessary - include path info at the beginning
         full_content = path_info + content.get_full_content()
-        full_content = self._substitute_variables(full_content)
+        full_content = self._substitute_variables(full_content, extra_vars={"SKILL_DIR": str(skill_dir)})
         return truncate_content(full_content, self.config.max_content_tokens)
 
     def load_skill_short(self, name: str) -> str:
@@ -326,9 +326,11 @@ class ResourceSkillkit(Skillkit):
         # Format with file info header
         return f"# {resource_path}\n\n```\n{content}\n```"
 
-    def _substitute_variables(self, content: str) -> str:
-        """Replace $VAR_NAME placeholders with values from config.variables."""
-        variables = self.config.variables
+    def _substitute_variables(self, content: str, extra_vars: dict = None) -> str:
+        """Replace $VAR_NAME placeholders with values from config.variables and extra_vars."""
+        variables = dict(self.config.variables) if self.config.variables else {}
+        if extra_vars:
+            variables.update(extra_vars)
         if not variables:
             return content
         for key, value in variables.items():
@@ -370,8 +372,10 @@ class ResourceSkillkit(Skillkit):
     def _load_resource_skill(self, skill_name: str, mode: str = "short", **kwargs) -> str:
         """Load a resource skill in short or full mode.
 
-        Default behavior is short mode for lower context overhead.
-        Use mode="full" to load complete SKILL.md instructions.
+        Default is short mode to reduce context overhead — when many skills
+        are registered, preloading full content for each would consume
+        significant context budget.  The LLM can request mode="full" for
+        skills it actually needs.
 
         Args:
             skill_name (str): Name of the skill to load

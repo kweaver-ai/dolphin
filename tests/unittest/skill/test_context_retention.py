@@ -3,6 +3,7 @@
 import pytest
 from dolphin.core.skill.context_retention import (
     ContextRetentionMode,
+    DEFAULT_SUMMARY_MAX_LENGTH,
     SkillContextRetention,
     SummaryContextStrategy,
     FullContextStrategy,
@@ -38,7 +39,7 @@ class TestSkillContextRetention:
         """Test default configuration values."""
         config = SkillContextRetention()
         assert config.mode == ContextRetentionMode.FULL
-        assert config.max_length == 2000
+        assert config.max_length == DEFAULT_SUMMARY_MAX_LENGTH
         assert config.detail_hint_min_omitted == 0
         assert config.summary_prompt is None
         assert config.ttl_turns == -1

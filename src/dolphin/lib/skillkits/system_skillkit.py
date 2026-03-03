@@ -8,6 +8,7 @@ import re
 import time
 from typing import Any, List, Union, Optional, Set
 
+from dolphin.core.skill.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
 from dolphin.core.skill.skillkit import SkillFunction, Skillkit
 
 """System function configuration mapping:
@@ -61,7 +62,7 @@ def _normalize_path(value: Any) -> str:
 
 class SystemFunctionsSkillKit(Skillkit):
     _DEFAULT_CACHED_RESULT_LIMIT = 2000
-    _MAX_CACHED_RESULT_LIMIT = 5000
+    _MAX_CACHED_RESULT_LIMIT = 20000
     _MAX_REFERENCE_ID_CANDIDATES = 10
     _SKILL_REFERENCE_HINT_PATTERN = re.compile(
         r"_get_cached_result_detail\(\s*['\"](?P<id>[^'\"]+)['\"]\s*,\s*scope\s*=\s*['\"]skill['\"]"
@@ -163,6 +164,7 @@ class SystemFunctionsSkillKit(Skillkit):
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
         return file_path
 
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
     def _read_file(self, file_path: str, **kwargs) -> str:
         """Read file
 
@@ -173,6 +175,10 @@ class SystemFunctionsSkillKit(Skillkit):
             str: File content
         """
         file_path = _normalize_path(file_path)
+        if not os.path.exists(file_path):
+            return f"[ERROR] File not found: {file_path}"
+        if os.path.isdir(file_path):
+            return f"[ERROR] Path is a directory, not a file: {file_path}"
         try:
             with open(file_path, "rb") as f:
                 data = f.read()
@@ -188,6 +194,7 @@ class SystemFunctionsSkillKit(Skillkit):
         except Exception as e:
             raise RuntimeError(f"Failed to read file: {file_path}: {e}") from e
 
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
     def _read_folder(
         self,
         folder_path: str,
@@ -211,31 +218,33 @@ class SystemFunctionsSkillKit(Skillkit):
         """
         folder_path = _normalize_path(folder_path)
         if not os.path.exists(folder_path):
-            raise FileNotFoundError(f"Folder not found: {folder_path}")
+            return f"Error: Folder not found: {folder_path}"
 
         if not os.path.isdir(folder_path):
-            raise ValueError(f"Path is not a directory: {folder_path}")
+            return f"Error: Path is not a directory: {folder_path}"
 
         # Handling the extension parameter
         if extensions is None:
             # If no extension is specified, read all files
             pattern = "*"
+            search_pattern = os.path.join(folder_path, pattern)
+            files = glob.glob(search_pattern)
         elif isinstance(extensions, str):
             # Single extension
             pattern = f"*.{extensions}"
+            search_pattern = os.path.join(folder_path, pattern)
+            files = glob.glob(search_pattern)
         elif isinstance(extensions, list):
-            # Multiple extensions, using glob's brace syntax
-            if len(extensions) == 1:
-                pattern = f"*.{extensions[0]}"
-            else:
-                ext_pattern = "{" + ",".join(extensions) + "}"
-                pattern = f"*.{ext_pattern}"
+            # Multiple extensions - iterate and collect files for each extension
+            # Note: Python glob doesn't support bash brace expansion like *.{md,py}
+            pattern = f"*.{{{','.join(extensions)}}}"
+            files = []
+            for ext in extensions:
+                ext_pattern = f"*.{ext}"
+                search_pattern = os.path.join(folder_path, ext_pattern)
+                files.extend(glob.glob(search_pattern))
         else:
             raise ValueError("extensions must be None, str, or List[str]")
-
-        # Get matching files
-        search_pattern = os.path.join(folder_path, pattern)
-        files = glob.glob(search_pattern)
 
         # Filter out files (excluding directories) and sort them
         files = [f for f in files if os.path.isfile(f)]
@@ -282,6 +291,7 @@ class SystemFunctionsSkillKit(Skillkit):
 
         return "\n\n".join(result_parts)
 
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
     def _grep(
         self,
         target_path: str,
@@ -318,7 +328,7 @@ class SystemFunctionsSkillKit(Skillkit):
             raise ValueError("before and after must be non-negative integers")
 
         if not os.path.exists(target_path):
-            raise FileNotFoundError(f"Path not found: {target_path}")
+            return f"Error: Path not found: {target_path}"
 
         if isinstance(file_extensions, str):
             file_exts = [file_extensions]

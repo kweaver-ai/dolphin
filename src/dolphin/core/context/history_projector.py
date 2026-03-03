@@ -128,6 +128,9 @@ class HistoryProjector:
         Recent ``config.recent_turns`` turns are kept in full (including the
         complete tool-call chain).  Earlier turns are trimmed to
         user + pinned + assistant_final.
+
+        When ``recent_turns == 0``, all turns are treated as old turns and
+        projected in trimmed mode.
         """
         turns = _parse_turns(history)
 
@@ -135,8 +138,12 @@ class HistoryProjector:
             return history.copy()
 
         n = self.config.recent_turns
-        old_turns = turns[:-n] if n and len(turns) > n else []
-        recent_turns = turns[-n:] if n else turns
+        if n == 0:
+            old_turns = turns
+            recent_turns = []
+        else:
+            old_turns = turns[:-n] if len(turns) > n else []
+            recent_turns = turns[-n:]
 
         result = Messages()
 

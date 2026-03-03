@@ -126,14 +126,13 @@ def truncate_to_tokens(
 
     words = text_content.split()
     result = []
-    current_tokens = 0
+    candidate = ""
 
     for word in words:
-        word_tokens = tokenizer_service.count_tokens(word)
-
-        if current_tokens + word_tokens > max_tokens:
+        next_candidate = (candidate + " " + word) if candidate else word
+        if tokenizer_service.count_tokens(next_candidate) > max_tokens:
             break
         result.append(word)
-        current_tokens += word_tokens
+        candidate = next_candidate
 
     return " ".join(result)

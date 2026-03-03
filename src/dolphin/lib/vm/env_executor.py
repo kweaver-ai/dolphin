@@ -703,7 +703,6 @@ class LocalExecutor(EnvExecutor):
                     ("math", _math_mod),
                     ("re", _re_mod),
                     ("datetime", _datetime_mod),
-                    ("os", os),
                 ]:
                     namespace.setdefault(_mod_name, _mod_obj)
 
@@ -772,7 +771,20 @@ class LocalExecutor(EnvExecutor):
         except Exception as e:
             import traceback
             logger.error(f"Error executing local Python: {e}")
-            return f"Error: {str(e)}\n{traceback.format_exc()}"
+            hint = ""
+            if isinstance(e, NameError):
+                hint = (
+                    "\n\n[Hint] A NameError means a variable or function is not defined "
+                    "in the execution scope. You must define the function in your code "
+                    "or import the required module explicitly."
+                )
+            elif isinstance(e, ModuleNotFoundError):
+                hint = (
+                    "\n\n[Hint] The required module is not installed. "
+                    "Use a shell command to install it (e.g. pip install <package>) "
+                    "before importing."
+                )
+            return f"Error: {str(e)}\n{traceback.format_exc()}{hint}"
     
     def _get_enhanced_env(self) -> dict:
         """Get environment with NVM/Node.js paths added."""

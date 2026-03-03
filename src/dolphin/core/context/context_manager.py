@@ -21,10 +21,23 @@ from dolphin.core.message.compressor import (
     LevelStrategy,
 )
 
-# Deprecated: SlidingWindowStrategy has been removed.  This alias keeps
+# Deprecated: SlidingWindowStrategy has been removed.  This wrapper keeps
 # existing code that imports it from this module working at runtime, but
 # new code should use TruncationStrategy or LevelStrategy instead.
-SlidingWindowStrategy = TruncationStrategy
+class SlidingWindowStrategy(TruncationStrategy):
+    """Deprecated: use TruncationStrategy or LevelStrategy instead."""
+
+    def __init__(self, *args, **kwargs):
+        if args or kwargs:
+            import warnings
+
+            warnings.warn(
+                "SlidingWindowStrategy no longer accepts arguments. "
+                "Use TruncationStrategy or LevelStrategy instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        super().__init__()
 
 if TYPE_CHECKING:
     from dolphin.core.config.global_config import (

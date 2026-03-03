@@ -37,6 +37,8 @@ KEY_MAX_ANSWER_CONTENT_LENGTH = "_max_answer_len"
 KEY_STATUS = "_status"
 KEY_PREVIOUS_STATUS = "_previous_status"
 KEY_HISTORY = "_history"
+KEY_HISTORY_COMPACT_ON_PERSIST = "_history_compact_on_persist"
+KEY_HISTORY_COMPACT_RECENT_TURNS = "_history_compact_recent_turns"
 KEY_PENDING_TURN = "_pending_turn"
 # Internal updates key for carrying user interrupt recovery input.
 # This is consumed by resume flow and should not be persisted as a user variable.
@@ -150,7 +152,10 @@ SEARCH_TIMEOUT = 10  # seconds for search API calls
 
 SEARCH_RETRY_COUNT = 2  # number of retries for failed search API calls
 
-MAX_SKILL_CALL_TIMES = 500
+# Upper bound for tool calls in a single exploration turn.
+# Production sessions rarely exceed 50; 300 provides ample headroom
+# while catching runaway loops before they exhaust context or tokens.
+MAX_SKILL_CALL_TIMES = 300
 
 # Plan orchestration tools (used for task management in plan mode)
 # These tools should be excluded from subtask contexts to prevent infinite recursion.
@@ -175,6 +180,11 @@ POLLING_TOOLS = frozenset({
 # This only applies when an active plan exists and the agent is not using plan-related tools
 # (e.g., _wait / _check_progress). Set to 0 to disable.
 MAX_PLAN_SILENT_ROUNDS = 50
+
+# Plan mode: maximum consecutive rounds where the agent uses plan tools
+# (e.g., _check_progress, _wait) but no actual task status progress is observed.
+# Prevents unbounded polling loops when tasks are stuck. Set to 0 to disable.
+MAX_PLAN_POLLING_ROUNDS = 100
 
 # Compression constants
 MAX_ANSWER_COMPRESSION_LENGTH = 100

@@ -154,7 +154,7 @@ class SkillLoader:
             frontmatter, _ = self._parse_frontmatter(content)
 
             if not frontmatter:
-                logger.warning(f"No frontmatter found in {skill_md}")
+                logger.debug(f"No frontmatter found in {skill_md}")
                 return None
 
             # Validate frontmatter

@@ -16,7 +16,7 @@ from dolphin.core.skill.skillkit import Skillkit
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.lib.vm.env_executor import EnvExecutor, LocalExecutor, create_executor
 from dolphin.core.logging.logger import get_logger
-from dolphin.core.skill.context_retention import context_retention
+from dolphin.core.skill.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
 
 
 logger = get_logger("env_skillkit")
@@ -99,7 +99,7 @@ class EnvSkillkit(Skillkit):
             self._executor = LocalExecutor()
         return self._executor
     
-    @context_retention(mode="summary", max_length=1200, detail_hint_min_omitted=1200)
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
     def _bash(self, cmd: str = "", **kwargs) -> str:
         """Execute a Bash command in the configured environment.
         
@@ -176,7 +176,7 @@ class EnvSkillkit(Skillkit):
         
         return executor.exec_bash(cmd, **kwargs)
     
-    @context_retention(mode="summary", max_length=2000)
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH)
     def _python(self, cmd: str, **kwargs) -> str:
         """Execute Python code in the configured environment.
         

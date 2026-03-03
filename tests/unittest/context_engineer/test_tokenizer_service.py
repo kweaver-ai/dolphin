@@ -115,6 +115,107 @@ class TestTokenizerService:
             TokenizerService(backend="invalid_backend")
 
 
+class TestSimpleTokenizerConsistency:
+    """Bug 2: SimpleTokenizer.count_tokens (word-based) can disagree with
+    estimate_tokens (char-based) by orders of magnitude on certain inputs.
+
+    The compressor uses estimate_tokens for fast checks and count_tokens for
+    "precise" counting near the budget boundary. A large discrepancy causes
+    the compressor to skip compression when it should compress.
+    """
+
+    @pytest.mark.parametrize(
+        "text,label",
+        [
+            ("a" * 1000, "repeated single char"),
+            ("abcdefghij" * 100, "repeated pattern no spaces"),
+            ("x" * 500 + " " + "y" * 500, "two long words"),
+            (
+                '{"role":"user","content":"' + "z" * 500 + '"}',
+                "JSON with long string value",
+            ),
+            ("这是一段中文测试" * 50, "repeated Chinese text no spaces"),
+        ],
+    )
+    def test_simple_tokenizer_count_vs_estimate_consistency(self, text, label):
+        """count_tokens and estimate_tokens must agree within 2x.
+
+        Current bug: count_tokens uses regex \\w+|[^\\w\\s] word splitting,
+        so "a" * 1000 → 1 token. estimate_tokens uses len/4.0 → 250 tokens.
+        """
+        tokenizer = SimpleTokenizer()
+        count = tokenizer.count_tokens(text)
+        estimate = tokenizer.estimate_tokens(text)
+
+        # Neither should be zero for non-empty text
+        assert count > 0, f"count_tokens returned 0 for '{label}'"
+        assert estimate > 0, f"estimate_tokens returned 0 for '{label}'"
+
+        ratio = max(count, estimate) / max(min(count, estimate), 1)
+        assert ratio <= 2.0, (
+            f"SimpleTokenizer count/estimate mismatch for '{label}': "
+            f"count={count}, estimate={estimate}, ratio={ratio:.1f}x. "
+            f"These methods must be consistent — the compressor relies on both."
+        )
+
+    def test_precise_count_does_not_contradict_fast_estimate(self):
+        """When _should_use_precise_count triggers, the precise count must
+        not wildly disagree with the fast estimate.
+
+        Current bug: near the budget boundary (ratio in [0.85, 1.05]),
+        _count_tokens_precise returns ~2K while estimate_tokens returns ~107K
+        because SimpleTokenizer.count_tokens word-splits long continuous content.
+        """
+        from dolphin.core.message.compressor import TruncationStrategy
+        from dolphin.core.common.enums import Messages, MessageRole
+        from dolphin.core.context.context import Context
+        from dolphin.core.config.global_config import GlobalConfig, ContextConstraints
+
+        ctx = Context(config=GlobalConfig(), verbose=False, is_cli=False)
+        strategy = TruncationStrategy()
+
+        # Build messages whose fast estimate is near the budget boundary
+        # Budget = 100000 - 10000 = 90000. We want estimate ~85K-95K.
+        msgs = Messages()
+        msgs.add_message(role=MessageRole.SYSTEM, content="System prompt here")
+        msgs.add_message(role=MessageRole.USER, content="User query")
+        # ~65K chars → ~65K * 1.3 ≈ 84.5K tokens (char-based estimate)
+        msgs.add_message(role=MessageRole.ASSISTANT, content="a " * 32500)
+
+        constraints = ContextConstraints(
+            max_input_tokens=100000,
+            reserve_output_tokens=10000,
+            preserve_system=True,
+        )
+        budget = constraints.max_input_tokens - constraints.reserve_output_tokens
+
+        fast_estimate = strategy.estimate_tokens(msgs)
+        # Verify we're in the "precise" boundary zone
+        ratio = fast_estimate / budget
+        assert 0.80 <= ratio <= 1.10, (
+            f"Test setup: fast_estimate={fast_estimate}, budget={budget}, "
+            f"ratio={ratio:.2f} — not in boundary zone, adjust test content"
+        )
+
+        # Now check precise count
+        precise_count = strategy._count_tokens_precise(ctx, msgs)
+        assert precise_count is not None, "Precise count returned None"
+
+        mismatch_ratio = max(fast_estimate, precise_count) / max(
+            min(fast_estimate, precise_count), 1
+        )
+        # The fast estimate uses CHINESE_CHAR_TO_TOKEN_RATIO (1.3 tokens/char)
+        # while SimpleTokenizer uses avg_chars_per_token=4.0 (0.25 tokens/char).
+        # This inherent ~5x gap exists for pure English content.  For Chinese
+        # text the gap narrows.  We tolerate up to 6x here; the critical fix
+        # is that the old word-splitting bug (250x mismatch) is gone.
+        assert mismatch_ratio <= 6.0, (
+            f"Precise count ({precise_count}) disagrees with fast estimate "
+            f"({fast_estimate}) by {mismatch_ratio:.1f}x. The compressor "
+            f"would use the precise count and skip needed compression."
+        )
+
+
 class TestTiktokenTokenizer:
     """Test cases for TiktokenTokenizer."""
 

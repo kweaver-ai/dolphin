@@ -265,14 +265,20 @@ def test_whitespace_pattern_not_false_positive():
     assert len(content) > MIN_LENGTH_TO_DETECT_DUPLICATE_OUTPUT
 
     recent = content[-50:]
-    assert recent.strip() == "", "Pattern should be pure whitespace"
+    # This assertion mirrors the production guard in
+    # LLMClient.stream_generate_with_compression (llm_client.py):
+    #   if not recent.strip(): yield chunk; continue
+    # A whitespace-only pattern is skipped before count_overlapping_occurrences
+    # is ever called, so high match counts below are harmless in production.
+    assert recent.strip() == "", "Pattern should be pure whitespace (skipped by production guard)"
 
     previous = content[:-50]
     count = count_overlapping_regex(previous, recent)
 
-    # Without the fix this would be a huge number; with the fix, detection is skipped.
-    # Here we verify the count IS high, proving the false positive scenario exists.
+    # Without the production guard this count would trigger duplicate detection.
+    # Here we verify the count IS high, proving the false-positive scenario exists
+    # and justifying the whitespace skip in the streaming loop.
     assert count > 50, (
         f"Whitespace pattern should match many times in padded table (got {count}), "
-        "confirming this is a false-positive scenario that the fix must skip"
+        "confirming this is a false-positive scenario that the production guard skips"
     )

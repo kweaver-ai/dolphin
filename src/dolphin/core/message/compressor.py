@@ -147,7 +147,10 @@ class CompressionStrategy(ABC):
             elif (
                 msg.role == MessageRole.USER
                 and idx == latest_user_index
-                and idx == last_non_system_index
+                # NOTE: the old code also required `idx == last_non_system_index`,
+                # which broke agentic loops where assistant/tool messages follow
+                # the latest user message. Removed so the current user query is
+                # always preserved regardless of what comes after it.
             ):
                 latest_user_message.add_message(content=msg)
             else:
@@ -723,7 +726,90 @@ class MessageCompressor:
                 f"(ratio: {result.compression_ratio:.2f})"
             )
 
+            # Persist compressed history back to the HISTORY bucket so that
+            # subsequent agentic loop rounds assemble from the compressed base
+            # instead of the original uncompressed history.  Without this,
+            # bucket reassembly defeats compression (Bug #3).
+            self._persist_compressed_history(result.compressed_messages)
+
         return result
+
+    def _persist_compressed_history(self, compressed_messages: Messages):
+        """Persist compressed messages back to buckets to prevent monotonic
+        context growth on bucket reassembly.
+
+        After truncation, the compressed messages are:
+            [system...] [first_user] [...surviving history + scratchpad...] [latest_user]
+
+        The surviving history+scratchpad content (between first_user and
+        latest_user) is written back to HISTORY, and SCRATCHPAD is cleared
+        to avoid double-counting (its surviving content is now in HISTORY).
+
+        Next round's assembly will be:
+            SYSTEM + HISTORY(compressed) + QUERY + SCRATCHPAD(new only)
+        """
+        if self.context is None or self.context.context_manager is None:
+            return
+
+        # Deferred import to avoid circular dependency: settings → context → compressor
+        from dolphin.core.context_engineer.config.settings import BuildInBucket
+
+        history_bucket = BuildInBucket.HISTORY.value
+        scratchpad_bucket = BuildInBucket.SCRATCHPAD.value
+
+        if not self.context.context_manager.has_bucket(history_bucket):
+            return
+
+        # Extract non-system messages
+        non_system = [m for m in compressed_messages if m.role != MessageRole.SYSTEM]
+        if len(non_system) < 2:
+            return
+
+        # Find the latest user message (at the end after compression)
+        latest_user_idx = -1
+        for i in range(len(non_system) - 1, -1, -1):
+            if non_system[i].role == MessageRole.USER:
+                latest_user_idx = i
+                break
+
+        if latest_user_idx < 0:
+            return
+
+        # Split non-system messages around the latest user message:
+        #   before_user  → persisted to HISTORY (prior conversation turns)
+        #   after_user   → persisted to SCRATCHPAD (current turn's tool context)
+        #
+        # In multi-user sessions: latest_user is the current query, messages
+        # before it are older turns (→ HISTORY), messages after it are the
+        # current agentic loop's tool calls (→ SCRATCHPAD).
+        #
+        # In single-user sessions (latest_user_idx == 0): before_user is
+        # empty, and ALL assistant/tool messages are after the user message.
+        # These must go into SCRATCHPAD to survive re-assembly.
+        history_messages = Messages()
+        for msg in non_system[:latest_user_idx]:
+            history_messages.add_message(content=msg)
+
+        scratchpad_messages = Messages()
+        for msg in non_system[latest_user_idx + 1:]:
+            scratchpad_messages.add_message(content=msg)
+
+        try:
+            self.context.set_history_bucket(history_messages)
+            # Replace SCRATCHPAD with the compressed surviving tail.
+            # This both prevents monotonic growth (old uncompressed content
+            # is replaced) and preserves current-turn tool context.
+            if self.context.context_manager.has_bucket(scratchpad_bucket):
+                self.context.set_messages_batch(
+                    scratchpad_messages, bucket=scratchpad_bucket
+                )
+            logger.debug(
+                f"Persisted {len(history_messages)} compressed messages "
+                f"to {history_bucket}, {len(scratchpad_messages)} to "
+                f"{scratchpad_bucket}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to persist compressed history: {e}")
 
     def register_strategy(self, name: str, strategy: CompressionStrategy):
         """Register a new compression strategy"""

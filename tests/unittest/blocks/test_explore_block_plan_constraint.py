@@ -10,6 +10,7 @@ from dolphin.core.code_block.skill_call_deduplicator import DefaultSkillCallDedu
 from dolphin.core.task_registry import Task, TaskStatus
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.common.constants import MAX_SKILL_CALL_TIMES
+from dolphin.core.common.enums import StreamItem
 
 
 class TestExploreBlockPlanConstraint:
@@ -184,3 +185,269 @@ class TestExploreBlockPlanConstraint:
         block.should_stop_exploration = False
         block.times = 0
         assert await block._should_continue_explore() is True
+
+    # ===================== Bug 1: should_stop_exploration signal integrity =====================
+
+    @pytest.mark.asyncio
+    async def test_no_tool_call_sets_should_stop_true_even_with_active_plan(self):
+        """After _handle_new_tool_call with no tool calls and active plan,
+        should_stop_exploration must be True (not overridden to False)."""
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
+
+        block = ExploreBlock(context=context)
+        block.model = "gpt-4"
+        block.content = "test"
+        block.system_prompt = None
+        block.output_var = "result"
+
+        with patch.object(block, 'llm_chat_stream') as mock_llm:
+            stream_item = StreamItem()
+            stream_item.answer = "Waiting..."
+            stream_item.tool_calls = []
+
+            async def mock_stream(*args, **kwargs):
+                yield stream_item
+
+            mock_llm.side_effect = mock_stream
+
+            async for _ in block._handle_new_tool_call(no_cache=True):
+                pass
+
+            assert block.should_stop_exploration is True, (
+                "should_stop_exploration must be True when no tool call, "
+                "even with active plan"
+            )
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_terminates_on_no_tool_call_no_progress_all_done(self):
+        """With should_stop_exploration=True, no progress, no plan tool,
+        and all tasks in terminal state: _should_continue_explore returns False."""
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        await context.task_registry.update_status("task_1", TaskStatus.COMPLETED)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        # Set signature to current so has_progress=False
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+        block._current_round_tools = []
+
+        # All tasks done → no active plan → should terminate
+        assert await context.has_active_plan() is False
+        assert await block._should_continue_explore() is False, (
+            "Should terminate: no tool call, no progress, no plan tool, all tasks done"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_continues_on_no_tool_call_with_progress(self):
+        """With should_stop_exploration=True but has_progress=True (first round):
+        _should_continue_explore returns True."""
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        # _plan_last_signature=None means first round -> has_progress=True
+        block._plan_last_signature = None
+
+        assert await block._should_continue_explore() is True, (
+            "Should continue: first round always has progress (signature change from None)"
+        )
+
+    # ===================== Bug 2: plan polling rounds limit =====================
+
+    @pytest.mark.asyncio
+    async def test_plan_polling_rounds_increments_on_plan_tool_without_progress(self):
+        """Polling counter increments when plan tool used but no progress."""
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+
+        block = ExploreBlock(context=context)
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+
+        block._update_plan_silent_rounds(signature, has_progress=False, used_plan_tool=True)
+
+        assert block._plan_polling_rounds == 1
+        assert block._plan_silent_rounds == 0
+
+    @pytest.mark.asyncio
+    async def test_plan_polling_rounds_resets_on_progress(self):
+        """Polling counter resets when actual progress occurs."""
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+
+        block = ExploreBlock(context=context)
+        block._plan_polling_rounds = 50
+        new_sig = (("task_1", "running"),)
+
+        block._update_plan_silent_rounds(new_sig, has_progress=True, used_plan_tool=False)
+
+        assert block._plan_polling_rounds == 0
+        assert block._plan_silent_rounds == 0
+
+    @pytest.mark.asyncio
+    async def test_plan_polling_terminates_after_max_rounds(self):
+        """ToolInterrupt raised when polling exceeds limit."""
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+
+        block = ExploreBlock(context=context)
+        block.plan_polling_max_rounds = 5
+        block._plan_polling_rounds = 4
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+
+        with pytest.raises(ToolInterrupt):
+            block._update_plan_silent_rounds(
+                signature, has_progress=False, used_plan_tool=True
+            )
+
+    @pytest.mark.asyncio
+    async def test_plan_polling_does_not_terminate_with_progress(self):
+        """No termination when progress is being made, even with high polling count."""
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+
+        block = ExploreBlock(context=context)
+        block.plan_polling_max_rounds = 5
+        block._plan_polling_rounds = 99  # would exceed if not reset
+        new_sig = (("task_1", "completed"),)
+
+        # Should NOT raise; progress resets both counters
+        block._update_plan_silent_rounds(
+            new_sig, has_progress=True, used_plan_tool=True
+        )
+        assert block._plan_polling_rounds == 0
+
+    # ===================== Bug 3: running tasks ignored on termination =====================
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_continues_with_running_task_no_tool_call_no_signature_change(self):
+        """BUG REPRO: With a RUNNING task, should_stop_exploration=True, and
+        signature unchanged (not first round), _should_continue_explore should
+        return True — but it incorrectly returns False.
+
+        Root cause: _should_continue_explore_in_plan_mode only checks
+        has_progress (signature change) and used_plan_tool, but never checks
+        whether tasks are still RUNNING.  A RUNNING task whose status hasn't
+        changed produces has_progress=False, and if the model emitted no tool
+        call (should_stop_exploration=True, used_plan_tool=False), L1282-1288
+        immediately terminates the loop.
+        """
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        # Simulate non-first round: set signature to current (RUNNING) state
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+        block._current_round_tools = []
+
+        # Precondition: plan IS active (task is RUNNING)
+        assert await context.has_active_plan() is True
+
+        # BUG: currently returns False (premature termination)
+        # EXPECTED: should return True because a task is still RUNNING
+        result = await block._should_continue_explore()
+        assert result is True, (
+            "Should NOT terminate while tasks are still RUNNING, even if "
+            "signature is unchanged and model made no tool call this round"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_continues_with_pending_task_no_tool_call_no_signature_change(self):
+        """Same bug as above, but with PENDING task.
+
+        A PENDING task also means the plan is active and should not be
+        terminated prematurely.
+        """
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        # Task stays PENDING (default)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+        block._current_round_tools = []
+
+        assert await context.has_active_plan() is True
+
+        result = await block._should_continue_explore()
+        assert result is True, (
+            "Should NOT terminate while tasks are still PENDING"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_L1301_terminates_despite_plan_tool_used(self):
+        """BUG REPRO for L1301: Even when used_plan_tool=True lets us pass
+        L1282, L1301 still terminates because it only checks
+        `should_stop_exploration and not has_progress`.
+
+        Scenario: model called _check_progress (plan tool) in previous rounds
+        but this round emitted no tool call.  should_stop_exploration=True,
+        signature unchanged.  L1282 passes (used_plan_tool=False this round),
+        but L1301 catches it.
+
+        This also means the silent-rounds tolerance at L1290-1295 is dead code
+        — L1301 always fires first.
+        """
+        config = GlobalConfig()
+        context = Context(config=config)
+        await context.enable_plan()
+
+        task = Task(id="task_1", name="Test Task", prompt="Test prompt")
+        await context.task_registry.add_task(task)
+        await context.task_registry.update_status("task_1", TaskStatus.RUNNING)
+
+        block = ExploreBlock(context=context)
+        block.should_stop_exploration = True
+        block.plan_silent_max_rounds = 3  # tolerant setting
+        block._plan_silent_rounds = 0     # first silent round
+        signature = await context.task_registry.get_progress_signature()
+        block._plan_last_signature = signature
+        block._current_round_tools = []
+
+        assert await context.has_active_plan() is True
+
+        # BUG: L1301 returns False despite _plan_silent_rounds < plan_silent_max_rounds
+        result = await block._should_continue_explore()
+        assert result is True, (
+            "Should NOT terminate on first silent round when silent_max_rounds=3 "
+            "and tasks are still RUNNING"
+        )

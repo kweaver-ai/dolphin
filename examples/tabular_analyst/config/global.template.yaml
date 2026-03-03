@@ -112,7 +112,7 @@ skill:
   # enabled_skills: []                       # Empty list means load no skills
   enabled_skills:                          # Specify skills to load
     - "vm_skillkit"
-    - "plan_act_skillkit"
+    - "plan"
   #   - "sql"
   #   - "search"
   #   - "memory"

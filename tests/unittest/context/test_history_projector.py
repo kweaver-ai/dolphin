@@ -17,7 +17,11 @@ import unittest
 from datetime import datetime
 from unittest.mock import Mock, MagicMock, PropertyMock
 
-from dolphin.core.common.constants import KEY_HISTORY
+from dolphin.core.common.constants import (
+    KEY_HISTORY,
+    KEY_HISTORY_COMPACT_ON_PERSIST,
+    KEY_HISTORY_COMPACT_RECENT_TURNS,
+)
 from dolphin.core.common.enums import Messages, MessageRole, SingleMessage
 from dolphin.core.context.context import Context
 from dolphin.core.context.history_projector import (
@@ -161,6 +165,19 @@ class TestToolChainTrimming(unittest.TestCase):
             self.assertNotEqual(m.role, MessageRole.TOOL)
             self.assertFalse(m.has_tool_calls())
 
+    def test_recent_turns_zero_trims_all_tool_chains(self):
+        """With recent_turns=0, all turns are projected in trimmed mode."""
+        history = self._build_history()
+        proj = HistoryProjector(ProjectionConfig(recent_turns=0))
+        result = proj.project(history)
+
+        msgs = result.get_messages()
+        # 3 old/trimmed turns: user + assistant_final each.
+        self.assertEqual(len(msgs), 6)
+        for m in msgs:
+            self.assertNotEqual(m.role, MessageRole.TOOL)
+            self.assertFalse(m.has_tool_calls())
+
 
 # ─── Test: tool_calls + tool pairs never split ────────────────────────────
 
@@ -295,6 +312,58 @@ class TestParseTurns(unittest.TestCase):
 # ─── Test: _update_history_and_cleanup stores tool chains ─────────────────
 
 class TestUpdateHistoryStoresToolChains(unittest.TestCase):
+    @staticmethod
+    def _group_turns(history: list[dict]) -> list[list[dict]]:
+        """Split flattened history into turns grouped by user message boundaries."""
+        turns = []
+        current = []
+        for item in history:
+            if item.get("role") == MessageRole.USER.value:
+                if current:
+                    turns.append(current)
+                current = [item]
+            else:
+                current.append(item)
+        if current:
+            turns.append(current)
+        return turns
+
+    @staticmethod
+    def _append_turn(block, ctx: Context, turn_id: int, pin_tool_response: bool = False):
+        """Append one turn using scratchpad tool chain + final answer."""
+        from dolphin.core.common.constants import PIN_MARKER
+        from dolphin.core.context_engineer.config.settings import BuildInBucket
+
+        scratchpad_msgs = Messages()
+        tc = [{
+            "id": f"call_{turn_id}",
+            "type": "function",
+            "function": {"name": f"tool_{turn_id}", "arguments": "{}"},
+        }]
+        scratchpad_msgs.add_tool_call_message(content=f"thinking_{turn_id}", tool_calls=tc)
+        tool_content = (
+            f"{PIN_MARKER} pinned_result_{turn_id}"
+            if pin_tool_response
+            else f"result_{turn_id}"
+        )
+        scratchpad_msgs.add_tool_response_message(
+            content=tool_content,
+            tool_call_id=f"call_{turn_id}",
+        )
+
+        if ctx.context_manager.has_bucket(BuildInBucket.SCRATCHPAD.value):
+            ctx.context_manager.replace_bucket_content(
+                BuildInBucket.SCRATCHPAD.value, scratchpad_msgs
+            )
+        else:
+            ctx.context_manager.add_bucket(
+                BuildInBucket.SCRATCHPAD.value, scratchpad_msgs
+            )
+
+        block.content = f"Q{turn_id}"
+        block.recorder.get_answer.return_value = f"A{turn_id}"
+        block._update_history_and_cleanup()
+
     def test_tool_chain_persisted_to_history(self):
         """_update_history_and_cleanup should extract tool chains from scratchpad."""
         from dolphin.core.code_block.basic_code_block import BasicCodeBlock
@@ -342,6 +411,116 @@ class TestUpdateHistoryStoresToolChains(unittest.TestCase):
         tool_msgs = [item for item in history if item["role"] == "tool"]
         self.assertEqual(len(tool_msgs), 1)
         self.assertEqual(tool_msgs[0]["tool_call_id"], "call_abc")
+
+    def test_history_compaction_disabled_by_default_preserves_full_old_turn_chains(self):
+        """Without compact flag, older turns should still keep their tool chain."""
+        from dolphin.core.code_block.basic_code_block import BasicCodeBlock
+
+        ctx = Context()
+        ctx.set_variable(KEY_HISTORY, [])
+
+        block = BasicCodeBlock.__new__(BasicCodeBlock)
+        block.context = ctx
+        block.recorder = Mock()
+        block._save_trajectory = Mock()
+
+        for i in range(1, 6):
+            self._append_turn(block, ctx, i)
+
+        history = ctx.get_history_messages(normalize=False)
+        turns = self._group_turns(history)
+        self.assertEqual(len(turns), 5)
+        first_turn_roles = [m.get("role") for m in turns[0]]
+        self.assertIn(MessageRole.TOOL.value, first_turn_roles)
+        self.assertTrue(any(isinstance(m.get("tool_calls"), list) for m in turns[0]))
+
+    def test_history_compaction_on_persist_trims_old_turn_chains(self):
+        """With compact flag enabled, old turns keep only user + assistant final."""
+        from dolphin.core.code_block.basic_code_block import BasicCodeBlock
+
+        ctx = Context()
+        ctx.set_variable(KEY_HISTORY, [])
+        ctx.set_variable(KEY_HISTORY_COMPACT_ON_PERSIST, True)
+        ctx.set_variable(KEY_HISTORY_COMPACT_RECENT_TURNS, 3)
+
+        block = BasicCodeBlock.__new__(BasicCodeBlock)
+        block.context = ctx
+        block.recorder = Mock()
+        block._save_trajectory = Mock()
+
+        for i in range(1, 6):
+            self._append_turn(block, ctx, i)
+
+        history = ctx.get_history_messages(normalize=False)
+        turns = self._group_turns(history)
+        self.assertEqual(len(turns), 5)
+
+        for turn in turns[:2]:
+            roles = [m.get("role") for m in turn]
+            self.assertEqual(roles, [MessageRole.USER.value, MessageRole.ASSISTANT.value])
+            self.assertFalse(any(isinstance(m.get("tool_calls"), list) for m in turn))
+
+        for turn in turns[2:]:
+            roles = [m.get("role") for m in turn]
+            self.assertIn(MessageRole.TOOL.value, roles)
+            self.assertTrue(any(isinstance(m.get("tool_calls"), list) for m in turn))
+
+    def test_history_compaction_on_persist_is_idempotent_across_turns(self):
+        """Repeated per-turn compaction should not mutate already compacted old turns."""
+        from dolphin.core.code_block.basic_code_block import BasicCodeBlock
+
+        ctx = Context()
+        ctx.set_variable(KEY_HISTORY, [])
+        ctx.set_variable(KEY_HISTORY_COMPACT_ON_PERSIST, True)
+        ctx.set_variable(KEY_HISTORY_COMPACT_RECENT_TURNS, 3)
+
+        block = BasicCodeBlock.__new__(BasicCodeBlock)
+        block.context = ctx
+        block.recorder = Mock()
+        block._save_trajectory = Mock()
+
+        for i in range(1, 5):
+            self._append_turn(block, ctx, i)
+        before_turn5 = ctx.get_history_messages(normalize=False)
+
+        self._append_turn(block, ctx, 5)
+        after_turn5 = ctx.get_history_messages(normalize=False)
+
+        turns_before = self._group_turns(before_turn5)
+        turns_after = self._group_turns(after_turn5)
+        self.assertEqual(
+            [m.get("role") for m in turns_before[0]],
+            [MessageRole.USER.value, MessageRole.ASSISTANT.value],
+        )
+        self.assertEqual(
+            [m.get("role") for m in turns_after[0]],
+            [MessageRole.USER.value, MessageRole.ASSISTANT.value],
+        )
+
+    def test_history_compaction_on_persist_preserves_pinned_messages(self):
+        """Pinned messages in old turns should survive compaction."""
+        from dolphin.core.code_block.basic_code_block import BasicCodeBlock
+
+        ctx = Context()
+        ctx.set_variable(KEY_HISTORY, [])
+        ctx.set_variable(KEY_HISTORY_COMPACT_ON_PERSIST, True)
+        ctx.set_variable(KEY_HISTORY_COMPACT_RECENT_TURNS, 3)
+
+        block = BasicCodeBlock.__new__(BasicCodeBlock)
+        block.context = ctx
+        block.recorder = Mock()
+        block._save_trajectory = Mock()
+
+        self._append_turn(block, ctx, 1, pin_tool_response=True)
+        for i in range(2, 6):
+            self._append_turn(block, ctx, i)
+
+        history = ctx.get_history_messages(normalize=False)
+        turns = self._group_turns(history)
+        first_turn = turns[0]
+        first_turn_contents = [m.get("content") for m in first_turn]
+        self.assertIn("pinned_result_1", first_turn_contents)
+        self.assertNotIn("result_1", first_turn_contents)
 
     def test_pinned_tool_response_survives_projection_for_old_turn(self):
         """Pinned content from tool responses should survive projection trimming."""
@@ -597,6 +776,25 @@ class TestGetHistoryProjected(unittest.TestCase):
         # Recent turns (3,4,5): 4 msgs each = 12
         self.assertEqual(len(msgs), 16)
 
+    def test_projected_negative_recent_turns_falls_back_to_default(self):
+        """Negative recent_turns should fallback to default 3 for projection."""
+        ctx = Context()
+        ctx.set_variable(KEY_HISTORY_COMPACT_RECENT_TURNS, -1)
+        history_list = []
+        for i in range(1, 6):
+            tc = [{"id": f"call_{i}", "type": "function",
+                   "function": {"name": f"t{i}", "arguments": "{}"}}]
+            history_list.extend([
+                _user(f"Q{i}"),
+                _assistant_tc(f"think_{i}", tc),
+                _tool(f"res_{i}", f"call_{i}"),
+                _assistant(f"A{i}"),
+            ])
+        ctx.set_variable(KEY_HISTORY, history_list)
+
+        projected = ctx.get_history_messages(projected=True)
+        self.assertEqual(len(projected.get_messages()), 16)
+
     def test_projected_false_returns_full(self):
         """projected=False should not trim anything."""
         ctx = Context()
@@ -653,6 +851,10 @@ class TestProjectionConfig(unittest.TestCase):
     def test_custom_recent_turns(self):
         config = ProjectionConfig(recent_turns=5)
         self.assertEqual(config.recent_turns, 5)
+
+    def test_zero_recent_turns(self):
+        config = ProjectionConfig(recent_turns=0)
+        self.assertEqual(config.recent_turns, 0)
 
 
 if __name__ == "__main__":

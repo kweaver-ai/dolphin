@@ -59,20 +59,25 @@ class SimpleTokenizer(BaseTokenizer):
         self.word_pattern = re.compile(r"\w+|[^\w\s]")
 
     def count_tokens(self, text: str) -> int:
-        """Count tokens using word-based splitting.
+        """Count tokens using character-based estimation.
 
-                Count tokens using word-based splitting.
+        Uses the same character-based heuristic as estimate_tokens() to ensure
+        consistency. The compressor relies on count_tokens (used for "precise"
+        counting near the budget boundary) and estimate_tokens (used for fast
+        checks) agreeing — a large mismatch causes the compressor to skip
+        compression when it should compress.
+
+        For real precision, use TiktokenTokenizer instead.
 
         Args:
             text (str): The text to count tokens for
 
         Returns:
-            int: The number of tokens in the text
+            int: The estimated number of tokens in the text
         """
         if not text:
             return 0
-        words = self.word_pattern.findall(text)
-        return len(words)
+        return max(1, int(len(text) / self.avg_chars_per_token))
 
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count based on character length.
@@ -87,7 +92,7 @@ class SimpleTokenizer(BaseTokenizer):
         """
         if not text:
             return 0
-        return int(len(text) / self.avg_chars_per_token)
+        return max(1, int(len(text) / self.avg_chars_per_token))
 
 
 class TiktokenTokenizer(BaseTokenizer):
