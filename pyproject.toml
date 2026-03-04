@@ -34,6 +34,7 @@ dependencies = [
     "docstring-parser>=0.15",
     "jsonschema>=4.17.0",
     "rich>=14.0.0,<15.0.0",
+    "google-genai>=1.0.0,<2.0.0",
 ]
 
 # 可选依赖（按需安装）

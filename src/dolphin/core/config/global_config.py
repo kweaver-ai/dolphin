@@ -54,15 +54,15 @@ def _resolve_env_var(value: str) -> str:
 class TypeAPI(Enum):
     OPENAI = "openai"
     AISHU_MODEL_FACTORY = "aishu_model_factory"
+    GEMINI = "gemini"
+    CHATGPT = "chatgpt"
 
     @staticmethod
     def from_str(type_api_str: str) -> "TypeAPI":
-        if type_api_str == TypeAPI.AISHU_MODEL_FACTORY.value:
-            return TypeAPI.AISHU_MODEL_FACTORY
-        elif type_api_str == TypeAPI.OPENAI.value:
-            return TypeAPI.OPENAI
-        else:
-            raise ValueError(f"不支持的API类型: {type_api_str}")
+        _MAP = {t.value: t for t in TypeAPI}
+        if type_api_str in _MAP:
+            return _MAP[type_api_str]
+        raise ValueError(f"不支持的API类型: {type_api_str}")
 
 
 class CloudConfig:

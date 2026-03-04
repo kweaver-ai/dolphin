@@ -12,6 +12,8 @@ from dolphin.core.common.enums import Messages
 from dolphin.core.config.global_config import TypeAPI
 from dolphin.core.context.context import Context
 from dolphin.core.llm.llm import LLMModelFactory, LLMOpenai
+from dolphin.core.llm.llm_chatgpt import LLMChatGPT
+from dolphin.core.llm.llm_gemini import LLMGemini
 from dolphin.core.config.global_config import (
     LLMInstanceConfig,
     ContextConstraints,
@@ -1067,13 +1069,17 @@ class LLMClient:
         )
         self.context.set_messages(compression_result.compressed_messages)
 
-        llm = None
-        if llm_instance_config.type_api == TypeAPI.OPENAI:
-            llm = LLMOpenai(self.context)
-        elif llm_instance_config.type_api == TypeAPI.AISHU_MODEL_FACTORY:
-            llm = LLMModelFactory(self.context)
-        else:
+        _LLM_REGISTRY = {
+            TypeAPI.OPENAI: LLMOpenai,
+            TypeAPI.AISHU_MODEL_FACTORY: LLMModelFactory,
+            TypeAPI.GEMINI: LLMGemini,
+            TypeAPI.CHATGPT: LLMChatGPT,
+        }
+
+        llm_cls = _LLM_REGISTRY.get(llm_instance_config.type_api)
+        if llm_cls is None:
             raise ValueError(f"不支持的API类型: {llm_instance_config.type_api}")
+        llm = llm_cls(self.context)
 
         for i in range(self.Retry_Count):
             self.accu_content = ""
