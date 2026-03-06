@@ -1551,6 +1551,11 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
         self._mark_pending_turn(preserve_context=preserve_context)
 
+        # Compress buckets (especially HISTORY) that exceed their allocated token budget.
+        # Without this, HISTORY grows unbounded across turns.
+        if self.context.context_manager and self.context.context_manager.needs_compression():
+            self.context.context_manager.compress_all()
+
         # 5. Run exploration loop
         _exec_error: Optional[BaseException] = None
         try:

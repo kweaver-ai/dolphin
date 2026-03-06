@@ -373,7 +373,7 @@ def get_default_config() -> ContextConfig:
                 "_history": {
                     "name": "_history",
                     "min_tokens": 120,
-                    "max_tokens": 1024,
+                    "max_tokens": 16384,
                     "weight": 0.8,
                     "message_role": "user",
                 },
