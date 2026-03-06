@@ -121,6 +121,9 @@ class EnvSkillkit(Skillkit):
             timeout (int): Command timeout in seconds. Default is 60 seconds.
                           If exceeded, returns a command_id for continuation.
                           Maximum allowed is 3600 (1 hour).
+            timeout_action (str): What to do on timeout. "continue" (default) returns
+                          a command_id for continuation. "fail" kills the process
+                          and returns partial output immediately (no continuation loop).
             command_id (str): ID of a previous timed-out command to continue waiting for.
             cancel (bool): If True and command_id is provided, cancel the command.
             background (bool): If True, run as a detached background process.

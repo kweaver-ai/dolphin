@@ -74,7 +74,7 @@ class MemoryFileSys(MemoryStorage):
 
         :param base_path: Base directory path for storing memory data
         """
-        self.base_path = Path(base_path)
+        self.base_path = Path(base_path).expanduser()
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def write_memory(

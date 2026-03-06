@@ -439,15 +439,18 @@ class LocalExecutor(EnvExecutor):
     
     def exec_bash(self, command: str, cwd: Optional[str] = None, **kwargs) -> str:
         """Execute a Bash command locally.
-        
+
         Args:
             command: Bash command to execute
             cwd: Working directory (overrides default)
             timeout: Command timeout in seconds (default 60).
                     If command exceeds timeout, returns with a command_id for continuation.
+            timeout_action: What to do on timeout. "continue" (default) returns a
+                    command_id for the caller to wait/cancel. "fail" kills the
+                    process and returns partial output immediately.
             background: If True, run command in background (for long-running servers).
                        Also auto-detects trailing '&' in command.
-            
+
         Returns:
             Command output (stdout and stderr), or:
             - Startup message for background commands
@@ -457,7 +460,10 @@ class LocalExecutor(EnvExecutor):
         command = self._preprocess_code(command, "bash")
         background = kwargs.get("background", False)
         timeout = kwargs.get("timeout", self.default_timeout)
-        
+        timeout_action = kwargs.get("timeout_action", "continue")
+        if timeout_action not in ("continue", "fail"):
+            raise ValueError(f"Invalid timeout_action: {timeout_action!r}. Must be 'continue' or 'fail'.")
+
         # Validate timeout
         if timeout is not None:
             timeout = max(1, min(timeout, 3600))  # Clamp between 1s and 1 hour
@@ -487,10 +493,19 @@ class LocalExecutor(EnvExecutor):
             )
             
             if status == CommandStatus.TIMEOUT:
+                if timeout_action == "fail":
+                    # Kill the process and return partial output immediately
+                    self._async_manager.cancel_command(command_id)
+                    partial = output.strip() if output else ""
+                    return (
+                        f"Command timed out after {timeout} seconds (killed).\n"
+                        f"{partial}"
+                    ).strip()
+
                 # Command still running - provide command_id for continuation
                 elapsed = timeout
                 partial_info = f"\nPartial output:\n{output[:2000]}" if output else ""
-                
+
                 return (
                     f"⏳ Command still running after {elapsed} seconds.\n"
                     f"Command ID: {command_id}\n"

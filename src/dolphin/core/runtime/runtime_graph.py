@@ -329,7 +329,7 @@ class RuntimeGraph:
             if hasattr(stage_type_val, "value"):
                 stage_type_val = stage_type_val.value
             node_data["stage_type"] = stage_type_val
-            node_data["skill_name"] = instance.skill_info.name if stage_type_val == TypeStage.SKILL and instance.skill_info else None
+            node_data["skill_name"] = instance.skill_info.name if stage_type_val == TypeStage.SKILL.value and instance.skill_info else None
             
             is_llm = self.is_llm_stage(instance)
             if is_llm:
