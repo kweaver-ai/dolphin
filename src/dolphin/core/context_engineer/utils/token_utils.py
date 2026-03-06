@@ -293,11 +293,14 @@ def _truncate_single_message(
             continue
 
         text = block.get("text", "")
+        if not text:
+            truncated_blocks.append(block)
+            continue
+
         truncated_text = truncate_to_tokens(text, remaining_tokens, tokenizer_service)
-        if truncated_text:
-            truncated_blocks.append({**block, "text": truncated_text})
-            remaining_tokens -= tokenizer_service.count_tokens(truncated_text)
-        else:
+        truncated_blocks.append({**block, "text": truncated_text})
+        remaining_tokens -= tokenizer_service.count_tokens(truncated_text)
+        if remaining_tokens <= 0:
             break
 
     truncated.content = truncated_blocks
