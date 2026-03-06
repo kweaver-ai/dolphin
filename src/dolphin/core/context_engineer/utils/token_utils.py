@@ -2,7 +2,7 @@
 
 from typing import Union, Dict, List, Optional
 
-from dolphin.core.common.enums import Messages
+from dolphin.core.common.enums import MessageRole, Messages, SingleMessage
 from ..core.tokenizer_service import TokenizerService
 
 
@@ -136,3 +136,169 @@ def truncate_to_tokens(
         candidate = next_candidate
 
     return " ".join(result)
+
+
+def truncate_messages_to_tokens(
+    messages: Messages,
+    max_tokens: int,
+    tokenizer_service: Optional[TokenizerService] = None,
+) -> Messages:
+    """
+    Truncate a Messages object to fit within token limit by dropping oldest messages first.
+
+    Preserves message structure (roles, boundaries). Keeps the most recent messages.
+
+    Args:
+        messages: Input Messages object
+        max_tokens: Maximum tokens allowed
+        tokenizer_service: TokenizerService instance
+
+    Returns:
+        Truncated Messages object (same type, structure preserved)
+    """
+    if tokenizer_service is None:
+        tokenizer_service = TokenizerService()
+
+    groups = _group_messages_for_truncation(list(messages.messages))
+    while groups:
+        msgs = _flatten_message_groups(groups)
+        total = sum(_count_tokens_for_message(msg, tokenizer_service) for msg in msgs)
+        if total <= max_tokens:
+            break
+        if len(groups) == 1 and len(groups[0]) == 1:
+            groups[0][0] = _truncate_single_message(
+                groups[0][0],
+                max_tokens,
+                tokenizer_service,
+            )
+            break
+        if len(groups) == 1:
+            # The last remaining group is a multi-message tool call chain.
+            # Splitting it would leave orphan tool responses, making the
+            # conversation invalid for the LLM.  Accept the overage rather
+            # than producing a broken message sequence.
+            break
+        groups.pop(0)
+
+    result = Messages()
+    result.max_tokens = messages.max_tokens
+    result.messages = _flatten_message_groups(groups)
+    return result
+
+
+def _count_tokens_for_message(
+    msg: SingleMessage,
+    tokenizer_service: TokenizerService,
+) -> int:
+    """Count tokens for a single message, handling both str and multi-block content."""
+    if isinstance(msg.content, list):
+        return sum(
+            tokenizer_service.count_tokens(block.get("text", ""))
+            for block in msg.content
+            if block.get("type") == "text"
+        )
+    return tokenizer_service.count_tokens(str(msg.content) if msg.content else "")
+
+
+def _group_messages_for_truncation(
+    messages: List[SingleMessage],
+) -> List[List[SingleMessage]]:
+    """Group messages so tool call chains are dropped atomically."""
+    groups: List[List[SingleMessage]] = []
+    current_group: List[SingleMessage] = []
+    expecting_tools = False
+    expected_tool_ids = set()
+
+    for msg in messages:
+        if msg.role == MessageRole.ASSISTANT and msg.tool_calls:
+            if current_group:
+                groups.append(current_group)
+
+            current_group = [msg]
+            expecting_tools = True
+            expected_tool_ids = {
+                tc.get("id")
+                for tc in msg.tool_calls
+                if isinstance(tc, dict) and tc.get("id")
+            }
+            continue
+
+        if msg.role == MessageRole.TOOL and expecting_tools:
+            if msg.tool_call_id not in expected_tool_ids:
+                # Unrecognized tool_call_id — flush the incomplete group and
+                # treat this response as a standalone message so the group
+                # does not stay open indefinitely.
+                if current_group:
+                    groups.append(current_group)
+                    current_group = []
+                expecting_tools = False
+                expected_tool_ids = set()
+                groups.append([msg])
+                continue
+
+            current_group.append(msg)
+            expected_tool_ids.discard(msg.tool_call_id)
+
+            if not expected_tool_ids:
+                groups.append(current_group)
+                current_group = []
+                expecting_tools = False
+            continue
+
+        if current_group:
+            groups.append(current_group)
+            current_group = []
+            expecting_tools = False
+            expected_tool_ids = set()
+
+        groups.append([msg])
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
+def _flatten_message_groups(groups: List[List[SingleMessage]]) -> List[SingleMessage]:
+    """Flatten grouped messages back into a plain message list."""
+    return [msg for group in groups for msg in group]
+
+
+def _truncate_single_message(
+    message: SingleMessage,
+    max_tokens: int,
+    tokenizer_service: TokenizerService,
+) -> SingleMessage:
+    """Truncate message content in-place fallback while preserving metadata."""
+    truncated = message.copy()
+
+    if isinstance(truncated.content, str):
+        truncated.content = truncate_to_tokens(
+            truncated.content,
+            max_tokens,
+            tokenizer_service,
+        )
+        return truncated
+
+    remaining_tokens = max_tokens
+    truncated_blocks = []
+    for block in truncated.content:
+        if remaining_tokens <= 0:
+            break
+
+        if block.get("type") != "text":
+            block_tokens = tokenizer_service.count_tokens(str(block))
+            truncated_blocks.append(block)
+            remaining_tokens -= block_tokens
+            continue
+
+        text = block.get("text", "")
+        truncated_text = truncate_to_tokens(text, remaining_tokens, tokenizer_service)
+        if truncated_text:
+            truncated_blocks.append({**block, "text": truncated_text})
+            remaining_tokens -= tokenizer_service.count_tokens(truncated_text)
+        else:
+            break
+
+    truncated.content = truncated_blocks
+    return truncated

@@ -222,6 +222,7 @@ class ExploreBlock(BasicCodeBlock):
 
         # Build initial message
         self._make_init_messages()
+        self._compress_initialized_buckets()
         self._mark_pending_turn()
 
         _exec_error: Optional[BaseException] = None
@@ -590,6 +591,19 @@ Please reconsider your approach and improve your answer based on the feedback ab
             history_messages = self.context.get_history_messages(projected=True)
             return history_messages or Messages()
         return None
+
+    def _compress_initialized_buckets(self, preserve_context: bool = False) -> None:
+        """Compress long-lived buckets after initialization when needed."""
+        if not self.context.context_manager:
+            return
+
+        if not self.context.context_manager.needs_compression():
+            return
+
+        buckets_to_compress = [BuildInBucket.HISTORY.value]
+        if not preserve_context:
+            buckets_to_compress.append(BuildInBucket.SCRATCHPAD.value)
+        self.context.context_manager.compress_buckets(buckets_to_compress)
 
     async def _explore_once(self, no_cache: bool = False):
         """Perform one exploration"""
@@ -1551,10 +1565,11 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
         self._mark_pending_turn(preserve_context=preserve_context)
 
-        # Compress buckets (especially HISTORY) that exceed their allocated token budget.
-        # Without this, HISTORY grows unbounded across turns.
-        if self.context.context_manager and self.context.context_manager.needs_compression():
-            self.context.context_manager.compress_all()
+        # Compress only long-lived buckets during initialization.
+        # Preserve QUERY so long user inputs are not truncated before the first LLM call.
+        # When preserve_context=True (interrupt resume), skip SCRATCHPAD: new user input was
+        # just appended to its tail, and truncation would drop it before the LLM sees it.
+        self._compress_initialized_buckets(preserve_context=preserve_context)
 
         # 5. Run exploration loop
         _exec_error: Optional[BaseException] = None

@@ -139,8 +139,8 @@ class ContextConfig:
         # Parse model config
         model_data = config_dict.get("model", {})
         model = ModelConfig(
-            name=model_data.get("name", "gpt-4"),
-            context_limit=model_data.get("context_limit", 8192),
+            name=model_data.get("name", "qwen-plus"),
+            context_limit=model_data.get("context_limit", 16384),
             output_target=model_data.get("output_target", 1200),
             output_headroom=model_data.get("output_headroom", 300),
         )
@@ -358,8 +358,8 @@ def get_default_config() -> ContextConfig:
     return ContextConfig.from_dict(
         {
             "model": {
-                "name": "gpt-4",
-                "context_limit": 8192,
+                "name": "qwen-plus",
+                "context_limit": 16384,
                 "output_target": 1200,
             },
             "buckets": {
@@ -373,7 +373,7 @@ def get_default_config() -> ContextConfig:
                 "_history": {
                     "name": "_history",
                     "min_tokens": 120,
-                    "max_tokens": 16384,
+                    "max_tokens": 8192,
                     "weight": 0.8,
                     "message_role": "user",
                 },

@@ -1597,5 +1597,54 @@ class TestContinueExplorationErrorRecovery(unittest.TestCase):
         )
 
 
+class TestExploreInitializationCompression(unittest.TestCase):
+    """Regression tests for initialization-time context compression."""
+
+    def test_execute_compresses_history_bucket_on_first_round(self):
+        """Initial execute should compress long-lived buckets before the first LLM call."""
+        context_manager = ContextManager()
+        context = Context(config=GlobalConfig(), context_manager=context_manager)
+        context._calc_all_skills()
+
+        block = ExploreBlock(context=context)
+        block.history = True
+        block.content = "test question"
+        block.model = "mock-model"
+        block.output_var = "result"
+        block.assign_type = "->"
+        block.recorder = MagicMock()
+        block.recorder.set_output_dump_process = MagicMock()
+        block.block_start_log = MagicMock()
+        block._parse_hook_config = MagicMock()
+
+        async def _execute_main_noop():
+            return
+            yield  # pragma: no cover
+
+        async def _super_execute_noop(*args, **kwargs):
+            return
+            yield  # pragma: no cover
+
+        block._execute_main = _execute_main_noop
+
+        context_manager.needs_compression = MagicMock(return_value=True)
+        context_manager.compress_buckets = MagicMock(return_value={})
+
+        async def run():
+            async for _ in block.execute("/explore test question"):
+                pass
+
+        with patch.object(
+            type(block).__bases__[0],
+            "execute",
+            new=_super_execute_noop,
+        ):
+            asyncio.run(run())
+
+        context_manager.compress_buckets.assert_called_once_with(
+            [BuildInBucket.HISTORY.value, BuildInBucket.SCRATCHPAD.value]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

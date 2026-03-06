@@ -14,7 +14,7 @@ from dolphin.core.context_engineer.core.context_assembler import (
     AssembledContext,
 )
 from dolphin.core.context_engineer.services.compressor import Compressor
-from dolphin.core.context_engineer.utils.token_utils import truncate_to_tokens
+from dolphin.core.context_engineer.utils.token_utils import truncate_to_tokens, truncate_messages_to_tokens
 from dolphin.core.context_engineer.utils.message_formatter import (
     MessageFormatter,
 )
@@ -420,11 +420,16 @@ class ContextManager:
                 )
                 bucket.content = result.compressed_content
             else:
-                # Fallback to simple truncation
-
-                bucket.content = truncate_to_tokens(
-                    bucket.content, bucket.allocated_tokens, self.tokenizer
-                )
+                # Fallback to simple truncation.
+                # For Messages, use message-level truncation to preserve role boundaries.
+                if isinstance(bucket.content, Messages):
+                    bucket.content = truncate_messages_to_tokens(
+                        bucket.content, bucket.allocated_tokens, self.tokenizer
+                    )
+                else:
+                    bucket.content = truncate_to_tokens(
+                        bucket.content, bucket.allocated_tokens, self.tokenizer
+                    )
 
             # Update token count
             bucket.token_count = self._count_tokens_for_content(bucket.content)
@@ -452,6 +457,17 @@ class ContextManager:
         results = {}
 
         for bucket_name in self.state.buckets:
+            results[bucket_name] = self.compress_bucket(bucket_name)
+
+        return results
+
+    def compress_buckets(self, bucket_names: List[str]) -> Dict[str, bool]:
+        """Compress specific buckets that are allowed to grow over time."""
+        results = {}
+
+        for bucket_name in bucket_names:
+            if bucket_name not in self.state.buckets:
+                continue
             results[bucket_name] = self.compress_bucket(bucket_name)
 
         return results
