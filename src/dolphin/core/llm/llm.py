@@ -1,3 +1,4 @@
+import asyncio
 from abc import abstractmethod
 import json
 from typing import Any, Optional
@@ -18,6 +19,60 @@ from dolphin.core.logging.logger import get_logger
 from dolphin.core.llm.message_sanitizer import needs_reasoning_content, sanitize_and_log
 
 logger = get_logger("llm")
+
+_OpenAIClientCacheKey = tuple[str, str, tuple[tuple[str, str], ...]]
+_client_cache: dict[_OpenAIClientCacheKey, AsyncOpenAI] = {}
+_client_lock = asyncio.Lock()
+
+
+def _normalize_openai_headers(headers: Optional[dict[str, str]]) -> dict[str, str]:
+    """Create a defensive copy of headers for client construction."""
+    return dict(headers or {})
+
+
+def _build_openai_client_cache_key(
+    base_url: str,
+    api_key: str,
+    headers: Optional[dict[str, str]],
+) -> _OpenAIClientCacheKey:
+    """Build a stable cache key for AsyncOpenAI clients."""
+    normalized_headers = tuple(sorted((headers or {}).items()))
+    return (base_url, api_key, normalized_headers)
+
+
+async def get_cached_openai_client(
+    base_url: str,
+    api_key: str,
+    headers: Optional[dict[str, str]],
+) -> AsyncOpenAI:
+    """Return a cached AsyncOpenAI client for the same connection settings."""
+    normalized_headers = _normalize_openai_headers(headers)
+    cache_key = _build_openai_client_cache_key(base_url, api_key, normalized_headers)
+
+    client = _client_cache.get(cache_key)
+    if client is not None:
+        return client
+
+    async with _client_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = AsyncOpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                default_headers=normalized_headers,
+            )
+            _client_cache[cache_key] = client
+        return client
+
+
+async def close_cached_openai_clients() -> None:
+    """Close and clear all cached AsyncOpenAI clients."""
+    async with _client_lock:
+        cached_clients = list(_client_cache.values())
+        _client_cache.clear()
+
+    for client in cached_clients:
+        await client.aclose()
 
 
 class ToolCallsParser:
@@ -404,10 +459,10 @@ class LLMOpenai(LLM):
             # If the URL format does not match expectations, keep it as is, but it may cause errors.
             base_url = api_url
 
-        client = AsyncOpenAI(
+        client = await get_cached_openai_client(
             base_url=base_url,
             api_key=llm_instance_config.api_key,
-            default_headers=llm_instance_config.headers,
+            headers=llm_instance_config.headers,
         )
 
         self.set_messages(messages, continous_content)
