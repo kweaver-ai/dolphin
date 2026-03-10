@@ -90,6 +90,6 @@ async def test_close_cached_openai_clients_closes_and_clears_cache():
 
     await llm.close_cached_openai_clients()
 
-    client_a.aclose.assert_awaited_once()
-    client_b.aclose.assert_awaited_once()
+    client_a.close.assert_awaited_once()
+    client_b.close.assert_awaited_once()
     assert llm._client_cache == {}

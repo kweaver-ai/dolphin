@@ -72,7 +72,7 @@ async def close_cached_openai_clients() -> None:
         _client_cache.clear()
 
     for client in cached_clients:
-        await client.aclose()
+        await client.close()
 
 
 class ToolCallsParser:
