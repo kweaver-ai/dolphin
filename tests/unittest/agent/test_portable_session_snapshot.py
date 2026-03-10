@@ -246,8 +246,11 @@ def test_import_portable_session_repair_and_restore_context():
     assert context.get_var_value("foo") == "bar"
 
     history = context.get_history_messages(normalize=True).get_messages_as_dict()
-    assert [item["role"] for item in history] == ["user", "assistant"]
-    assert history[0]["content"] == "new turn"
+    # Orphan tool is healed: synthetic assistant(tool_use) + original tool + user + assistant
+    assert [item["role"] for item in history] == ["assistant", "tool", "user", "assistant"]
+    assert history[0]["tool_calls"][0]["id"] == "call_orphan"
+    assert history[1]["content"] == "orphan"
+    assert history[2]["content"] == "new turn"
 
 
 def test_import_portable_session_repair_false_keeps_issues():
@@ -610,8 +613,13 @@ def test_portable_session_roundtrip_with_repair_via_file(tmp_path: Path):
     assert restored_ctx.get_session_id() == "sess_bad"
     assert restored_ctx.get_var_value("keep_me") == 42
     restored_history = restored_ctx.get_history_messages(normalize=True).get_messages_as_dict()
-    assert [m["role"] for m in restored_history] == ["user", "assistant", "assistant"]
-    assert all(m["role"] != "tool" for m in restored_history)
+    # Orphan tool is healed: synthetic assistant(tool_use) + tool + user + assistant(trimmed) + assistant
+    assert restored_history[0]["role"] == "assistant"
+    assert restored_history[0].get("tool_calls")
+    assert restored_history[0]["tool_calls"][0]["id"] == "call_orphan"
+    assert restored_history[1]["role"] == "tool"
+    assert restored_history[1]["tool_call_id"] == "call_orphan"
+    assert restored_history[2]["role"] == "user"
 
 
 def test_import_repair_assistant_with_only_unpaired_tool_calls():
@@ -756,8 +764,7 @@ def test_import_with_issues_after_repair_aborts_silently():
     }
 
     report = agent.snapshot.import_portable_session(state, repair=True, trusted=False)
-    # After repair the orphan tool is dropped, leaving empty history
-    # which should validate clean
+    # After repair the orphan tool is healed with a synthetic assistant(tool_use)
     assert report["issues_after"] == []
 
 
@@ -972,3 +979,108 @@ def test_normalize_then_sanitize_pipeline():
     tool_msgs = [m for m in sanitized if m.get("role") == "tool"]
     assert len(tool_msgs) == 1
     assert tool_msgs[0]["tool_call_id"] == "call_legacy"
+
+
+# --- Orphan tool message heal tests ---
+
+
+def test_repair_heals_orphan_tool_with_tool_call_id():
+    """Orphan tool with tool_call_id is healed by synthesizing assistant(tool_use)."""
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_heal",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "content": "resource data", "tool_call_id": "call_orphan_1"},
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+
+    repaired, report = agent.snapshot.repair_portable_session(state)
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == [], f"Expected no issues after repair, got: {issues}"
+    assert report["applied"] is True
+
+    history = repaired["history_messages"]
+    # user, synthetic assistant(tool_use), tool, assistant
+    assert [m["role"] for m in history] == ["user", "assistant", "tool", "assistant"]
+    assert history[1]["tool_calls"][0]["id"] == "call_orphan_1"
+    assert history[1]["tool_calls"][0]["function"]["name"] == "_healed_orphan_tool"
+    assert history[2]["content"] == "resource data"
+    assert history[2]["tool_call_id"] == "call_orphan_1"
+
+    heal_actions = [a for a in report["actions"] if a["action"] == "heal_orphan_tool_message"]
+    assert len(heal_actions) == 1
+    assert heal_actions[0]["detail"]["tool_call_id"] == "call_orphan_1"
+
+
+def test_repair_drops_orphan_tool_without_tool_call_id():
+    """Orphan tool without tool_call_id is dropped (cannot synthesize valid pair)."""
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_drop",
+        "variables": {},
+        "history_messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "content": "no id"},
+            {"role": "assistant", "content": "done"},
+        ],
+    }
+
+    repaired, report = agent.snapshot.repair_portable_session(state)
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == []
+    assert report["applied"] is True
+
+    history = repaired["history_messages"]
+    assert [m["role"] for m in history] == ["user", "assistant"]
+
+    dropped_reasons = [d["reason"] for d in report["dropped_fields"]]
+    assert "orphan_tool_message_missing_tool_call_id" in dropped_reasons
+
+
+def test_repair_heals_multiple_consecutive_orphan_tools():
+    """Multiple consecutive orphan tools each get their own synthetic assistant."""
+    agent, _ = _build_agent_with_context()
+
+    state = {
+        "schema_version": "portable_session.v1",
+        "session_id": "sess_multi_heal",
+        "variables": {},
+        "history_messages": [
+            {"role": "tool", "content": "data_a", "tool_call_id": "call_a"},
+            {"role": "tool", "content": "data_b", "tool_call_id": "call_b"},
+            {"role": "tool", "content": "data_c", "tool_call_id": "call_c"},
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "ok"},
+        ],
+    }
+
+    repaired, report = agent.snapshot.repair_portable_session(state)
+    issues = agent.snapshot.validate_portable_session(repaired)
+    assert issues == [], f"Expected no issues after repair, got: {issues}"
+    assert report["applied"] is True
+
+    history = repaired["history_messages"]
+    # Each orphan gets: synthetic assistant + tool
+    # Then: user, assistant
+    expected_roles = [
+        "assistant", "tool",  # healed call_a
+        "assistant", "tool",  # healed call_b
+        "assistant", "tool",  # healed call_c
+        "user", "assistant",
+    ]
+    assert [m["role"] for m in history] == expected_roles
+
+    # Verify order preserved
+    tool_msgs = [m for m in history if m["role"] == "tool"]
+    assert [m["tool_call_id"] for m in tool_msgs] == ["call_a", "call_b", "call_c"]
+    assert [m["content"] for m in tool_msgs] == ["data_a", "data_b", "data_c"]
+
+    heal_actions = [a for a in report["actions"] if a["action"] == "heal_orphan_tool_message"]
+    assert len(heal_actions) == 3

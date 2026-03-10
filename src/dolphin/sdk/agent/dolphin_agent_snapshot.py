@@ -269,11 +269,47 @@ class DolphinAgentSnapshot:
                     continue
 
                 if role == "tool":
+                    tool_call_id = msg.get("tool_call_id")
+
+                    if isinstance(tool_call_id, str) and tool_call_id:
+                        synthetic_assistant = {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": tool_call_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": "_healed_orphan_tool",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ],
+                        }
+                        repaired_history.append(synthetic_assistant)
+                        repaired_history.append(msg)
+                        report.applied = True
+                        report.actions.append(
+                            {
+                                "action": "heal_orphan_tool_message",
+                                "path": f"$.history_messages[{idx}]",
+                                "detail": {"tool_call_id": tool_call_id},
+                            }
+                        )
+                        logger.warning(
+                            "Healed orphan tool message at index %d with "
+                            "synthetic assistant tool_call (tool_call_id=%s)",
+                            idx,
+                            tool_call_id,
+                        )
+                        idx += 1
+                        continue
+
                     report.applied = True
                     report.dropped_fields.append(
                         {
                             "path": f"$.history_messages[{idx}]",
-                            "reason": "orphan_tool_message",
+                            "reason": "orphan_tool_message_missing_tool_call_id",
                         }
                     )
                     idx += 1

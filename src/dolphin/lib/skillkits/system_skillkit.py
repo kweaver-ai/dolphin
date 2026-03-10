@@ -60,6 +60,29 @@ def _normalize_path(value: Any) -> str:
 
 
 
+# Maximum file size (in bytes) that file-reading tools will process.
+_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# Directories that os.walk should never descend into.
+_SKIP_DIRS = frozenset({
+    ".colima", ".docker", ".lima", ".vagrant",
+    "node_modules", ".git", "__pycache__",
+    ".venv", "venv", ".tox",
+})
+
+
+def _check_file_size(file_path: str) -> str | None:
+    """Return an error string if *file_path* exceeds the size limit, else ``None``."""
+    try:
+        size = os.path.getsize(file_path)
+    except OSError:
+        return None
+    if size > _MAX_FILE_SIZE:
+        size_mb = size / (1024 * 1024)
+        return f"[SKIPPED] File too large ({size_mb:.1f} MB, limit {_MAX_FILE_SIZE // (1024 * 1024)} MB): {file_path}"
+    return None
+
+
 class SystemFunctionsSkillKit(Skillkit):
     _DEFAULT_CACHED_RESULT_LIMIT = 2000
     _MAX_CACHED_RESULT_LIMIT = 20000
@@ -179,6 +202,9 @@ class SystemFunctionsSkillKit(Skillkit):
             return f"[ERROR] File not found: {file_path}"
         if os.path.isdir(file_path):
             return f"[ERROR] Path is a directory, not a file: {file_path}"
+        size_err = _check_file_size(file_path)
+        if size_err:
+            return size_err
         try:
             with open(file_path, "rb") as f:
                 data = f.read()
@@ -257,6 +283,11 @@ class SystemFunctionsSkillKit(Skillkit):
 
         for file_path in files:
             try:
+                size_err = _check_file_size(file_path)
+                if size_err:
+                    file_name = os.path.basename(file_path)
+                    result_parts.append(f"=== FILE: {file_name} ===\n{size_err}")
+                    continue
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
@@ -348,7 +379,8 @@ class SystemFunctionsSkillKit(Skillkit):
             files = [target_path]
         elif os.path.isdir(target_path):
             if recursive:
-                for root, _, filenames in os.walk(target_path):
+                for root, dirs, filenames in os.walk(target_path):
+                    dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
                     for filename in filenames:
                         file_path = os.path.join(root, filename)
                         if normalized_exts and not file_path.endswith(
@@ -381,6 +413,10 @@ class SystemFunctionsSkillKit(Skillkit):
         results: List[str] = []
         match_found = False
         for file_path in sorted(files):
+            size_err = _check_file_size(file_path)
+            if size_err:
+                results.append(f"=== {file_path} ===\n{size_err}")
+                continue
             try:
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
@@ -437,6 +473,9 @@ class SystemFunctionsSkillKit(Skillkit):
             results.append("\n".join(file_results))
 
         if not match_found:
+            if results:
+                # Some files were skipped or had errors; surface those messages.
+                return "\n".join(results)
             return f"No matches found for '{pattern}' in {target_path}"
 
         return "\n".join(results)
