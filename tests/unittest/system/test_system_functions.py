@@ -271,5 +271,68 @@ def func():
             self.assertIn("test.md", result)
             self.assertNotIn("test.py", result)
 
+    def test_read_file_skips_large_file(self):
+        """_read_file should refuse to read files exceeding the size limit."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            large_file = os.path.join(tmpdir, "huge.bin")
+            # Create a file just over 10 MB
+            with open(large_file, "wb") as f:
+                f.seek(10 * 1024 * 1024 + 1)
+                f.write(b"\x00")
+
+            result = self.skillkit._read_file(large_file)
+            self.assertIn("SKIPPED", result)
+            self.assertIn("too large", result.lower())
+
+    def test_read_folder_skips_large_file(self):
+        """_read_folder should skip files exceeding the size limit and still read normal files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Normal file
+            small = os.path.join(tmpdir, "small.txt")
+            with open(small, "w") as f:
+                f.write("I am small")
+
+            # Oversized file
+            big = os.path.join(tmpdir, "big.txt")
+            with open(big, "wb") as f:
+                f.seek(10 * 1024 * 1024 + 1)
+                f.write(b"\x00")
+
+            result = self.skillkit._read_folder(tmpdir, extensions="txt")
+            self.assertIn("I am small", result)
+            self.assertIn("SKIPPED", result)
+            self.assertIn("big.txt", result)
+
+    def test_grep_skips_large_file(self):
+        """_grep should skip files exceeding the size limit."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            large_file = os.path.join(tmpdir, "huge.txt")
+            with open(large_file, "wb") as f:
+                f.write(b"needle\n")
+                f.seek(10 * 1024 * 1024 + 1)
+                f.write(b"\x00")
+
+            result = self.skillkit._grep(large_file, "needle")
+            self.assertIn("SKIPPED", result)
+            self.assertNotIn("needle", result.split("SKIPPED")[0])
+
+    def test_grep_skips_dangerous_directories(self):
+        """_grep recursive walk should skip directories like .git, node_modules, .colima."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for dangerous_dir in [".git", "node_modules", ".colima"]:
+                ddir = os.path.join(tmpdir, dangerous_dir)
+                os.makedirs(ddir)
+                with open(os.path.join(ddir, "secret.txt"), "w") as f:
+                    f.write("findme_dangerous\n")
+
+            # Normal file that should be found
+            with open(os.path.join(tmpdir, "normal.txt"), "w") as f:
+                f.write("findme_normal\n")
+
+            result = self.skillkit._grep(tmpdir, "findme", recursive=True)
+            self.assertIn("findme_normal", result)
+            self.assertNotIn("findme_dangerous", result)
+
+
 if __name__ == "__main__":
     unittest.main()
