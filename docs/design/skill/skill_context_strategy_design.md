@@ -969,7 +969,7 @@ skillkits:
   ResourceSkillkit:
     _load_resource_skill:
         mode: pin
-    _load_skill_resource:
+    _read_skill_asset:
       mode: summary
       max_length: 2000
       ttl_turns: 3

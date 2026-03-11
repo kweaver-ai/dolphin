@@ -47,6 +47,8 @@ class ResourceSkillConfig:
         default_factory=lambda: list(_DEFAULT_ALLOWED_EXTENSIONS)
     )
     variables: dict = field(default_factory=dict)
+    include: Optional[List[str]] = None
+    exclude: Optional[List[str]] = None
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "ResourceSkillConfig":
@@ -72,6 +74,8 @@ class ResourceSkillConfig:
             max_scan_depth=resource_config.get("max_scan_depth", _DEFAULT_MAX_SCAN_DEPTH),
             allowed_extensions=resource_config.get("allowed_extensions", _DEFAULT_ALLOWED_EXTENSIONS),
             variables=resource_config.get("variables", {}),
+            include=resource_config.get("include", None),
+            exclude=resource_config.get("exclude", None),
         )
 
     def get_resolved_directories(self, base_path: Optional[Path] = None) -> List[Path]:
@@ -115,4 +119,6 @@ class ResourceSkillConfig:
             "max_scan_depth": self.max_scan_depth,
             "allowed_extensions": self.allowed_extensions,
             "variables": self.variables,
+            "include": self.include,
+            "exclude": self.exclude,
         }

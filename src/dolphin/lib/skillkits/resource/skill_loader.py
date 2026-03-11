@@ -232,22 +232,22 @@ class SkillLoader:
             return None
 
     def load_resource(
-        self, skill_dir: Path, resource_path: str
+        self, skill_dir: Path, asset_path: str
     ) -> Tuple[Optional[str], Optional[str]]:
-        """Load Level 3 resource file content.
+        """Load Level 3 asset file content.
 
         Args:
             skill_dir: Path to the skill directory
-            resource_path: Relative path to resource file (e.g., "scripts/etl.py")
+            asset_path: Relative path to asset file (e.g., "scripts/etl.py")
 
         Returns:
             Tuple of (content, error_message). Content is None if error.
         """
-        full_path, error = resolve_safe_path(resource_path, skill_dir)
+        full_path, error = resolve_safe_path(asset_path, skill_dir)
         if error:
             return None, error
         if full_path is None:
-            return None, f"Invalid path: '{resource_path}'"
+            return None, f"Invalid path: '{asset_path}'"
 
         # Validate file type
         validation = self.validator.validate_file_type(full_path)
@@ -268,11 +268,11 @@ class SkillLoader:
             with os.fdopen(fd, "r", encoding="utf-8") as f:
                 return f.read(), None
         except UnicodeDecodeError:
-            return None, f"Cannot read '{resource_path}': not a text file"
+            return None, f"Cannot read '{asset_path}': not a text file"
         except OSError as e:
-            return None, f"Error reading '{resource_path}': {e}"
+            return None, f"Error reading '{asset_path}': {e}"
         except Exception as e:
-            return None, f"Error reading '{resource_path}': {e}"
+            return None, f"Error reading '{asset_path}': {e}"
 
     def _parse_frontmatter(self, content: str) -> Tuple[Optional[Dict[str, Any]], str]:
         """Parse YAML frontmatter from SKILL.md content.
@@ -391,5 +391,5 @@ def truncate_content(content: str, max_tokens: int, chars_per_token: int = 4) ->
     return (
         truncated
         + "\n\n---\n"
-        + "*[Content truncated. Use `_load_skill_resource()` to load specific files.]*"
+        + "*[Content truncated. Use `_read_skill_asset()` to load specific files.]*"
     )
