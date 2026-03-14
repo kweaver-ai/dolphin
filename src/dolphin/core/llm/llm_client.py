@@ -1,4 +1,6 @@
 import asyncio
+import atexit
+import contextlib
 import json
 import re
 import threading
@@ -12,7 +14,11 @@ import openai
 from dolphin.core.common.enums import Messages
 from dolphin.core.config.global_config import TypeAPI
 from dolphin.core.context.context import Context
-from dolphin.core.llm.llm import LLMModelFactory, LLMOpenai
+from dolphin.core.llm.llm import (
+    LLMModelFactory,
+    LLMOpenai,
+    close_cached_openai_clients,
+)
 from dolphin.core.config.global_config import (
     LLMInstanceConfig,
     ContextConstraints,
@@ -38,7 +44,21 @@ from dolphin.core.llm.message_sanitizer import needs_reasoning_content, sanitize
 """
 
 _bridge_loop: asyncio.AbstractEventLoop | None = None
+_bridge_thread: threading.Thread | None = None
 _bridge_loop_lock = threading.Lock()
+_bridge_loop_started = threading.Event()
+
+
+def _run_bridge_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Run the bridge loop in a dedicated thread and clean up cached clients."""
+    asyncio.set_event_loop(loop)
+    _bridge_loop_started.set()
+    try:
+        loop.run_forever()
+    finally:
+        with contextlib.suppress(Exception):
+            loop.run_until_complete(close_cached_openai_clients())
+        loop.close()
 
 
 def _get_bridge_loop() -> asyncio.AbstractEventLoop:
@@ -47,13 +67,42 @@ def _get_bridge_loop() -> asyncio.AbstractEventLoop:
     Used by sync-to-async bridges so that AsyncOpenAI clients cached in
     the WeakKeyDictionary can be reused across calls.
     """
-    global _bridge_loop
+    global _bridge_loop, _bridge_thread
     with _bridge_loop_lock:
-        if _bridge_loop is None or _bridge_loop.is_closed():
+        if _bridge_loop is None or _bridge_loop.is_closed() or not _bridge_loop.is_running():
             _bridge_loop = asyncio.new_event_loop()
-            t = threading.Thread(target=_bridge_loop.run_forever, daemon=True)
-            t.start()
+            _bridge_loop_started.clear()
+            _bridge_thread = threading.Thread(
+                target=_run_bridge_loop,
+                args=(_bridge_loop,),
+                daemon=True,
+            )
+            _bridge_thread.start()
+            if not _bridge_loop_started.wait(timeout=5):
+                raise RuntimeError("Bridge event loop failed to start within 5 seconds")
         return _bridge_loop
+
+
+def shutdown_bridge_loop() -> None:
+    """Stop the bridge loop and release its thread-owned resources."""
+    global _bridge_loop, _bridge_thread
+    with _bridge_loop_lock:
+        loop = _bridge_loop
+        thread = _bridge_thread
+        _bridge_loop = None
+        _bridge_thread = None
+
+    if loop is None:
+        return
+
+    if not loop.is_closed():
+        loop.call_soon_threadsafe(loop.stop)
+
+    if thread and thread.is_alive():
+        thread.join(timeout=5)
+
+
+atexit.register(shutdown_bridge_loop)
 
 
 class LLMClient:
@@ -491,17 +540,8 @@ class LLMClient:
                     final_content = chunk["content"]
             return final_content
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:  # 'There is no current event loop...'
-            loop = None
-
-        if loop and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(get_result(), _get_bridge_loop())
-            return future.result(timeout=60)
-        else:
-            # If there is no running loop, we can use asyncio.run()
-            return asyncio.run(get_result())
+        future = asyncio.run_coroutine_threadsafe(get_result(), _get_bridge_loop())
+        return future.result(timeout=60)
 
     # Streaming self-reflection implementation
     async def run_self_reflection_stream(
