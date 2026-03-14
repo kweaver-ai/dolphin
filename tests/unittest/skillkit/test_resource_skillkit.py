@@ -446,7 +446,7 @@ class TestResourceSkillkitEntryPointLoading(unittest.TestCase):
         skill_names = set(global_skills.installedSkillset.getSkillNames())
         # Note: _list_resource_skills is removed; Level 1 metadata is auto-injected
         self.assertIn("_load_resource_skill", skill_names)
-        self.assertIn("_load_skill_resource", skill_names)
+        self.assertIn("_read_skill_asset", skill_names)
 
     def test_resource_skillkit_reads_global_resource_skills_config(self):
         """验证 ResourceSkillkit 可从 GlobalConfig.resource_skills 读取扫描目录等配置。"""
@@ -786,6 +786,29 @@ class TestResourceSkillkitIntegration(unittest.TestCase):
             f"Failed to load resource: {content}"
         )
 
+    def test_level3_tool_schema_uses_new_name_and_parameter(self):
+        """Level 3 tool schema should expose only the new public API."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        skill_by_name = {
+            skill.get_function_name(): skill
+            for skill in skillkit.getSkills()
+        }
+
+        new_schema = skill_by_name["_read_skill_asset"].get_openai_tool_schema()
+        new_properties = new_schema["function"]["parameters"]["properties"]
+        assert "asset_path" in new_properties
+        assert "resource_path" not in new_properties
+        assert "asset_path" in new_schema["function"]["parameters"]["required"]
+
     def test_skill_meta_data_class(self):
         """Test SkillMeta data class functionality."""
         if not self.skillkit_available:
@@ -855,7 +878,7 @@ class TestResourceSkillkitIntegration(unittest.TestCase):
 
         skill_names = [s.func.__name__ for s in skills]
         self.assertIn("_load_resource_skill", skill_names)
-        self.assertIn("_load_skill_resource", skill_names)
+        self.assertIn("_read_skill_asset", skill_names)
 
     def test_cache_functionality(self):
         """Test that caching works correctly."""
@@ -914,6 +937,207 @@ class TestResourceSkillkitIntegration(unittest.TestCase):
 
 
 
+
+class TestResourceSkillConfigIncludeExclude(unittest.TestCase):
+    """Test include/exclude fields on ResourceSkillConfig."""
+
+    def test_default_include_exclude_are_none(self):
+        """Default config has no include/exclude filter."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig()
+        self.assertIsNone(config.include)
+        self.assertIsNone(config.exclude)
+
+    def test_from_dict_parses_include(self):
+        """from_dict should parse include list."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig.from_dict({
+            "resource_skills": {
+                "include": ["skill-a", "skill-b"],
+            }
+        })
+        self.assertEqual(config.include, ["skill-a", "skill-b"])
+        self.assertIsNone(config.exclude)
+
+    def test_from_dict_parses_exclude(self):
+        """from_dict should parse exclude list."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig.from_dict({
+            "resource_skills": {
+                "exclude": ["skill-c"],
+            }
+        })
+        self.assertIsNone(config.include)
+        self.assertEqual(config.exclude, ["skill-c"])
+
+    def test_from_dict_no_filter_by_default(self):
+        """from_dict without include/exclude yields None for both."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig.from_dict({
+            "resource_skills": {"enabled": True}
+        })
+        self.assertIsNone(config.include)
+        self.assertIsNone(config.exclude)
+
+    def test_to_dict_includes_filter_fields(self):
+        """to_dict should round-trip include/exclude."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig(include=["a"], exclude=["b"])
+        d = config.to_dict()
+        self.assertEqual(d["include"], ["a"])
+        self.assertEqual(d["exclude"], ["b"])
+
+    def test_to_dict_none_filter_fields(self):
+        """to_dict should include None for unset filters."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig()
+        d = config.to_dict()
+        self.assertIsNone(d["include"])
+        self.assertIsNone(d["exclude"])
+
+
+class TestResourceSkillkitIncludeExcludeFilter(unittest.TestCase):
+    """Test that ResourceSkillkit.initialize() applies include/exclude filtering."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from dolphin.lib.skillkits.resource import ResourceSkillkit
+            from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+            cls.ResourceSkillkit = ResourceSkillkit
+            cls.ResourceSkillConfig = ResourceSkillConfig
+            cls.available = True
+        except ImportError as e:
+            cls.available = False
+            cls.import_error = str(e)
+
+        cls.temp_dir = tempfile.mkdtemp(prefix="test_filter_")
+        # Create 3 skills: alpha, beta, gamma
+        for name in ["alpha", "beta", "gamma"]:
+            skill_dir = Path(cls.temp_dir) / name
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Skill {name}\n---\n\n# {name}\n\nBody of {name}.\n",
+                encoding="utf-8",
+            )
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, "temp_dir") and os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir)
+
+    def _make_skillkit(self, include=None, exclude=None):
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+            include=include,
+            exclude=exclude,
+        )
+        sk = self.ResourceSkillkit(config)
+        sk.initialize()
+        return sk
+
+    def test_no_filter_returns_all(self):
+        """Without include/exclude, all 3 skills are available."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit()
+        self.assertEqual(sk.get_available_skills(), ["alpha", "beta", "gamma"])
+
+    def test_include_filters_to_subset(self):
+        """include=['alpha', 'gamma'] should keep only those two."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha", "gamma"])
+        self.assertEqual(sk.get_available_skills(), ["alpha", "gamma"])
+
+    def test_include_single(self):
+        """include=['beta'] should keep only beta."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["beta"])
+        self.assertEqual(sk.get_available_skills(), ["beta"])
+
+    def test_exclude_removes_skills(self):
+        """exclude=['beta'] should remove beta, keep alpha and gamma."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(exclude=["beta"])
+        self.assertEqual(sk.get_available_skills(), ["alpha", "gamma"])
+
+    def test_exclude_multiple(self):
+        """exclude=['alpha', 'gamma'] should keep only beta."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(exclude=["alpha", "gamma"])
+        self.assertEqual(sk.get_available_skills(), ["beta"])
+
+    def test_include_takes_precedence_over_exclude(self):
+        """When both include and exclude are set, include takes precedence."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha"], exclude=["alpha"])
+        # include wins: only alpha
+        self.assertEqual(sk.get_available_skills(), ["alpha"])
+
+    def test_include_unknown_skill_is_harmless(self):
+        """include with a non-existent skill name doesn't crash."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha", "nonexistent"])
+        self.assertEqual(sk.get_available_skills(), ["alpha"])
+
+    def test_exclude_unknown_skill_is_harmless(self):
+        """exclude with a non-existent skill name doesn't crash."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(exclude=["nonexistent"])
+        self.assertEqual(sk.get_available_skills(), ["alpha", "beta", "gamma"])
+
+    def test_metadata_prompt_reflects_filter(self):
+        """get_metadata_prompt() should only show included skills."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha"])
+        prompt = sk.get_metadata_prompt()
+        self.assertIn("alpha", prompt)
+        self.assertNotIn("beta", prompt)
+        self.assertNotIn("gamma", prompt)
+
+    def test_load_skill_blocked_by_filter(self):
+        """load_skill() for a filtered-out skill should return 'not found'."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha"])
+        result = sk.load_skill("beta")
+        self.assertIn("not found", result.lower())
+
+    def test_empty_include_means_no_skills(self):
+        """include=[] should result in zero skills."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=[])
+        self.assertEqual(sk.get_available_skills(), [])
+
+    def test_filter_applied_via_setGlobalConfig(self):
+        """Filter should work when config comes through setGlobalConfig()."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        from dolphin.core.config.global_config import GlobalConfig, SkillConfig, MCPConfig
+
+        sk = self.ResourceSkillkit()
+        config = GlobalConfig(
+            skill_config=SkillConfig(enabled_skills=["resource_skillkit"]),
+            mcp_config=MCPConfig(enabled=False),
+            resource_skills={
+                "enabled": True,
+                "directories": [self.temp_dir],
+                "include": ["beta"],
+            },
+        )
+        sk.setGlobalConfig(config)
+        sk.initialize()
+        self.assertEqual(sk.get_available_skills(), ["beta"])
 
 
 if __name__ == "__main__":

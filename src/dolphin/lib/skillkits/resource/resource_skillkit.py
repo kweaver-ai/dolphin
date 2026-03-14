@@ -155,6 +155,22 @@ class ResourceSkillkit(Skillkit):
             self._skills_meta[meta.name] = meta
             self._meta_cache.set(meta.name, meta)
 
+        # Apply include/exclude filter
+        if self.config.include is not None:
+            include_set = set(self.config.include)
+            to_remove = [k for k in self._skills_meta if k not in include_set]
+            for k in to_remove:
+                del self._skills_meta[k]
+                self._meta_cache.delete(k)
+            logger.info(f"Applied include filter: {len(self._skills_meta)} skills remaining")
+        elif self.config.exclude is not None:
+            exclude_set = set(self.config.exclude)
+            to_remove = [k for k in self._skills_meta if k in exclude_set]
+            for k in to_remove:
+                del self._skills_meta[k]
+                self._meta_cache.delete(k)
+            logger.info(f"Applied exclude filter: {len(self._skills_meta)} skills remaining")
+
         logger.info(f"Initialized ResourceSkillkit with {len(self._skills_meta)} skills")
         self._initialized = True
 
@@ -170,7 +186,7 @@ class ResourceSkillkit(Skillkit):
         """
         return [
             SkillFunction(self._load_resource_skill),
-            SkillFunction(self._load_skill_resource),
+            SkillFunction(self._read_skill_asset),
         ]
 
     def get_metadata_prompt(self) -> str:
@@ -287,18 +303,18 @@ class ResourceSkillkit(Skillkit):
             f"_load_resource_skill(skill_name=\"{name}\", mode=\"full\")"
         )
 
-    def load_resource(self, skill_name: str, resource_path: str) -> str:
-        """Load Level 3 resource file content.
+    def load_resource(self, skill_name: str, asset_path: str) -> str:
+        """Load Level 3 asset file content.
 
-        This is the internal method called by _load_skill_resource.
+        This is the internal method called by _read_skill_asset.
         The returned content is temporary (scratchpad).
 
         Args:
             skill_name: The skill name
-            resource_path: Relative path to resource file
+            asset_path: Relative path to asset file
 
         Returns:
-            Resource file content or error message
+            Asset file content or error message
         """
         self._ensure_initialized()
 
@@ -319,12 +335,12 @@ class ResourceSkillkit(Skillkit):
         meta = self._skills_meta[skill_name]
         skill_dir = Path(meta.base_path)
 
-        content, error = self.loader.load_resource(skill_dir, resource_path)
+        content, error = self.loader.load_resource(skill_dir, asset_path)
         if error:
             return f"Error: {error}"
 
         # Format with file info header
-        return f"# {resource_path}\n\n```\n{content}\n```"
+        return f"# {asset_path}\n\n```\n{content}\n```"
 
     def _substitute_variables(self, content: str, extra_vars: dict = None) -> str:
         """Replace $VAR_NAME placeholders with values from config.variables and extra_vars."""
@@ -393,11 +409,16 @@ class ResourceSkillkit(Skillkit):
             return content
         return f"{PIN_MARKER}\n{content}"
 
-    def _load_skill_resource(self, skill_name: str, resource_path: str, **kwargs) -> str:
-        """Load a specific resource file from a skill package.
+    def _read_skill_asset(
+        self,
+        skill_name: str,
+        asset_path: str,
+        **kwargs,
+    ) -> str:
+        """Read a specific asset file from a skill package.
 
         Loads content from scripts/ or references/ directories within
-        a skill package. The resource path should be relative to the
+        a skill package. The asset path should be relative to the
         skill directory (e.g., "scripts/etl.py").
 
         Note: Level 3 resources are designed to be ephemeral (single-turn only).
@@ -406,13 +427,13 @@ class ResourceSkillkit(Skillkit):
 
         Args:
             skill_name (str): Name of the skill
-            resource_path (str): Relative path to the resource file
+            asset_path (str): Relative path to the asset file
 
         Returns:
-            str: Resource file content
+            str: Asset file content
         """
         # Level 3: No PIN_MARKER - content goes to scratchpad, discarded after turn
-        return self.load_resource(skill_name, resource_path)
+        return self.load_resource(skill_name, asset_path)
 
     # =====================================
     # Utility Methods

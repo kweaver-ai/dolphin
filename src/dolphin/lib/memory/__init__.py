@@ -8,7 +8,6 @@ supporting both simple memory storage and complex knowledge management with user
 from dolphin.core.common import KnowledgePoint, SingleMessage
 from .storage import MemoryFileSys
 from .manager import MemoryManager
-from .llm_calls import LLMCall, KnowledgeExtractionCall, KnowledgeMergeCall
 
 from dolphin.core.config.global_config import MemoryConfig
 
@@ -21,8 +20,4 @@ __all__ = [
     # Unified management
     "MemoryManager",
     "MemoryConfig",
-    # LLM processing
-    "LLMCall",
-    "KnowledgeExtractionCall",
-    "KnowledgeMergeCall",
 ]
