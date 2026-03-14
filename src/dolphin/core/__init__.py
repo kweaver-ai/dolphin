@@ -48,7 +48,6 @@ from dolphin.core.skill.skill_matcher import SkillMatcher
 # LLM
 from dolphin.core.llm.llm import LLM
 from dolphin.core.llm.llm_client import LLMClient
-from dolphin.core.llm.llm_call import LLMCall
 
 # Config
 from dolphin.core.config.global_config import GlobalConfig
@@ -90,7 +89,6 @@ __all__ = [
     # LLM
     "LLM",
     "LLMClient",
-    "LLMCall",
     # Config
     "GlobalConfig",
     # Common

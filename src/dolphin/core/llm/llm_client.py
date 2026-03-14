@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import threading
 from typing import Optional
 
 from dolphin.core.common.exceptions import ModelException
@@ -35,6 +36,24 @@ from dolphin.core.llm.message_sanitizer import needs_reasoning_content, sanitize
     Supports streaming and non-streaming (deepseek_chat, deepseek_chat_stream)
     Supports structured output (response_format=True/False); if structured output is to be used, the instruction must include the word "json"
 """
+
+_bridge_loop: asyncio.AbstractEventLoop | None = None
+_bridge_loop_lock = threading.Lock()
+
+
+def _get_bridge_loop() -> asyncio.AbstractEventLoop:
+    """Return a long-lived event loop running in a daemon thread.
+
+    Used by sync-to-async bridges so that AsyncOpenAI clients cached in
+    the WeakKeyDictionary can be reused across calls.
+    """
+    global _bridge_loop
+    with _bridge_loop_lock:
+        if _bridge_loop is None or _bridge_loop.is_closed():
+            _bridge_loop = asyncio.new_event_loop()
+            t = threading.Thread(target=_bridge_loop.run_forever, daemon=True)
+            t.start()
+        return _bridge_loop
 
 
 class LLMClient:
@@ -478,22 +497,8 @@ class LLMClient:
             loop = None
 
         if loop and loop.is_running():
-            # If there's a running loop, we need to avoid deadlock
-            # Create a new thread to run the coroutine
-            import concurrent.futures
-
-            def run_in_new_loop():
-                # Create a new event loop in this thread
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(get_result())
-                finally:
-                    new_loop.close()
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(run_in_new_loop)
-                return future.result(timeout=60)  # 60 second timeout
+            future = asyncio.run_coroutine_threadsafe(get_result(), _get_bridge_loop())
+            return future.result(timeout=60)
         else:
             # If there is no running loop, we can use asyncio.run()
             return asyncio.run(get_result())

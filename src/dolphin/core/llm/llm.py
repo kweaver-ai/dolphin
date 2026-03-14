@@ -1,7 +1,9 @@
 import asyncio
 from abc import abstractmethod
 import json
-from typing import Any, Optional
+import threading
+import weakref
+from typing import Any, NamedTuple, Optional
 from dolphin.core.common.exceptions import ModelException
 from dolphin.core import flags
 import aiohttp
@@ -20,9 +22,17 @@ from dolphin.core.llm.message_sanitizer import needs_reasoning_content, sanitize
 
 logger = get_logger("llm")
 
-_OpenAIClientCacheKey = tuple[str, str, tuple[tuple[str, str], ...]]
-_client_cache: dict[_OpenAIClientCacheKey, AsyncOpenAI] = {}
-_client_lock = asyncio.Lock()
+class _ConnKey(NamedTuple):
+    """Cache key for AsyncOpenAI clients, grouping connection parameters."""
+    base_url: str
+    api_key: str
+    headers: tuple[tuple[str, str], ...]
+
+
+_client_cache: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[_ConnKey, AsyncOpenAI]
+] = weakref.WeakKeyDictionary()
+_client_cache_lock = threading.Lock()
 
 
 def _normalize_openai_headers(headers: Optional[dict[str, str]]) -> dict[str, str]:
@@ -30,14 +40,14 @@ def _normalize_openai_headers(headers: Optional[dict[str, str]]) -> dict[str, st
     return dict(headers or {})
 
 
-def _build_openai_client_cache_key(
+def _build_conn_key(
     base_url: str,
     api_key: str,
     headers: Optional[dict[str, str]],
-) -> _OpenAIClientCacheKey:
-    """Build a stable cache key for AsyncOpenAI clients."""
+) -> _ConnKey:
+    """Build a stable cache key from connection parameters."""
     normalized_headers = tuple(sorted((headers or {}).items()))
-    return (base_url, api_key, normalized_headers)
+    return _ConnKey(base_url, api_key, normalized_headers)
 
 
 async def get_cached_openai_client(
@@ -45,34 +55,44 @@ async def get_cached_openai_client(
     api_key: str,
     headers: Optional[dict[str, str]],
 ) -> AsyncOpenAI:
-    """Return a cached AsyncOpenAI client for the same connection settings."""
+    """Return a cached AsyncOpenAI client for the same connection settings.
+
+    Clients are cached per event loop because the underlying httpx.AsyncClient
+    binds connections to the loop where they were created.  When a loop is
+    garbage-collected the WeakKeyDictionary automatically drops the associated
+    entries, allowing AsyncHttpxClientWrapper.__del__ to close resources.
+    """
+    loop = asyncio.get_running_loop()
     normalized_headers = _normalize_openai_headers(headers)
-    cache_key = _build_openai_client_cache_key(base_url, api_key, normalized_headers)
+    conn_key = _build_conn_key(base_url, api_key, normalized_headers)
 
-    client = _client_cache.get(cache_key)
-    if client is not None:
-        return client
+    with _client_cache_lock:
+        per_loop = _client_cache.get(loop)
+        if per_loop is None:
+            per_loop = {}
+            _client_cache[loop] = per_loop
 
-    async with _client_lock:
-        client = _client_cache.get(cache_key)
+        client = per_loop.get(conn_key)
         if client is None:
             client = AsyncOpenAI(
                 base_url=base_url,
                 api_key=api_key,
                 default_headers=normalized_headers,
             )
-            _client_cache[cache_key] = client
+            per_loop[conn_key] = client
         return client
 
 
 async def close_cached_openai_clients() -> None:
-    """Close and clear all cached AsyncOpenAI clients."""
-    async with _client_lock:
-        cached_clients = list(_client_cache.values())
-        _client_cache.clear()
+    """Close cached AsyncOpenAI clients that belong to the current event loop."""
+    loop = asyncio.get_running_loop()
 
-    for client in cached_clients:
-        await client.close()
+    with _client_cache_lock:
+        per_loop = _client_cache.pop(loop, None)
+
+    if per_loop:
+        for client in per_loop.values():
+            await client.close()
 
 
 class ToolCallsParser:
