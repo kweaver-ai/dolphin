@@ -1446,71 +1446,109 @@ class BasicCodeBlock:
             )
             if agent_as_skill is not None:
                 console_agent_skill_enter(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
+            
+            # Trace: Tool call start hook
+            import time
+            tool_start_time = time.time()
+            trace_listener = getattr(self.context, 'trace_listener', None)
+            tool_type = getattr(skill, 'skill_type', 'function') if hasattr(skill, 'skill_type') else 'function'
+            
+            if trace_listener:
+                try:
+                    trace_listener.on_tool_start(
+                        tool_name=skill_name,
+                        tool_type=tool_type,
+                        args=skill_params_json,
+                    )
+                except Exception as e:
+                    logger.warning(f"Trace listener on_tool_start failed: {e}")
+            
+            tool_error = None
+            tool_result = None
             result = None
-            async for result in Skillkit.arun(
-                skill=skill,
-                skill_params=skill_params_json if skill_params_json is not None else {},
-                props=props,
-            ):
-                # Debug: log result type and keys
-                self.context.debug(
-                    f"[BasicCodeBlock.skill_run] Tool {skill_name} returned result type: {type(result)}"
-                )
-                if isinstance(result, dict):
-                    if "answer" in result:
-                        self.context.debug(
-                            f"[BasicCodeBlock.skill_run] answer : {result['answer']}"
-                        )
-                
-                # Check if this is a dynamic tool response and load tools immediately
-                if (
-                    isinstance(result, dict)
-                    and "answer" in result
-                    and isinstance(result["answer"], dict)
-                    and "_dynamic_tools" in result["answer"]
+            try:
+                async for result in Skillkit.arun(
+                    skill=skill,
+                    skill_params=skill_params_json if skill_params_json is not None else {},
+                    props=props,
                 ):
-                    # Load dynamic tools into current skillkit
-                    self.context.info(
-                        f"[BasicCodeBlock] Detected dynamic tool response, loading tools..."
-                    )
-                    loaded_count = self._load_dynamic_tools(result["answer"])
-                    self.context.info(
-                        f"[BasicCodeBlock] Loaded {loaded_count} dynamic tools"
-                    )
-                else:
+                    # Debug: log result type and keys
                     self.context.debug(
-                        f"[BasicCodeBlock.skill_run] Not a dynamic tool response (result={'dict' if isinstance(result, dict) else type(result)}, has_answer={'answer' in result if isinstance(result, dict) else False})"
+                        f"[BasicCodeBlock.skill_run] Tool {skill_name} returned result type: {type(result)}"
+                    )
+                    if isinstance(result, dict):
+                        if "answer" in result:
+                            self.context.debug(
+                                f"[BasicCodeBlock.skill_run] answer : {result['answer']}"
+                            )
+                    
+                    # Check if this is a dynamic tool response and load tools immediately
+                    if (
+                        isinstance(result, dict)
+                        and "answer" in result
+                        and isinstance(result["answer"], dict)
+                        and "_dynamic_tools" in result["answer"]
+                    ):
+                        # Load dynamic tools into current skillkit
+                        self.context.info(
+                            f"[BasicCodeBlock] Detected dynamic tool response, loading tools..."
+                        )
+                        loaded_count = self._load_dynamic_tools(result["answer"])
+                        self.context.info(
+                            f"[BasicCodeBlock] Loaded {loaded_count} dynamic tools"
+                        )
+                    else:
+                        self.context.debug(
+                            f"[BasicCodeBlock.skill_run] Not a dynamic tool response (result={'dict' if isinstance(result, dict) else type(result)}, has_answer={'answer' in result if isinstance(result, dict) else False})"
+                        )
+
+                    # After tool execution, store the result in cache
+                    try:
+                        ref = self.skillkit_hook.on_tool_after_execute(skill_name, result)
+                        # Remove problematic code
+                    except Exception as e:
+                        import traceback
+
+                        raise e
+
+                    # Save the Reference object as raw output
+                    raw_output = ref
+                    # Process the response data to return to frontend
+                    try:
+                        result = self.skillkit_hook.on_before_reply_app(
+                            reference_id=ref.reference_id, skill=skill
+                        )
+                    except Exception as e:
+                        raise e
+
+                    self.recorder.update(
+                        item=result,
+                        raw_output=raw_output,
+                        source_type=SourceType.SKILL,
+                        skill_name=skill_name,
+                        skill_args=skill_params_json,
                     )
 
-                # After tool execution, store the result in cache
-                try:
-                    ref = self.skillkit_hook.on_tool_after_execute(skill_name, result)
-                    # Remove problematic code
-                except Exception as e:
-                    import traceback
-
-                    raise e
-
-                # Save the Reference object as raw output
-                raw_output = ref
-                # Process the response data to return to frontend
-                try:
-                    result = self.skillkit_hook.on_before_reply_app(
-                        reference_id=ref.reference_id, skill=skill
-                    )
-                except Exception as e:
-                    raise e
-
-                self.recorder.update(
-                    item=result,
-                    raw_output=raw_output,
-                    source_type=SourceType.SKILL,
-                    skill_name=skill_name,
-                    skill_args=skill_params_json,
-                )
-
-                have_answer = True
-                yield result
+                    have_answer = True
+                    tool_result = result
+                    yield result
+            except Exception as e:
+                tool_error = e
+                raise
+            finally:
+                # Trace: Tool call end hook
+                tool_latency_ms = int((time.time() - tool_start_time) * 1000)
+                
+                if trace_listener:
+                    try:
+                        trace_listener.on_tool_end(
+                            tool_name=skill_name,
+                            result=tool_result,
+                            latency_ms=tool_latency_ms,
+                            error=tool_error,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Trace listener on_tool_end failed: {e}")
 
             # Restore the original current agent after skill execution
             if agent_as_skill is not None:
@@ -1653,6 +1691,67 @@ class BasicCodeBlock:
         emitted_output_events = False
         last_full_text = ""
 
+        # Trace: LLM call start hook
+        import time
+        llm_start_time = time.time()
+        trace_listener = getattr(self.context, 'trace_listener', None)
+        block_type = llm_params.get('lang_mode', 'chat')
+        
+        # Trace: LLM call start hook
+        if trace_listener:
+            try:
+                model_name_param = llm_params.get('model')
+                messages_dict = llm_params["messages"].get_messages_as_dict() if hasattr(llm_params["messages"], 'get_messages_as_dict') else []
+                
+                # Get actual model config to extract model_name and request parameters
+                # These are the same values that will be sent in the API payload (llm.py:303-312)
+                actual_model_name = 'default'
+                trace_params = {}
+                try:
+                    model_config = self.llm_client.get_model_config(model_name_param)
+                    # Check if it's a valid LLMInstanceConfig object (not dict fallback)
+                    if model_config and hasattr(model_config, 'model_name'):
+                        actual_model_name = model_config.model_name
+                        # Extract request parameters from model_config
+                        # These are the values that will be used in payload at llm.py:303-312
+                        trace_params = {
+                            'temperature': getattr(model_config, 'temperature', None),
+                            'top_p': getattr(model_config, 'top_p', None),
+                            'top_k': getattr(model_config, 'top_k', None),
+                            'max_tokens': getattr(model_config, 'max_tokens', None),
+                            'frequency_penalty': getattr(model_config, 'frequency_penalty', None),
+                            'presence_penalty': getattr(model_config, 'presence_penalty', None),
+                        }
+                    elif isinstance(model_config, dict) and 'model_name' in model_config:
+                        actual_model_name = model_config['model_name']
+                        # Extract from dict
+                        trace_params = {
+                            'temperature': model_config.get('temperature'),
+                            'top_p': model_config.get('top_p'),
+                            'top_k': model_config.get('top_k'),
+                            'max_tokens': model_config.get('max_tokens'),
+                            'frequency_penalty': model_config.get('frequency_penalty'),
+                            'presence_penalty': model_config.get('presence_penalty'),
+                        }
+                except Exception:
+                    # Fallback to param if config lookup fails
+                    actual_model_name = model_name_param or 'default'
+                
+                # Override with explicit params from llm_params if provided
+                if 'temperature' in llm_params:
+                    trace_params['temperature'] = llm_params['temperature']
+                
+                trace_listener.on_llm_start(
+                    model=actual_model_name,
+                    messages=messages_dict,
+                    block_type=block_type,
+                    **trace_params,
+                )
+            except Exception as e:
+                logger.warning(f"Trace listener on_llm_start failed: {e}")
+
+        llm_error = None
+        llm_response = None
         try:
             async for chunk in self.llm_client.mf_chat_stream(**llm_params):
                 # Checkpoint: Check user interrupt during LLM streaming
@@ -1702,7 +1801,67 @@ class BasicCodeBlock:
                 # If a complete tool call is detected and early-stop is enabled, stop streaming.
                 if early_stop_on_tool_call and tool_call_detected and complete_tool_call:
                     break
+            
+            # Capture final response for trace (including usage from last chunk)
+            if stream_item:
+                llm_response = {
+                    'answer': stream_item.answer,
+                    'think': stream_item.think,
+                    'tool_call': stream_item.get_tool_call() if stream_item.has_complete_tool_call() else None,
+                    'finish_reason': stream_item.finish_reason,
+                }
+                # Capture token usage from last stream chunk
+                llm_token_usage = stream_item.token_usage
+        except Exception as e:
+            llm_error = e
+            raise
         finally:
+            # Trace: LLM call end hook
+            llm_latency_ms = int((time.time() - llm_start_time) * 1000)
+            
+            if trace_listener:
+                try:
+                    # Use token usage from stream_item if available, otherwise try context
+                    usage_dict = None
+                    if 'llm_token_usage' in locals() and llm_token_usage:
+                        # Convert OpenAI format (prompt_tokens, completion_tokens) to standard format
+                        usage_dict = {
+                            'input_tokens': llm_token_usage.get('prompt_tokens', 0),
+                            'output_tokens': llm_token_usage.get('completion_tokens', 0),
+                            'total_tokens': llm_token_usage.get('total_tokens', 0),
+                        }
+                    else:
+                        # Fallback to context variable
+                        ctx_usage = self.context.get_var_value('usage')
+                        if ctx_usage:
+                            usage_dict = {
+                                'input_tokens': ctx_usage.get('prompt_tokens') or ctx_usage.get('input_tokens', 0),
+                                'output_tokens': ctx_usage.get('completion_tokens') or ctx_usage.get('output_tokens', 0),
+                                'total_tokens': ctx_usage.get('total_tokens', 0),
+                            }
+                    
+                    # Use actual model name from llm_client config (same logic as on_llm_start)
+                    actual_model_name = 'default'
+                    try:
+                        model_config = self.llm_client.get_model_config(llm_params.get('model'))
+                        if model_config and hasattr(model_config, 'model_name'):
+                            actual_model_name = model_config.model_name
+                        elif isinstance(model_config, dict) and 'model_name' in model_config:
+                            actual_model_name = model_config['model_name']
+                    except Exception:
+                        actual_model_name = llm_params.get('model') or 'default'
+                    
+                    trace_listener.on_llm_end(
+                        model=actual_model_name,
+                        response=llm_response,
+                        latency_ms=llm_latency_ms,
+                        usage=usage_dict,
+                        error=llm_error,
+                        block_type=block_type,
+                    )
+                except Exception as e:
+                    logger.warning(f"Trace listener on_llm_end failed: {e}")
+            
             if emitted_output_events:
                 self.context.write_output(
                     "llm_stream",

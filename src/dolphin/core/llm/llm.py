@@ -311,6 +311,9 @@ class LLMModelFactory(LLM):
                 "messages": sanitized_messages,
                 "max_tokens": llm_instance_config.max_tokens,
                 "stream": True,
+                "stream_options": {
+                    "include_usage": True
+                }
             }
             # If there is a tools parameter, add it to the API call, and support custom tool_choice.
             if "tools" in kwargs and kwargs["tools"]:
@@ -323,6 +326,8 @@ class LLMModelFactory(LLM):
             accu_content = ""
             reasoning_content = ""
             finish_reason = None
+            # Accumulate token usage from chunks
+            accumulated_usage = {}
             # Use ToolCallsParser to handle tool calls parsing
             tool_parser = ToolCallsParser()
             timeout = aiohttp.ClientTimeout(
@@ -415,9 +420,18 @@ class LLMModelFactory(LLM):
                                         "reasoning_content": reasoning_content,
                                     }
 
-                                # Add token usage information
+                                # Add token usage information and accumulate
                                 # {"completion_tokens": 26, "prompt_tokens": 159, "total_tokens": 185, "prompt_tokens_details": {"cached_tokens": 0, "uncached_tokens": 159}, "completion_tokens_details": {"reasoning_tokens": 0}}
-                                result["usage"] = line_json.get("usage", {})
+                                chunk_usage = line_json.get("usage", {})
+                                if chunk_usage:
+                                    # Update accumulated_usage with latest values
+                                    accumulated_usage.update(chunk_usage)
+                                elif "choices" in line_json and line_json["choices"]:
+                                    choice_usage = line_json["choices"][0].get("usage", {})
+                                    if choice_usage:
+                                        accumulated_usage.update(choice_usage)
+                                # Always return the accumulated usage (so last chunk has complete usage)
+                                result["usage"] = accumulated_usage.copy() if accumulated_usage else {}
 
                                 # Add tool call information using ToolCallsParser
                                 result.update(tool_parser.get_result())
@@ -425,6 +439,10 @@ class LLMModelFactory(LLM):
                                 # Add finish_reason for downstream tool call validation
                                 if finish_reason:
                                     result["finish_reason"] = finish_reason
+                                
+                                # Add actual model name from API response (for tracing)
+                                # Use API response model if available, otherwise use config model
+                                result["model"] = line_json.get("model", llm_instance_config.model_name)
 
                                 yield result
                         except Exception as e:

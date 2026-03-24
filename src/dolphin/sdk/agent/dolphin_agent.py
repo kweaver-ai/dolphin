@@ -45,6 +45,7 @@ class DolphinAgent(BaseAgent):
         is_cli: bool = False,
         log_level: int = logging.INFO,
         output_variables: Optional[list] = None,
+        trace_listener: Optional[Any] = None,
     ):
         """Initialize Dolphin Agent
 
@@ -64,6 +65,7 @@ class DolphinAgent(BaseAgent):
             log_level: Log level, such as logging.DEBUG, logging.INFO, etc.
             output_variables: List of variable names to return, corresponding to VariablePool variable names.
                             If specified, only these variables are returned; if empty list or None, all variables are returned
+            trace_listener: Optional ITraceListener implementation for observability tracking
         """
         # Parameter Validation
         if file_path is None and content is None:
@@ -117,6 +119,7 @@ class DolphinAgent(BaseAgent):
         self.output_variables = output_variables or []  # Store output variable list
         self.header_info = {}  # Store parsed header information
         self.snapshot = DolphinAgentSnapshot(self)
+        self.trace_listener = trace_listener  # Store trace listener for injection into context
 
         # Initialize components (completed in the _initialize method)
 
@@ -442,6 +445,11 @@ class DolphinAgent(BaseAgent):
                     "variables": self.variables,
                 }
             )
+
+            # Inject trace listener into context (for observability)
+            if self.trace_listener is not None:
+                self.executor.context.trace_listener = self.trace_listener
+                self._logger.debug("Trace listener injected into context")
 
             # Register hook for dynamic tool loading (SDK-layer policy)
             # This is a temporary hack: auto-add interrupt_config to dynamic tools
