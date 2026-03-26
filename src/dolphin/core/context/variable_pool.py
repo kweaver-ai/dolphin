@@ -34,6 +34,7 @@ import re
 from dolphin.core.common.constants import KEY_STATUS, KEY_PREVIOUS_STATUS
 from dolphin.core.common.types import SourceType, Var
 from dolphin.core.context.var_output import VarOutput
+from dolphin.core.utils.tools import strip_think_tags
 
 
 class VariablePool:
@@ -231,7 +232,13 @@ class VariablePool:
                 raise AttributeError(
                     f"Variable '{variable_first_name}' not found in variable pool"
                 )
-            variable_value = var.value
+            # Strip think tags from string base values before embedding them
+            # in the expression string.  If variable_value is a raw string
+            # (e.g. '<think>中文，推理</think>hello'), str() embeds the tags
+            # verbatim, producing invalid Python syntax for eval().
+            # Non-string values (dict, list, etc.) pass through strip_think_tags
+            # unchanged, so this is safe for all types.
+            variable_value = strip_think_tags(var.value)
             variable_full_index = variable_name.replace(
                 variable_first_name, str(variable_value), 1
             )

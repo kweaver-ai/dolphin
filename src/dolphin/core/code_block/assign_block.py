@@ -6,6 +6,7 @@ from dolphin.core.logging.logger import console_block_start
 from dolphin.core.common.enums import CategoryBlock, count_occurrences, TypeStage
 from dolphin.core.context.context import Context
 from dolphin.core.context.var_output import SourceType
+from dolphin.core.utils.tools import strip_think_tags
 
 
 class AssignBlock(BasicCodeBlock):
@@ -48,8 +49,8 @@ class AssignBlock(BasicCodeBlock):
         local_variables = {"json": json}
         for i in range(len(var_before)):
             expr = expr.replace(var_before[i][0], "temp" + str(i))
-            local_variables["temp" + str(i)] = self.context.get_variable_type(
-                var_before[i][0]
+            local_variables["temp" + str(i)] = strip_think_tags(
+                self.context.get_variable_type(var_before[i][0])
             )
 
         try:
