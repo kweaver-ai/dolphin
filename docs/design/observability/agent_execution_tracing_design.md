@@ -10,6 +10,10 @@
 4. [Span 树结构设计](#4-span-树结构设计)
 5. [上报数据模型](#5-上报数据模型)
 6. [属性与事件的分层设计](#6-属性与事件的分层设计)
+7. [实现架构](#7-实现架构)
+8. [实现步骤与改动范围](#8-实现步骤与改动范围)
+9. [向后兼容与降级策略](#9-向后兼容与降级策略)
+10. [非目标](#10-非目标)
 
 ---
 
@@ -208,25 +212,24 @@ traceId 由根 Span 生成，所有子 Span 自动继承，直接挂载在根 Sp
 
 **Span Attributes（指标）：**
 
-| 字段 | 类型 | 来源 | OTel 合规性 | 说明 |
-|-----|-----|-----|------------|-----|
-| `gen_ai.operation.name` | string | 固定值 `chat` | ✅ 标准值 | 操作类型 |
-| `gen_ai.provider.name` | string | `model_config.type_api` | ✅ 标准字段 | 模型提供商 |
-| `gen_ai.request.model` | string | `model_config.model_name` | ✅ 标准字段 | 请求模型名 |
-| `gen_ai.output.type` | string | 固定值 `text` | ✅ 标准值 | 输出内容类型 |
-| `gen_ai.request.temperature` | double | `model_config.temperature` | ✅ 标准字段 | 采样温度 |
-| `gen_ai.request.top_p` | double | `model_config.top_p` | ✅ 标准字段 | Top-P 采样参数 |
-| `gen_ai.request.top_k` | int | `model_config.top_k` | ✅ 标准字段 | Top-K 采样参数 |
-| `gen_ai.request.max_tokens` | int | `model_config.max_tokens` | ✅ 标准字段 | 最大输出 token 数 |
-| `gen_ai.request.frequency_penalty` | double | `model_config.frequency_penalty` | ✅ 标准字段 | 频率惩罚系数 |
-| `gen_ai.request.presence_penalty` | double | `model_config.presence_penalty` | ✅ 标准字段 | 存在惩罚系数 |
-| `gen_ai.usage.input_tokens` | int | LLM 响应 usage | ✅ 标准字段 | 输入 token 数 |
-| `gen_ai.usage.output_tokens` | int | LLM 响应 usage | ✅ 标准字段 | 输出 token 数 |
-| `gen_ai.response.finish_reasons` | string[] | LLM 响应 finish_reason | ✅ 标准字段 | 停止原因 |
-| `agent.block.type` | string | listener 注入 | 自定义扩展 | 所处 block 类型：`chat` / `explore` / `judge` |
-| `agent.reasoning.step` | int | listener 内部计数 | 自定义扩展 | 第几次 LLM 调用（1-based，用于分析调用深度） |
-| `agent.llm.latency_ms` | int | 调用耗时 | 自定义扩展 | 单次 LLM 调用耗时（ms） |
-| `error.type` | string | 异常类名 | ✅ 标准字段 | 仅在调用异常时写入 |
+| 字段 | 类型 | 来源 | OTel 合规性 | 说明                                         |
+|-----|-----|-----|------------|--------------------------------------------|
+| `gen_ai.operation.name` | string | 固定值 `chat` | ✅ 标准值 | 操作类型                                       |
+| `gen_ai.request.model` | string | `model_config.model_name` | ✅ 标准字段 | 请求模型名                                      |
+| `gen_ai.output.type` | string | 固定值 `text` | ✅ 标准值 | 输出内容类型                                     |
+| `gen_ai.request.temperature` | double | `model_config.temperature` | ✅ 标准字段 | 采样温度                                       |
+| `gen_ai.request.top_p` | double | `model_config.top_p` | ✅ 标准字段 | Top-P 采样参数                                 |
+| `gen_ai.request.top_k` | int | `model_config.top_k` | ✅ 标准字段 | Top-K 采样参数                                 |
+| `gen_ai.request.max_tokens` | int | `model_config.max_tokens` | ✅ 标准字段 | 最大输出 token 数                               |
+| `gen_ai.request.frequency_penalty` | double | `model_config.frequency_penalty` | ✅ 标准字段 | 频率惩罚系数                                     |
+| `gen_ai.request.presence_penalty` | double | `model_config.presence_penalty` | ✅ 标准字段 | 存在惩罚系数                                     |
+| `gen_ai.usage.input_tokens` | int | LLM 响应 usage | ✅ 标准字段 | 输入 token 数                                 |
+| `gen_ai.usage.output_tokens` | int | LLM 响应 usage | ✅ 标准字段 | 输出 token 数                                 |
+| `gen_ai.response.finish_reasons` | string[] | LLM 响应 finish_reason | ✅ 标准字段 | 停止原因                                       |
+| `agent.block.type` | string | listener 注入 | 自定义扩展 | 所处 block 类型：`prompt` / `explore` / `judge` |
+| `agent.reasoning.step` | int | listener 内部计数 | 自定义扩展 | 第几次 LLM 调用（1-based，用于分析调用深度）               |
+| `agent.llm.latency_ms` | int | 调用耗时 | 自定义扩展 | 单次 LLM 调用耗时（ms）                            |
+| `error.type` | string | 异常类名 | ✅ 标准字段 | 仅在调用异常时写入                                  |
 
 **Span Events（内容，Opt-In）：**
 
@@ -308,3 +311,124 @@ traceId 由根 Span 生成，所有子 Span 自动继承，直接挂载在根 Sp
 OTel SDK 默认限制 Attribute/Event 字段值长度为 64KB。当 LLM 上下文窗口较大时，消息全文可能超出此限制。需要在 agent-executor 初始化 TracerProvider 时通过 `SpanLimits.max_attribute_length` 配置调大，或设置环境变量 `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` 为合适值（如 `1000000` 即 1MB）。
 
 ---
+
+## 7. 实现架构
+
+### 7.1 组件职责划分
+
+```
+agent-executor（上层宿主）
+  ├── OTel TracerProvider 初始化          ← 已有，无需改动
+  ├── 根 Span 创建（@internal_span）      ← 已有，无需改动
+  ├── AgentTraceListener 实现             ← 新建
+  └── run_dolphin.py 注入 listener        ← 小改动（~8行）
+
+dolphin SDK（下层执行引擎）
+  ├── ITraceListener 协议定义             ← 新增接口（~30行）
+  ├── Context 存储 trace_listener         ← 新增属性（1行）
+  ├── DolphinAgent 接收 trace_listener    ← 新增参数（~8行）
+  ├── LLMClient 调用前后触发 listener     ← 新增钩子（~25行）
+  └── Skillkit 调用前后触发 listener      ← 新增钩子（~25行）
+```
+
+### 7.2 关键设计决策
+
+**为什么 TracerProvider 放在 agent-executor 而不是 dolphin SDK？**
+
+dolphin SDK 是一个通用框架，不应强依赖特定的可观测性实现。TracerProvider 的初始化涉及到具体的 exporter 地址、认证信息等配置，这些属于应用层关注点。dolphin SDK 只暴露协议接口，由宿主（agent-executor）注入具体实现。
+
+**为什么用 Listener 而不是直接在 SDK 内写 OTel 调用？**
+
+如果 dolphin SDK 直接调用 OTel API，则：
+- SDK 强依赖 `opentelemetry-api` 包
+- SDK 无法灵活切换追踪方案
+- SDK 和 agent-executor 之间形成双向依赖
+
+使用 Listener 协议后，dolphin SDK 只依赖 Python 标准库的 `typing.Protocol`，完全解耦。
+
+**为什么 LLM 的消息全文用 Span Event，而工具 I/O 用 Span Attribute？**
+
+这是 OTel GenAI 规范的刻意区分：
+
+- **LLM 消息**（`gen_ai.input.messages` / `gen_ai.output.messages`）：规范将其定义为 `gen_ai.client.inference.operation.details` 事件的 Opt-In 属性，而非 Span Attribute。原因是 LLM 消息结构复杂、体积大，用 Event 可附带时间戳，更贴近"LLM 推理过程详情"的语义。
+- **工具 I/O**（`gen_ai.tool.call.arguments` / `gen_ai.tool.call.result`）：规范将其定义为 `execute_tool` Span 的 Opt-In Attributes。工具调用本质上是一次函数调用，参数和结果是该 Span 本身的核心属性，体积相对可控。
+
+**为什么不为 explore block 创建单独的容器 Span？**
+
+explore block 是 DPH 程序的结构性执行容器，不对应任何实质性操作——所有实际工作都是由内部的 LLM 和工具调用完成的。增加容器 Span 只会加深层次结构而不带来新信息。通过 LLM Span 上的 `agent.block.type = "explore"` 和 `agent.reasoning.step` 序号，已经可以完整还原 explore 的执行过程和调用顺序，无需额外容器。
+
+---
+
+## 8. 实现步骤与改动范围
+
+### Phase 1：Dolphin SDK 增加追踪钩子（~1 天）
+
+| 步骤 | 文件 | 改动说明 | 规模 |
+|-----|------|---------|-----|
+| 1.1 | `src/dolphin/core/interfaces.py` | 追加 `ITraceListener` 协议定义（仅 LLM/工具 4 个钩子） | +30 行 |
+| 1.2 | `src/dolphin/core/context/context.py` | 在 Context 中增加 `trace_listener` 属性 | +1 行 |
+| 1.3 | `src/dolphin/sdk/agent/dolphin_agent.py` | 增加 `trace_listener` 构造参数，初始化后注入 context | +8 行 |
+| 1.4 | `src/dolphin/core/llm/llm_client.py` | 在 `_chat_stream` 调用前后触发 listener，传入 `block_type` | +25 行 |
+| 1.5 | 工具执行核心路径 | 在技能调用前后触发 listener | +25 行 |
+
+### Phase 2：agent-executor 实现 listener（~1 天）
+
+| 步骤 | 文件 | 改动说明 | 规模 |
+|-----|------|---------|-----|
+| 2.1 | `app/utils/observability/agent_trace_listener.py` | 新建 `AgentTraceListener` 实现 | +90 行 |
+| 2.2 | `app/utils/observability/observability_trace.py` | 初始化 TracerProvider 时配置 SpanLimits | +5 行 |
+| 2.3 | `app/logic/agent_core_logic_v2/run_dolphin.py` | 创建 listener 并注入 DolphinAgent | +8 行 |
+
+### Phase 3：验证（~0.5 天）
+
+- 开启 `trace_provider=console` 模式，跑一个包含 explore block（多工具调用）的 Agent 对话
+- 验证 Span 树：`invoke_agent` 下直接挂载 `chat` 和 `execute_tool` 子 Span
+- 验证 explore 模式下 `agent.block.type=explore` 和 `agent.reasoning.step` 正确递增
+- 验证 listener 异常不影响正常 Agent 执行
+
+**总改动量：** 约 220 行，跨 7 个文件，其中 2 个新建、5 个小改动
+
+---
+
+## 9. 向后兼容与降级策略
+
+| 场景 | 行为 | 影响 |
+|-----|------|-----|
+| `trace_listener=None`（未注入） | dolphin SDK 所有钩子调用处直接跳过 | 零开销 |
+| OTel 追踪未启用（Config 关闭） | `AgentTraceListener` 不被创建，等同未注入 | 零开销 |
+| OTel SDK 不可用 | `AgentTraceListener` 所有方法立即返回 | 无副作用 |
+| listener 内部抛出异常 | 所有钩子调用包裹在 `suppress(Exception)` 中，异常被静默 | 主流程不受影响 |
+| Span 属性值超过限制 | OTel SDK 自动截断，不抛出异常 | 数据可能截断，需配置 SpanLimits |
+| 现有 DolphinAgent 调用方 | `trace_listener` 参数有默认值 `None`，无需修改现有调用 | 完全兼容 |
+
+---
+
+## 10. 非目标
+
+以下内容超出本方案范围，不在此次实现中：
+
+- **Metrics（指标）上报**：如 QPS、P99 延迟聚合计算等；可在后续阶段基于已有 `MetricSetting` 扩展
+- **分布式 Trace 跨服务传播**：从 agent-executor 到下游 LLM 服务注入 `traceparent` header，使 trace 延伸到模型服务内部
+- **CLI 模式下的追踪**：`bin/dolphin` 命令行入口不涉及 OTel Provider 初始化，暂不支持
+- **历史数据回填**：只追踪方案实施后的新请求
+
+---
+
+## 附录：文件变更汇总
+
+```
+dolphin/src/dolphin/
+├── core/
+│   ├── interfaces.py              [改] 追加 ITraceListener 协议（4个钩子）
+│   ├── context/context.py         [改] 增加 trace_listener 属性（1行）
+│   └── llm/llm_client.py          [改] _chat_stream 前后触发 listener，传入 block_type
+├── sdk/agent/dolphin_agent.py     [改] 增加 trace_listener 参数
+└── 工具执行核心路径               [改] 技能调用前后触发 listener
+
+agent-executor/app/
+├── utils/observability/
+│   ├── agent_trace_listener.py    [新建] AgentTraceListener 实现
+│   └── observability_trace.py     [改] 配置 SpanLimits
+└── logic/agent_core_logic_v2/
+    └── run_dolphin.py             [改] 注入 listener（~8行）
+```

@@ -58,9 +58,16 @@ class OTelTraceListener:
     ) -> None:
         """Create LLM span on call start"""
         try:
-            from opentelemetry.trace import SpanKind
+            from opentelemetry.trace import SpanKind, get_current_span
             
             self._reasoning_step += 1
+            
+            # 获取当前父span，验证上下文
+            current_span = get_current_span()
+            if current_span and current_span.is_recording():
+                print(f"[OTelTraceListener] on_llm_start: Current parent span exists, span_id={current_span.get_span_context().span_id}")
+            else:
+                print(f"[OTelTraceListener] on_llm_start: WARNING - No active parent span in context!")
             
             # Create span with model name
             span_name = f"chat {model}"
@@ -68,6 +75,8 @@ class OTelTraceListener:
                 span_name,
                 kind=SpanKind.CLIENT,
             )
+            
+            print(f"[OTelTraceListener] on_llm_start: Created LLM span '{span_name}', reasoning_step={self._reasoning_step}")
             
             # Set standard GenAI attributes
             self._current_llm_span.set_attribute("gen_ai.operation.name", "chat")
@@ -77,6 +86,14 @@ class OTelTraceListener:
             # Set block type and reasoning step
             self._current_llm_span.set_attribute("agent.block.type", block_type)
             self._current_llm_span.set_attribute("agent.reasoning.step", self._reasoning_step)
+            
+            # Set context IDs (inherited from root span context)
+            if self.agent_id:
+                self._current_llm_span.set_attribute("gen_ai.agent.id", self.agent_id)
+            if self.conversation_id:
+                self._current_llm_span.set_attribute("gen_ai.conversation.id", self.conversation_id)
+            if self.user_id:
+                self._current_llm_span.set_attribute("agent.user.id", self.user_id)
             
             # Set optional model parameters
             if 'temperature' in kwargs and kwargs['temperature'] is not None:
@@ -105,6 +122,9 @@ class OTelTraceListener:
         try:
             from opentelemetry.trace import Status, StatusCode
             
+            span_context = self._current_llm_span.get_span_context()
+            print(f"[OTelTraceListener] on_llm_end: Ending LLM span, trace_id={format(span_context.trace_id, '032x')}, span_id={format(span_context.span_id, '016x')}")
+            
             # Set latency
             self._current_llm_span.set_attribute("agent.llm.latency_ms", latency_ms)
             
@@ -114,6 +134,7 @@ class OTelTraceListener:
                     self._current_llm_span.set_attribute("gen_ai.usage.input_tokens", usage['input_tokens'])
                 if 'output_tokens' in usage:
                     self._current_llm_span.set_attribute("gen_ai.usage.output_tokens", usage['output_tokens'])
+                print(f"[OTelTraceListener] on_llm_end: Token usage - input={usage.get('input_tokens', 0)}, output={usage.get('output_tokens', 0)}")
             
             # Set finish reason if available
             if response and 'finish_reason' in response:
@@ -123,6 +144,7 @@ class OTelTraceListener:
             if error:
                 self._current_llm_span.set_status(Status(StatusCode.ERROR, str(error)))
                 self._current_llm_span.set_attribute("error.type", type(error).__name__)
+                print(f"[OTelTraceListener] on_llm_end: LLM call failed with error: {type(error).__name__}")
             else:
                 self._current_llm_span.set_status(Status(StatusCode.OK))
             
@@ -158,6 +180,8 @@ class OTelTraceListener:
                 attributes=event_attributes,
             )
             
+            print(f"[OTelTraceListener] on_llm_end: LLM span completed successfully")
+            
             # End span
             self._current_llm_span.end()
             self._current_llm_span = None
@@ -182,7 +206,14 @@ class OTelTraceListener:
     ) -> None:
         """Create tool span on call start"""
         try:
-            from opentelemetry.trace import SpanKind
+            from opentelemetry.trace import SpanKind, get_current_span
+            
+            # 获取当前父span，验证上下文
+            current_span = get_current_span()
+            if current_span and current_span.is_recording():
+                print(f"[OTelTraceListener] on_tool_start: Current parent span exists")
+            else:
+                print(f"[OTelTraceListener] on_tool_start: WARNING - No active parent span in context!")
             
             # Create span with tool name
             span_name = f"execute_tool {tool_name}"
@@ -191,10 +222,20 @@ class OTelTraceListener:
                 kind=SpanKind.CLIENT,
             )
             
+            print(f"[OTelTraceListener] on_tool_start: Created tool span '{span_name}'")
+            
             # Set standard GenAI attributes
             self._current_tool_span.set_attribute("gen_ai.operation.name", "execute_tool")
             self._current_tool_span.set_attribute("gen_ai.tool.name", tool_name)
             self._current_tool_span.set_attribute("gen_ai.tool.type", tool_type)
+            
+            # Set context IDs (inherited from root span context)
+            if self.agent_id:
+                self._current_tool_span.set_attribute("gen_ai.agent.id", self.agent_id)
+            if self.conversation_id:
+                self._current_tool_span.set_attribute("gen_ai.conversation.id", self.conversation_id)
+            if self.user_id:
+                self._current_tool_span.set_attribute("agent.user.id", self.user_id)
             
             # Set tool arguments (Opt-In - can be disabled via config)
             if args:
@@ -221,6 +262,9 @@ class OTelTraceListener:
         try:
             from opentelemetry.trace import Status, StatusCode
             
+            span_context = self._current_tool_span.get_span_context()
+            print(f"[OTelTraceListener] on_tool_end: Ending tool span, trace_id={format(span_context.trace_id, '032x')}, span_id={format(span_context.span_id, '016x')}, latency={latency_ms}ms")
+            
             # Set latency
             self._current_tool_span.set_attribute("agent.tool.latency_ms", latency_ms)
             
@@ -235,8 +279,11 @@ class OTelTraceListener:
             if error:
                 self._current_tool_span.set_status(Status(StatusCode.ERROR, str(error)))
                 self._current_tool_span.set_attribute("error.type", type(error).__name__)
+                print(f"[OTelTraceListener] on_tool_end: Tool call failed with error: {type(error).__name__}")
             else:
                 self._current_tool_span.set_status(Status(StatusCode.OK))
+            
+            print(f"[OTelTraceListener] on_tool_end: Tool span completed successfully")
             
             # End span
             self._current_tool_span.end()
