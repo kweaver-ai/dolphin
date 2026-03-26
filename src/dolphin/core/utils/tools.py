@@ -1,10 +1,48 @@
 from typing import Any, Dict, Iterator, List, Optional
 import ast
 import json
+import re
 
 from dolphin.core.logging.logger import get_logger
 
 logger = get_logger("utils.tools")
+
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def strip_think_tags(value: Any) -> Any:
+    """Strip <think>...</think> blocks from a string value.
+
+    When reasoning models (e.g., DeepSeek-R1) inline their reasoning in the
+    content field, this function removes those blocks before the value is
+    passed to eval(). Non-string values are returned unchanged.
+
+    Args:
+        value: The value to sanitize. Only str values are processed; all
+               other types are returned as-is.
+
+    Returns:
+        For str input: the string with all <think>...</think> blocks removed
+        and leading/trailing whitespace stripped.
+        For non-str input: the original value unchanged.
+
+    Notes:
+        - Multiple think blocks are all removed.
+        - Unclosed <think> tags (e.g. from a truncated streaming response)
+          do NOT match the pattern and are returned unchanged — this is
+          intentional and safe. Do not add a greedy fallback pattern, as
+          that would silently destroy valid content.
+        - The non-greedy .*? quantifier with re.DOTALL is used, which is
+          idiomatic Python and handles multiline reasoning content.
+    """
+    if not isinstance(value, str):
+        return value
+    result = _THINK_TAG_RE.sub("", value)
+    # Only strip surrounding whitespace when think tags were actually removed.
+    # Unconditional strip() would silently alter strings that contain no think
+    # tags (e.g. intentional leading/trailing spaces), which violates the
+    # function's stated purpose.
+    return result.strip() if result != value else value
 
 
 def safe_json_loads(json_str: str, strict: bool = True) -> Dict[str, Any]:

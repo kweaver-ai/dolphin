@@ -16,7 +16,7 @@ from dolphin.core.common.enums import StreamItem, count_occurrences
 from dolphin.core.common.constants import KEY_STATUS, KEY_PREVIOUS_STATUS
 from dolphin.core.context.context import Context
 from dolphin.core.parser.parser import Parser
-from dolphin.core.utils.tools import ToolInterrupt
+from dolphin.core.utils.tools import ToolInterrupt, strip_think_tags
 
 
 def split_by_multiple_prefixes(text, prefixes):
@@ -330,7 +330,14 @@ class Executor:
             raise Exception(
                 f"Syntax Error({content})，check the '/if/','elif','else','/end/'"
             )
-        variables = self.context.get_all_variables_values()
+        # Apply strip_think_tags to all variable values before eval().
+        # This eagerly sanitizes the entire pool; only a subset may appear in
+        # the condition expression, but the overhead is acceptable and
+        # correctness is simpler than lazy per-variable stripping.
+        variables = {
+            k: strip_think_tags(v)
+            for k, v in self.context.get_all_variables_values().items()
+        }
         for condition, action in ifelse_list:
             if condition[:4] == "/if/" or condition[:4] == "elif":
                 result = eval(condition[4:].replace("$", ""), globals(), variables)
