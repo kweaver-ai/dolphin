@@ -239,13 +239,25 @@ class VariablePool:
             # Non-string values (dict, list, etc.) pass through strip_think_tags
             # unchanged, so this is safe for all types.
             variable_value = strip_think_tags(var.value)
+            # For complex types (list, dict), use repr() to ensure valid Python syntax for eval()
+            # For strings, str() is safe and preserves the original format
+            if isinstance(variable_value, (list, dict, tuple, set)):
+                variable_value_str = repr(variable_value)
+            else:
+                variable_value_str = str(variable_value)
+            
             variable_full_index = variable_name.replace(
-                variable_first_name, str(variable_value), 1
+                variable_first_name, variable_value_str, 1
             )
             try:
                 value = eval(variable_full_index)
-            except Exception:
-                raise AttributeError(f"failed to eval '{variable_full_index}'")
+            except Exception as e:
+                raise AttributeError(
+                    f"failed to eval '{variable_full_index}'; "
+                    f"variable_first_name='{variable_first_name}', "
+                    f"variable_value type={type(variable_value).__name__}, "
+                    f"error={e}"
+                )
 
         if (
             isinstance(value, list)

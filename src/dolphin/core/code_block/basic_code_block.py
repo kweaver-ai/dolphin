@@ -1138,9 +1138,11 @@ class BasicCodeBlock:
         normalized_history = self.context.get_history_messages()
 
         if self.system_prompt:
+            # Auto-inject context_variables for judge and prompt modes
+            enriched_system_prompt = self._enrich_system_prompt_with_context(self.system_prompt)
             self.context.add_bucket(
                 BuildInBucket.SYSTEM.value,
-                self.system_prompt,
+                enriched_system_prompt,
             )
         if self.content:
             self.context.add_bucket(
@@ -1956,6 +1958,39 @@ class BasicCodeBlock:
 
                 content = content.replace(variable_name, variable_value_str)
         return content
+    
+    def _enrich_system_prompt_with_context(self, system_prompt: str) -> str:
+        """Enrich system prompt with context variables for judge and prompt modes.
+        
+        Auto-injects relevant context_variables (header, self_config) into the system prompt
+        so that the LLM can access them even when they are not explicitly referenced.
+        
+        Args:
+            system_prompt: Original system prompt
+            
+        Returns:
+            Enriched system prompt with context variables prepended
+        """
+        if not self.context:
+            return system_prompt
+        
+        try:
+            user_vars = self.context.get_user_variables(include_system_context_vars=True)
+            relevant_vars = {
+                k: v for k, v in user_vars.items()
+                if k in ['header', 'self_config'] and v
+            }
+            
+            if not relevant_vars:
+                return system_prompt
+            
+            context_info = "\n## Context Variables:\n```json\n"
+            context_info += json.dumps(relevant_vars, ensure_ascii=False, indent=2)
+            context_info += "\n```\n\n"
+            
+            return context_info + system_prompt
+        except Exception:
+            return system_prompt
 
     def _save_trajectory(self, stage_name: str = "explore"):
         """

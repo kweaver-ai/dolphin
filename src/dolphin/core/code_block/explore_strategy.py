@@ -56,7 +56,8 @@ class ExploreStrategy(ABC):
         self,
         skillkit: Skillkit,
         system_prompt: str,
-        tools_format: str = "medium"
+        tools_format: str = "medium",
+        context: Optional[Context] = None
     ) -> str:
         """Build system message containing tool descriptions"""
         pass
@@ -312,7 +313,8 @@ class PromptStrategy(ExploreStrategy):
         self,
         skillkit: Skillkit,
         system_prompt: str,
-        tools_format: str = "medium"
+        tools_format: str = "medium",
+        context: Optional[Context] = None
     ) -> str:
         """Build system message for Prompt mode.
 
@@ -320,6 +322,7 @@ class PromptStrategy(ExploreStrategy):
         - Goals and tool schemas
         - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
         - User-provided system prompt
+        - Auto-injected context variables
         """
         role_format = """
 ## Goals：
@@ -333,6 +336,7 @@ class PromptStrategy(ExploreStrategy):
 - 当需要调用工具的时候，你需要使用"=>#tool_name: {{key:value}}"的格式来调用工具,其中参数为严格的json格式，例如"=>#someskill: {"key1": "value1", "key2": "value2"}"。
 
 {metadata_prompt}
+{context_variables}
 {system_prompt}
 """
         if skillkit is not None and not skillkit.isEmpty():
@@ -340,12 +344,17 @@ class PromptStrategy(ExploreStrategy):
             role = role_format.replace(r"{tools}", skillkit.getFormattedToolsDescription(tools_format))
         else:
             role_format = """{metadata_prompt}
+{context_variables}
 {system_prompt}"""
             role = role_format
 
         # Inject metadata prompt from skillkits via skill.owner_skillkit
         metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
         role = role.replace(r"{metadata_prompt}", metadata_prompt)
+
+        # Auto-inject context_variables
+        context_variables_str = self._format_context_variables(context)
+        role = role.replace(r"{context_variables}", context_variables_str)
 
         # Replace user system prompt
         if len(system_prompt.strip()) == 0:
@@ -355,6 +364,28 @@ class PromptStrategy(ExploreStrategy):
                 r"{system_prompt}", "## User Demands:\n" + system_prompt.strip()
             )
         return role
+    
+    def _format_context_variables(self, context: Optional[Context]) -> str:
+        """Format context variables for injection into system message."""
+        if not context:
+            return ""
+        
+        try:
+            user_vars = context.get_user_variables(include_system_context_vars=True)
+            relevant_vars = {
+                k: v for k, v in user_vars.items()
+                if k in ['header', 'self_config'] and v
+            }
+            
+            if not relevant_vars:
+                return ""
+            
+            context_info = "\n## Context Variables:\n```json\n"
+            context_info += json.dumps(relevant_vars, ensure_ascii=False, indent=2)
+            context_info += "\n```\n"
+            return context_info
+        except Exception:
+            return ""
 
     def get_llm_params(
         self,
@@ -518,7 +549,8 @@ class ToolCallStrategy(ExploreStrategy):
         self,
         skillkit: Skillkit,
         system_prompt: str,
-        tools_format: str = "medium"
+        tools_format: str = "medium",
+        context: Optional[Context] = None
     ) -> str:
         """Build system message for Tool Call mode.
 
@@ -526,6 +558,7 @@ class ToolCallStrategy(ExploreStrategy):
         - Goals and tool descriptions
         - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
         - User-provided system prompt
+        - Auto-injected context variables
         """
         role_format = """
 ## Goals：
@@ -541,6 +574,7 @@ class ToolCallStrategy(ExploreStrategy):
 - 如果不确定工具用法，可以先尝试简单的调用来了解
 
 {metadata_prompt}
+{context_variables}
 {system_prompt}
         """
 
@@ -557,6 +591,10 @@ class ToolCallStrategy(ExploreStrategy):
         metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
         role_format = role_format.replace(r"{metadata_prompt}", metadata_prompt)
 
+        # Auto-inject context_variables
+        context_variables_str = self._format_context_variables(context)
+        role_format = role_format.replace(r"{context_variables}", context_variables_str)
+
         # Replace user system prompt
         if not system_prompt or len(system_prompt.strip()) == 0:
             role_format = role_format.replace(r"{system_prompt}", "")
@@ -564,6 +602,28 @@ class ToolCallStrategy(ExploreStrategy):
             role_format = role_format.replace(r"{system_prompt}", system_prompt)
 
         return role_format
+    
+    def _format_context_variables(self, context: Optional[Context]) -> str:
+        """Format context variables for injection into system message."""
+        if not context:
+            return ""
+        
+        try:
+            user_vars = context.get_user_variables(include_system_context_vars=True)
+            relevant_vars = {
+                k: v for k, v in user_vars.items()
+                if k in ['header', 'self_config'] and v
+            }
+            
+            if not relevant_vars:
+                return ""
+            
+            context_info = "\n## Context Variables:\n```json\n"
+            context_info += json.dumps(relevant_vars, ensure_ascii=False, indent=2)
+            context_info += "\n```\n"
+            return context_info
+        except Exception:
+            return ""
 
     def get_llm_params(
         self,
