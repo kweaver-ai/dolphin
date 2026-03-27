@@ -553,6 +553,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             skillkit=skillkit,
             system_prompt=self.system_prompt,
             tools_format=self.tools_format,
+            context=self.context,
         )
 
         # Add system message
@@ -829,6 +830,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             skillkit=current_skillkit,
             system_prompt=self.system_prompt,
             tools_format=self.tools_format,
+            context=self.context,
         )
 
         # Update SYSTEM bucket
@@ -1717,6 +1719,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             skillkit=skillkit,
             system_prompt=getattr(self, "system_prompt", "") or "",
             tools_format=self.tools_format,
+            context=self.context,
         )
 
         # Auto-inject Plan orchestration guidance when plan_skillkit is used

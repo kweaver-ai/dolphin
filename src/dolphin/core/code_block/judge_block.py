@@ -264,3 +264,7 @@ class JudgeBlock(BasicCodeBlock):
             raise Exception(
                 f"Judge block execution failed: {str(e)} traceback: {traceback.format_exc()}"
             )
+        finally:
+            # Update history variable to persist conversation for multi-turn dialogue
+            # This ensures that when history=True, the current turn is saved for next turn
+            self._update_history_and_cleanup()

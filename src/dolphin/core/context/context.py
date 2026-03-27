@@ -143,6 +143,9 @@ class Context:
         # Use bounded deque to prevent unbounded memory growth in long-running sessions
         self._output_events: deque = deque(maxlen=MAX_OUTPUT_EVENTS)
 
+        # Trace listener for observability (injected by host application)
+        self.trace_listener: Optional["ITraceListener"] = None
+
         # Calculate all skills initially
         self._calc_all_skills()
 
