@@ -267,4 +267,4 @@ class JudgeBlock(BasicCodeBlock):
         finally:
             # Update history variable to persist conversation for multi-turn dialogue
             # This ensures that when history=True, the current turn is saved for next turn
-            self._update_history_and_cleanup()
+            self._update_history_and_cleanup(stage_name="judge")

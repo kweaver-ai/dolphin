@@ -213,13 +213,21 @@ class Trajectory:
             # 4. Process messages: convert to dicts and separate new vs history
             new_messages_data = []
 
+            # For first explore stage, preserve SYSTEM messages even if they appear in history
+            is_first_explore = (stage_name == "explore" and not any(
+                stage.get("stage") == "explore" for stage in self.stages
+            ))
+
             for i, msg in enumerate(stage_messages):
                 msg_data = self._convert_message_to_dict(msg, stage_name, user_id, model)
                 msg_signature = self._get_message_signature(msg)
                 is_history = msg_signature in history_signatures
 
+                # For first explore, preserve SYSTEM messages even if in history
+                if is_first_explore and msg.role == MessageRole.SYSTEM:
+                    new_messages_data.append(msg_data)
                 # Only new messages (not from history)
-                if not is_history:
+                elif not is_history:
                     new_messages_data.append(msg_data)
 
             # 5. Update global trajectory state

@@ -2267,7 +2267,7 @@ class BasicCodeBlock:
         )
         logger.debug("Marked pending turn for current explore round.")
 
-    def _update_history_and_cleanup(self):
+    def _update_history_and_cleanup(self, stage_name: str = "explore"):
         """
         Update history variable with current conversation turn and save trajectory.
 
@@ -2282,6 +2282,10 @@ class BasicCodeBlock:
         This ensures trajectory can capture complete tool call information.
 
         Called by: ExploreBlock and ExploreBlockV2 after their main execution completes
+
+        Args:
+            stage_name: The name of the stage to save (default: "explore").
+                       Should be overridden by subclasses (e.g., PromptBlock uses "prompt").
 
         Side effects:
         - Updates 'history' variable in context
@@ -2342,7 +2346,7 @@ class BasicCodeBlock:
             logger.debug("Cleanup: keeping pending turn because answer is missing.")
 
         # Save trajectory BEFORE cleaning up buckets (so tool calls are preserved)
-        self._save_trajectory(stage_name="explore")
+        self._save_trajectory(stage_name=stage_name)
 
     def _load_dynamic_tools(self, result) -> int:
         """
