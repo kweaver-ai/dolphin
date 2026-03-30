@@ -211,8 +211,7 @@ class CacheKVMgr:
         self.loadCaches()
 
     def loadCaches(self):
-        if not os.path.exists(self.cacheDir):
-            os.makedirs(self.cacheDir)
+        os.makedirs(self.cacheDir, exist_ok=True)
 
         for fileName in os.listdir(self.cacheDir):
             if fileName.startswith(self.prefix) and fileName.endswith(".json"):
