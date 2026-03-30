@@ -44,7 +44,10 @@ def test_read_file_directory_returns_error_message(tmp_path):
 def test_read_file_normalizes_path_formats(tmp_path, monkeypatch):
     skillkit = SystemFunctionsSkillKit()
 
+    # Set both HOME and USERPROFILE for cross-platform compatibility
+    # Windows uses USERPROFILE, Unix uses HOME
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("ALFRED_TEST_DIR", str(tmp_path))
 
     (tmp_path / "a.txt").write_text("hello", encoding="utf-8")

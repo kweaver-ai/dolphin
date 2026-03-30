@@ -5,9 +5,13 @@ in compliance with OpenTelemetry GenAI semantic conventions as specified in:
 docs/design/observability/agent_execution_tracing_design.md
 """
 
+import threading
 from typing import Any, Dict, List, Optional
 from dolphin.core.interfaces import ITraceListener
 from dolphin.core.observability.trace_exporter import TraceExporter
+from dolphin.core.logging.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SimpleTraceListener(ITraceListener):
@@ -77,6 +81,12 @@ class SimpleTraceListener(ITraceListener):
         # Track session start time for root span
         import time
         self.session_start_time = time.time()
+        
+        # Thread-safe storage for concurrent calls
+        self._llm_calls_lock = threading.Lock()
+        self._tool_calls_lock = threading.Lock()
+        self._llm_call_storage: Dict[int, dict] = {}
+        self._tool_call_storage: Dict[int, dict] = {}
     
     def on_llm_start(
         self,
@@ -100,18 +110,24 @@ class SimpleTraceListener(ITraceListener):
                 - frequency_penalty: Frequency penalty
                 - presence_penalty: Presence penalty
         """
-        self.llm_call_count += 1
-        self.reasoning_step += 1  # Increment for each LLM call
+        with self._llm_calls_lock:
+            self.llm_call_count += 1
+            self.reasoning_step += 1  # Increment for each LLM call
+            call_id = self.llm_call_count
+            reasoning_step = self.reasoning_step
         
-        # Store start info for computing latency in on_llm_end
-        self._current_llm_call = {
-            'call_id': self.llm_call_count,
-            'reasoning_step': self.reasoning_step,
+        # Store start info for computing latency in on_llm_end (thread-safe)
+        call_info = {
+            'call_id': call_id,
+            'reasoning_step': reasoning_step,
             'model': model,
             'messages': messages,
             'block_type': block_type,
             'kwargs': kwargs,
         }
+        
+        with self._llm_calls_lock:
+            self._llm_call_storage[call_id] = call_info
     
     def on_llm_end(
         self,
@@ -132,7 +148,16 @@ class SimpleTraceListener(ITraceListener):
             error: Exception if call failed, None otherwise
             **kwargs: Additional context
         """
-        start_info = getattr(self, '_current_llm_call', {})
+        # Retrieve call info using thread-safe storage
+        # Use most recent call if not explicitly tracked (fallback for backwards compatibility)
+        with self._llm_calls_lock:
+            if self._llm_call_storage:
+                # Get the most recent call (highest call_id)
+                call_id = max(self._llm_call_storage.keys())
+                start_info = self._llm_call_storage.pop(call_id)
+            else:
+                start_info = {}
+        
         start_kwargs = start_info.get('kwargs', {})
         
         # Build Span Attributes (metadata, small, indexable)
@@ -227,7 +252,7 @@ class SimpleTraceListener(ITraceListener):
         try:
             self.exporter.export_llm_call(trace_data)
         except Exception as e:
-            print(f"[TRACE] Failed to export LLM call: {e}")
+            logger.error(f"[TRACE] Failed to export LLM call: {e}")
     
     def on_tool_start(
         self,
@@ -244,15 +269,21 @@ class SimpleTraceListener(ITraceListener):
             args: Tool input parameters
             **kwargs: Additional context
         """
-        self.tool_call_count += 1
-        # Store start info for computing latency in on_tool_end
-        self._current_tool_call = {
-            'call_id': self.tool_call_count,
+        with self._tool_calls_lock:
+            self.tool_call_count += 1
+            call_id = self.tool_call_count
+        
+        # Store start info for computing latency in on_tool_end (thread-safe)
+        call_info = {
+            'call_id': call_id,
             'tool_name': tool_name,
             'tool_type': tool_type,
             'args': args,
             'kwargs': kwargs,
         }
+        
+        with self._tool_calls_lock:
+            self._tool_call_storage[call_id] = call_info
     
     def on_tool_end(
         self,
@@ -271,7 +302,15 @@ class SimpleTraceListener(ITraceListener):
             error: Exception if execution failed, None otherwise
             **kwargs: Additional context
         """
-        start_info = getattr(self, '_current_tool_call', {})
+        # Retrieve call info using thread-safe storage
+        # Use most recent call if not explicitly tracked (fallback for backwards compatibility)
+        with self._tool_calls_lock:
+            if self._tool_call_storage:
+                # Get the most recent call (highest call_id)
+                call_id = max(self._tool_call_storage.keys())
+                start_info = self._tool_call_storage.pop(call_id)
+            else:
+                start_info = {}
         
         # Build Span Attributes following OTel GenAI spec
         attributes = {
@@ -316,7 +355,7 @@ class SimpleTraceListener(ITraceListener):
         try:
             self.exporter.export_tool_call(trace_data)
         except Exception as e:
-            print(f"[TRACE] Failed to export tool call: {e}")
+            logger.error(f"[TRACE] Failed to export tool call: {e}")
     
     def _serialize_tool_data(self, data: Any) -> str:
         """Serialize tool arguments/results to JSON string
@@ -376,4 +415,4 @@ class SimpleTraceListener(ITraceListener):
             # Flush all buffered data
             self.exporter.flush()
         except Exception as e:
-            print(f"[TRACE] Failed to flush exporter: {e}")
+            logger.error(f"[TRACE] Failed to flush exporter: {e}")

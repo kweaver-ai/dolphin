@@ -58,6 +58,8 @@ class ITraceListener(Protocol):
     
     This interface enables dolphin SDK to report LLM and tool execution events
     to external tracing systems (e.g., OpenTelemetry) without tight coupling.
+    Implementations can use OpenTelemetry or other tracing backends without
+    coupling the dolphin SDK to specific observability implementations.
     """
     
     def on_llm_start(
@@ -131,89 +133,5 @@ class ITraceListener(Protocol):
             latency_ms: Execution time in milliseconds
             error: Exception if execution failed, None otherwise
             **kwargs: Additional context
-        """
-        ...
-
-
-class ITraceListener(Protocol):
-    """Trace listener interface for observability
-    
-    This protocol defines callbacks for LLM and tool execution events.
-    Implementations (e.g., in agent-executor) can use OpenTelemetry or
-    other tracing backends without coupling the dolphin SDK to specific
-    observability implementations.
-    """
-    
-    def on_llm_start(
-        self,
-        model: str,
-        messages: List[Dict[str, Any]],
-        block_type: str,
-        **kwargs
-    ) -> None:
-        """Called before LLM invocation
-        
-        Args:
-            model: Model name (e.g., "gpt-4")
-            messages: Input messages list
-            block_type: Type of block ("chat", "judge", "explore")
-            **kwargs: Additional metadata (temperature, top_p, etc.)
-        """
-        ...
-    
-    def on_llm_end(
-        self,
-        model: str,
-        response: Any,
-        latency_ms: float,
-        usage: Optional[Dict[str, int]] = None,
-        error: Optional[Exception] = None,
-        **kwargs
-    ) -> None:
-        """Called after LLM invocation completes
-        
-        Args:
-            model: Model name
-            response: LLM response (messages or error)
-            latency_ms: Execution time in milliseconds
-            usage: Token usage dict (input_tokens, output_tokens)
-            error: Exception if LLM call failed
-            **kwargs: Additional metadata
-        """
-        ...
-    
-    def on_tool_start(
-        self,
-        tool_name: str,
-        tool_type: str,
-        args: Dict[str, Any],
-        **kwargs
-    ) -> None:
-        """Called before tool execution
-        
-        Args:
-            tool_name: Name of the tool/skill
-            tool_type: Type of tool ("function", "api", "mcp", etc.)
-            args: Tool input arguments
-            **kwargs: Additional metadata
-        """
-        ...
-    
-    def on_tool_end(
-        self,
-        tool_name: str,
-        result: Any,
-        latency_ms: float,
-        error: Optional[Exception] = None,
-        **kwargs
-    ) -> None:
-        """Called after tool execution completes
-        
-        Args:
-            tool_name: Name of the tool/skill
-            result: Tool execution result
-            latency_ms: Execution time in milliseconds
-            error: Exception if tool execution failed
-            **kwargs: Additional metadata
         """
         ...

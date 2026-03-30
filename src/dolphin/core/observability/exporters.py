@@ -11,6 +11,9 @@ Provides helper functions to initialize trace providers with different exporters
 from typing import Optional, Dict, Any
 import os
 import json
+from dolphin.core.logging.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def create_console_exporter():
@@ -62,7 +65,7 @@ def create_file_exporter(filepath: str):
                         json.dump(self.spans, f, indent=2, ensure_ascii=False, default=str)
                     return SpanExportResult.SUCCESS
                 except Exception as e:
-                    print(f"Failed to write spans to file: {e}")
+                    logger.error(f"Failed to write spans to file: {e}")
                     return SpanExportResult.FAILURE
             
             def _span_to_dict(self, span: ReadableSpan) -> Dict[str, Any]:
@@ -207,4 +210,4 @@ def shutdown_trace_provider():
         if hasattr(provider, 'shutdown'):
             provider.shutdown()
     except Exception as e:
-        print(f"Failed to shutdown trace provider: {e}")
+        logger.error(f"Failed to shutdown trace provider: {e}")

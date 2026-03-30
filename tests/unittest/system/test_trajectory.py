@@ -681,7 +681,218 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
 
 
 # =============================================================================
-# 辅助测试: Trajectory 类基本功能
+# Case 5: SYSTEM Message Protection for First Prompt/Judge Stages
+# =============================================================================
+
+
+def test_trajectory_preserves_system_message_for_first_prompt_stage():
+    """Verify that first prompt stage preserves SYSTEM message even if it exists in history.
+    
+    Regression test for Review Issue #9:
+    - SYSTEM message protection should apply to all stages, not just explore
+    - First execution of prompt/judge should preserve SYSTEM even if signature in history
+    """
+    from dolphin.core.trajectory.trajectory import Trajectory
+    from dolphin.core.common.enums import Messages, MessageRole
+    from dolphin.core.context_engineer.core.context_manager import ContextManager
+    from dolphin.core.context_engineer.config.settings import BuildInBucket
+    import tempfile
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        traj_path = f.name
+    
+    try:
+        traj = Trajectory(trajectory_path=traj_path, overwrite=True)
+        
+        # Create context manager with history containing a SYSTEM message
+        ctx_mgr = ContextManager()
+        
+        # Add SYSTEM message to history bucket (simulating previous execution)
+        history_msgs = Messages()
+        history_msgs.add_message(
+            role=MessageRole.SYSTEM,
+            content="You are a helpful assistant"
+        )
+        history_msgs.add_message(
+            role=MessageRole.USER,
+            content="Previous query"
+        )
+        history_msgs.add_message(
+            role=MessageRole.ASSISTANT,
+            content="Previous response"
+        )
+        ctx_mgr.add_bucket(BuildInBucket.HISTORY.value, history_msgs)
+        
+        # Add current prompt stage messages (including same SYSTEM message)
+        current_msgs = Messages()
+        current_msgs.add_message(
+            role=MessageRole.SYSTEM,
+            content="You are a helpful assistant"  # Same as in history
+        )
+        current_msgs.add_message(
+            role=MessageRole.USER,
+            content="Current query"
+        )
+        ctx_mgr.add_bucket(BuildInBucket.QUERY.value, current_msgs)
+        
+        # Finalize first prompt stage
+        traj.finalize_stage(
+            stage_name="prompt",
+            stage_index=1,
+            context_manager=ctx_mgr,
+            tools=[],
+            user_id="test-user"
+        )
+        
+        # Verify: SYSTEM message should be preserved in trajectory
+        assert len(traj.stages) == 1, "Should have 1 stage recorded"
+        stage = traj.stages[0]
+        assert stage["stage"] == "prompt"
+        
+        stage_messages = stage["messages"]
+        system_messages = [m for m in stage_messages if m["role"] == "system"]
+        
+        assert len(system_messages) > 0, (
+            "First prompt stage should preserve SYSTEM message even if it exists in history"
+        )
+        assert system_messages[0]["content"] == "You are a helpful assistant"
+        
+    finally:
+        import os
+        if os.path.exists(traj_path):
+            os.remove(traj_path)
+
+
+def test_trajectory_preserves_system_message_for_first_judge_stage():
+    """Verify that first judge stage preserves SYSTEM message even if it exists in history."""
+    from dolphin.core.trajectory.trajectory import Trajectory
+    from dolphin.core.common.enums import Messages, MessageRole
+    from dolphin.core.context_engineer.core.context_manager import ContextManager
+    from dolphin.core.context_engineer.config.settings import BuildInBucket
+    import tempfile
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        traj_path = f.name
+    
+    try:
+        traj = Trajectory(trajectory_path=traj_path, overwrite=True)
+        
+        # Create context manager with history containing a SYSTEM message
+        ctx_mgr = ContextManager()
+        
+        # Add SYSTEM message to history bucket
+        history_msgs = Messages()
+        history_msgs.add_message(
+            role=MessageRole.SYSTEM,
+            content="You are a tool selector"
+        )
+        ctx_mgr.add_bucket(BuildInBucket.HISTORY.value, history_msgs)
+        
+        # Add current judge stage messages (including same SYSTEM message)
+        current_msgs = Messages()
+        current_msgs.add_message(
+            role=MessageRole.SYSTEM,
+            content="You are a tool selector"  # Same as in history
+        )
+        current_msgs.add_message(
+            role=MessageRole.USER,
+            content="Select a tool"
+        )
+        ctx_mgr.add_bucket(BuildInBucket.QUERY.value, current_msgs)
+        
+        # Finalize first judge stage
+        traj.finalize_stage(
+            stage_name="judge",
+            stage_index=1,
+            context_manager=ctx_mgr,
+            tools=[],
+            user_id="test-user"
+        )
+        
+        # Verify: SYSTEM message should be preserved
+        assert len(traj.stages) == 1
+        stage_messages = traj.stages[0]["messages"]
+        system_messages = [m for m in stage_messages if m["role"] == "system"]
+        
+        assert len(system_messages) > 0, (
+            "First judge stage should preserve SYSTEM message even if it exists in history"
+        )
+        
+    finally:
+        import os
+        if os.path.exists(traj_path):
+            os.remove(traj_path)
+
+
+def test_trajectory_filters_system_message_for_second_prompt_stage():
+    """Verify that second prompt stage filters duplicate SYSTEM messages from history.
+    
+    Note: This test verifies the INTENDED behavior - second execution of same stage
+    should filter duplicate SYSTEM messages. However, due to timestamp-based signatures,
+    this may not work perfectly in practice (SYSTEM messages at different times have
+    different signatures). This is acceptable as it ensures freshness.
+    """
+    from dolphin.core.trajectory.trajectory import Trajectory
+    from dolphin.core.common.enums import Messages, MessageRole
+    from dolphin.core.context_engineer.core.context_manager import ContextManager
+    from dolphin.core.context_engineer.config.settings import BuildInBucket
+    import tempfile
+    import time
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        traj_path = f.name
+    
+    try:
+        traj = Trajectory(trajectory_path=traj_path, overwrite=True)
+        ctx_mgr = ContextManager()
+        
+        # First prompt execution - create messages with specific timestamp
+        base_timestamp = "2026-03-30T10:00:00.000000"
+        msgs1 = Messages()
+        msgs1.add_message(role=MessageRole.SYSTEM, content="System prompt")
+        msgs1.messages[-1].timestamp = base_timestamp  # Fix timestamp for signature matching
+        msgs1.add_message(role=MessageRole.USER, content="Query 1")
+        msgs1.messages[-1].timestamp = base_timestamp
+        
+        ctx_mgr.add_bucket(BuildInBucket.QUERY.value, msgs1)
+        traj.finalize_stage("prompt", 1, ctx_mgr, [], "test-user")
+        
+        # Now add first prompt's messages to history
+        ctx_mgr.add_bucket(BuildInBucket.HISTORY.value, msgs1.copy())
+        
+        # Second prompt execution - reuse same message objects (same timestamp)
+        msgs2 = Messages()
+        msgs2.add_message(role=MessageRole.SYSTEM, content="System prompt")
+        msgs2.messages[-1].timestamp = base_timestamp  # Same timestamp = same signature
+        msgs2.add_message(role=MessageRole.USER, content="Query 2")
+        msgs2.messages[-1].timestamp = "2026-03-30T10:01:00.000000"  # Different timestamp
+        
+        ctx_mgr.replace_bucket_content(BuildInBucket.QUERY.value, msgs2)
+        traj.finalize_stage("prompt", 2, ctx_mgr, [], "test-user")
+        
+        # Verify: Second prompt should filter SYSTEM (same signature) but keep USER (different)
+        assert len(traj.stages) == 2
+        stage2_messages = traj.stages[1]["messages"]
+        
+        # SYSTEM message should be filtered (has same signature as history)
+        system_messages = [m for m in stage2_messages if m["role"] == "system"]
+        assert len(system_messages) == 0, (
+            "Second prompt stage should filter duplicate SYSTEM messages with matching signatures"
+        )
+        
+        # But USER message should be preserved (different signature)
+        user_messages = [m for m in stage2_messages if m["role"] == "user"]
+        assert len(user_messages) == 1
+        assert user_messages[0]["content"] == "Query 2"
+        
+    finally:
+        import os
+        if os.path.exists(traj_path):
+            os.remove(traj_path)
+
+
+# =============================================================================
+# Helper Tests: Trajectory Basic Functions
 # =============================================================================
 
 
