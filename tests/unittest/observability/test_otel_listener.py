@@ -5,11 +5,13 @@ Tests the OpenTelemetry-based trace listener including:
 - Thread safety
 - Context propagation
 - Attribute setting
+- Concurrent span pairing
 """
 
 import pytest
 import threading
 import time
+import asyncio
 from unittest.mock import Mock, MagicMock, patch
 from typing import List
 
@@ -269,3 +271,159 @@ class TestOTelTraceListener:
             )
         
         assert trace_listener._reasoning_step == 3
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_llm_span_pairing_correctness(self, trace_listener, mock_otel):
+        """Test that concurrent LLM calls correctly pair their spans using contextvars
+        
+        This test verifies the fix for Issue #2 from code review:
+        - Multiple concurrent LLM calls should each get their own span
+        - Each call should end its own span, not someone else's
+        - Span attributes should match the call that created them
+        """
+        # Collect all created spans
+        created_spans = []
+        
+        def create_tracked_span(*args, **kwargs):
+            """Create a span and track which call_id it belongs to"""
+            span = MagicMock()
+            span_context = MagicMock()
+            span_context.trace_id = 12345678901234567890
+            span_context.span_id = len(created_spans)
+            span.get_span_context.return_value = span_context
+            
+            # Extract model name from span_name to identify which call this is
+            span_name = args[0] if args else "unknown"
+            span._test_span_name = span_name
+            span._test_attributes = {}
+            
+            # Mock set_attribute to track what was set
+            def track_attribute(key, value):
+                span._test_attributes[key] = value
+            span.set_attribute.side_effect = track_attribute
+            
+            created_spans.append(span)
+            return span
+        
+        mock_otel['tracer'].start_span.side_effect = create_tracked_span
+        
+        async def concurrent_llm_call(call_num: int):
+            """Simulate a concurrent LLM call"""
+            model_name = f"model-{call_num}"
+            
+            # Start LLM call
+            trace_listener.on_llm_start(
+                model=model_name,
+                messages=[{"role": "user", "content": f"query {call_num}"}],
+                block_type="chat",
+            )
+            
+            # Simulate some async work
+            await asyncio.sleep(0.01)
+            
+            # End LLM call
+            trace_listener.on_llm_end(
+                model=model_name,
+                response={"answer": f"response {call_num}"},
+                latency_ms=10,
+                usage={"input_tokens": 10, "output_tokens": 20},
+                error=None,
+            )
+            
+            return call_num
+        
+        # Run 5 concurrent LLM calls
+        num_concurrent = 5
+        results = await asyncio.gather(*[
+            concurrent_llm_call(i) for i in range(num_concurrent)
+        ])
+        
+        # Verify all calls completed
+        assert len(results) == num_concurrent
+        assert results == list(range(num_concurrent))
+        
+        # Verify correct number of spans created
+        assert len(created_spans) == num_concurrent
+        
+        # Verify all spans were properly paired and ended
+        for i, span in enumerate(created_spans):
+            # Verify span was ended
+            span.end.assert_called_once()
+            
+            # Verify span has correct model attribute
+            # Each span should have the model name from its own call, not from other calls
+            assert 'gen_ai.request.model' in span._test_attributes, \
+                f"Span {i} missing gen_ai.request.model attribute. Attributes: {span._test_attributes}"
+            model_attr = span._test_attributes['gen_ai.request.model']
+            # The model name should be one of our test models
+            assert model_attr.startswith('model-'), \
+                f"Span {i} has unexpected model name: {model_attr}"
+            
+        # Verify no spans left in storage (all were properly paired and removed)
+        assert len(trace_listener._llm_spans) == 0
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_tool_span_pairing_correctness(self, trace_listener, mock_otel):
+        """Test that concurrent tool calls correctly pair their spans using contextvars"""
+        
+        created_spans = []
+        
+        def create_tracked_span(*args, **kwargs):
+            span = MagicMock()
+            span_context = MagicMock()
+            span_context.trace_id = 12345678901234567890
+            span_context.span_id = len(created_spans)
+            span.get_span_context.return_value = span_context
+            span._test_attributes = {}
+            
+            def track_attribute(key, value):
+                span._test_attributes[key] = value
+            span.set_attribute.side_effect = track_attribute
+            
+            created_spans.append(span)
+            return span
+        
+        mock_otel['tracer'].start_span.side_effect = create_tracked_span
+        
+        async def concurrent_tool_call(call_num: int):
+            """Simulate a concurrent tool call"""
+            tool_name = f"tool-{call_num}"
+            
+            # Start tool call
+            trace_listener.on_tool_start(
+                tool_name=tool_name,
+                tool_type="function",
+                args={"arg": f"value-{call_num}"},
+            )
+            
+            # Simulate some async work
+            await asyncio.sleep(0.01)
+            
+            # End tool call
+            trace_listener.on_tool_end(
+                tool_name=tool_name,
+                result=f"result-{call_num}",
+                latency_ms=10,
+                error=None,
+            )
+            
+            return call_num
+        
+        # Run 5 concurrent tool calls
+        num_concurrent = 5
+        results = await asyncio.gather(*[
+            concurrent_tool_call(i) for i in range(num_concurrent)
+        ])
+        
+        # Verify all calls completed
+        assert len(results) == num_concurrent
+        
+        # Verify correct number of spans created
+        assert len(created_spans) == num_concurrent
+        
+        # Verify all spans were ended
+        for span in created_spans:
+            span.end.assert_called_once()
+        
+        # Verify no spans left in storage
+        assert len(trace_listener._tool_spans) == 0

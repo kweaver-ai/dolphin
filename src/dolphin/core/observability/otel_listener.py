@@ -8,9 +8,14 @@ to create spans and report to trace backends.
 
 import json
 import threading
+import contextvars
 from typing import List, Dict, Any, Optional
 from dolphin.core.logging.logger import get_logger
 logger = get_logger()
+
+# Context variables for tracking call IDs in concurrent scenarios
+_llm_call_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar('llm_call_id', default=None)
+_tool_call_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar('tool_call_id', default=None)
 
 class OTelTraceListener:
     """OpenTelemetry-based trace listener
@@ -48,7 +53,9 @@ class OTelTraceListener:
         self.user_id = user_id
         self._reasoning_step = 0
         
-        # Thread-safe span storage
+        # Thread-safe span storage for concurrent calls
+        # Design: Uses contextvars to track call_id for each concurrent execution context
+        # This ensures correct span pairing even when multiple LLM/tool calls run concurrently
         self._spans_lock = threading.Lock()
         self._llm_spans: Dict[int, Any] = {}  # call_id -> (span, messages)
         self._tool_spans: Dict[int, Any] = {}  # call_id -> span
@@ -71,7 +78,10 @@ class OTelTraceListener:
                 call_id = self._call_counter
                 reasoning_step = self._reasoning_step
             
-            # 获取当前父span，验证上下文
+            # Store call_id in context for concurrent-safe span pairing
+            _llm_call_id_var.set(call_id)
+            
+            # Verify parent span context
             current_span = get_current_span()
             if current_span and current_span.is_recording():
                 logger.debug(f"[OTelTraceListener] on_llm_start: Current parent span exists, span_id={current_span.get_span_context().span_id}")
@@ -85,7 +95,7 @@ class OTelTraceListener:
                 kind=SpanKind.CLIENT,
             )
             
-            logger.debug(f"[OTelTraceListener] on_llm_start: Created LLM span '{span_name}', reasoning_step={reasoning_step}")
+            logger.debug(f"[OTelTraceListener] on_llm_start: Created LLM span '{span_name}', call_id={call_id}, reasoning_step={reasoning_step}")
             
             # Set standard GenAI attributes
             llm_span.set_attribute("gen_ai.operation.name", "chat")
@@ -126,12 +136,17 @@ class OTelTraceListener:
         **kwargs,
     ) -> None:
         """Complete LLM span on call end"""
+        # Retrieve call_id from context (set by on_llm_start)
+        call_id = _llm_call_id_var.get()
+        if call_id is None:
+            logger.warning("[OTelTraceListener] on_llm_end: No call_id in context, cannot pair span")
+            return
+        
         # Retrieve span from thread-safe storage
         with self._spans_lock:
-            if not self._llm_spans:
+            if call_id not in self._llm_spans:
+                logger.warning(f"[OTelTraceListener] on_llm_end: call_id={call_id} not found in storage")
                 return
-            # Get the most recent span (highest call_id)
-            call_id = max(self._llm_spans.keys())
             llm_span, messages = self._llm_spans.pop(call_id)
         
         try:
@@ -223,7 +238,10 @@ class OTelTraceListener:
                 self._call_counter += 1
                 call_id = self._call_counter
             
-            # 获取当前父span，验证上下文
+            # Store call_id in context for concurrent-safe span pairing
+            _tool_call_id_var.set(call_id)
+            
+            # Verify parent span context
             current_span = get_current_span()
             if current_span and current_span.is_recording():
                 logger.debug(f"[OTelTraceListener] on_tool_start: Current parent span exists")
@@ -237,7 +255,7 @@ class OTelTraceListener:
                 kind=SpanKind.CLIENT,
             )
             
-            logger.debug(f"[OTelTraceListener] on_tool_start: Created tool span '{span_name}'")
+            logger.debug(f"[OTelTraceListener] on_tool_start: Created tool span '{span_name}', call_id={call_id}")
             
             # Set standard GenAI attributes
             tool_span.set_attribute("gen_ai.operation.name", "execute_tool")
@@ -275,12 +293,17 @@ class OTelTraceListener:
         **kwargs,
     ) -> None:
         """Complete tool span on call end"""
+        # Retrieve call_id from context variable for concurrent-safe span pairing
+        call_id = _tool_call_id_var.get()
+        if call_id is None:
+            logger.warning("[OTelTraceListener] on_tool_end: No call_id in context, cannot match span")
+            return
+        
         # Retrieve span from thread-safe storage
         with self._spans_lock:
-            if not self._tool_spans:
+            if call_id not in self._tool_spans:
+                logger.warning(f"[OTelTraceListener] on_tool_end: call_id {call_id} not found in span storage")
                 return
-            # Get the most recent span (highest call_id)
-            call_id = max(self._tool_spans.keys())
             tool_span = self._tool_spans.pop(call_id)
         
         try:

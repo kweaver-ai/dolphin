@@ -165,7 +165,7 @@ class ConsoleTraceExporter(TraceExporter):
                     logger.debug(f"Result preview: {preview}")
                 except:
                     preview = result_json[:200] + '...' if len(result_json) > 200 else result_json
-                    logger.error(f"Result preview: {preview}")
+                    logger.debug(f"Result preview: {preview}")
             
             logger.debug("=" * 80)
     
@@ -336,12 +336,9 @@ class FileTraceExporter(TraceExporter):
         try:
             with open(self.output_path, 'w', encoding='utf-8') as f:
                 json.dump(existing_data, f, ensure_ascii=False, indent=2)
-                # Explicitly flush to ensure data is written to disk
-                f.flush()
-                os.fsync(f.fileno())
-            # Add final newline for proper JSON formatting
-            with open(self.output_path, 'a', encoding='utf-8') as f:
+                # Add final newline for proper JSON formatting
                 f.write('\n')
+                # Explicitly flush to ensure data is written to disk
                 f.flush()
                 os.fsync(f.fileno())
             

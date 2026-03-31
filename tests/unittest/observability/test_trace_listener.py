@@ -5,11 +5,13 @@ Tests the trace listener implementation including:
 - Thread safety
 - OTel semantic conventions compliance
 - Exporter integration
+- Concurrent call pairing
 """
 
 import pytest
 import threading
 import time
+import asyncio
 from unittest.mock import Mock, MagicMock, call
 from typing import List, Dict, Any
 
@@ -354,3 +356,256 @@ class TestSimpleTraceListener:
         assert 'gen_ai.input.messages' in event_attrs
         assert 'gen_ai.output.messages' in event_attrs
         assert event_attrs['gen_ai.input.messages'] == input_messages
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_llm_call_pairing(self, trace_listener, mock_exporter):
+        """Test that concurrent LLM calls are correctly paired using contextvars
+        
+        This test verifies that when multiple LLM calls happen concurrently (A start, B start, A end, B end),
+        each call's start and end events are correctly paired, preventing the issue where:
+        - A's end event might be matched to B's start event
+        - B's end event might be matched to A's start event
+        """
+        async def concurrent_llm_call(call_num: int):
+            """Simulate a concurrent LLM call"""
+            model_name = f"model-{call_num}"
+            messages = [{"role": "user", "content": f"query {call_num}"}]
+            
+            # Start LLM call
+            trace_listener.on_llm_start(
+                model=model_name,
+                messages=messages,
+                block_type="chat",
+            )
+            
+            # Simulate async work
+            await asyncio.sleep(0.01)
+            
+            # End LLM call
+            trace_listener.on_llm_end(
+                model=model_name,
+                response={"answer": f"response {call_num}"},
+                latency_ms=10 + call_num,  # Different latency to verify pairing
+                usage={"input_tokens": 10 * call_num, "output_tokens": 20 * call_num},
+                error=None,
+            )
+            
+            return call_num
+        
+        # Run 5 concurrent LLM calls
+        num_concurrent = 5
+        results = await asyncio.gather(*[
+            concurrent_llm_call(i) for i in range(num_concurrent)
+        ])
+        
+        # Verify all calls completed
+        assert len(results) == num_concurrent
+        assert len(mock_exporter.llm_calls) == num_concurrent
+        
+        # Verify each call has correct pairing (model name matches token usage)
+        for trace_data in mock_exporter.llm_calls:
+            attrs = trace_data['attributes']
+            model = attrs['gen_ai.request.model']
+            
+            # Extract call number from model name
+            call_num = int(model.split('-')[1])
+            
+            # Verify this call's attributes match its call_num
+            assert attrs['gen_ai.usage.input_tokens'] == 10 * call_num
+            assert attrs['gen_ai.usage.output_tokens'] == 20 * call_num
+            assert attrs['agent.llm.latency_ms'] == 10 + call_num
+        
+        # Verify no calls left in storage
+        assert len(trace_listener._llm_call_storage) == 0
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_tool_call_pairing(self, trace_listener, mock_exporter):
+        """Test that concurrent tool calls are correctly paired using contextvars"""
+        
+        async def concurrent_tool_call(call_num: int):
+            """Simulate a concurrent tool call"""
+            tool_name = f"tool-{call_num}"
+            
+            # Start tool call
+            trace_listener.on_tool_start(
+                tool_name=tool_name,
+                tool_type="function",
+                args={"arg": f"value-{call_num}"},
+            )
+            
+            # Simulate async work
+            await asyncio.sleep(0.01)
+            
+            # End tool call
+            trace_listener.on_tool_end(
+                tool_name=tool_name,
+                result=f"result-{call_num}",
+                latency_ms=10 + call_num,  # Different latency to verify pairing
+                error=None,
+            )
+            
+            return call_num
+        
+        # Run 5 concurrent tool calls
+        num_concurrent = 5
+        results = await asyncio.gather(*[
+            concurrent_tool_call(i) for i in range(num_concurrent)
+        ])
+        
+        # Verify all calls completed
+        assert len(results) == num_concurrent
+        assert len(mock_exporter.tool_calls) == num_concurrent
+        
+        # Verify each call has correct pairing (tool name matches latency)
+        for trace_data in mock_exporter.tool_calls:
+            attrs = trace_data['attributes']
+            tool_name = attrs['gen_ai.tool.name']
+            
+            # Extract call number from tool name
+            call_num = int(tool_name.split('-')[1])
+            
+            # Verify this call's attributes match its call_num
+            assert attrs['agent.tool.latency_ms'] == 10 + call_num
+        
+        # Verify no calls left in storage
+        assert len(trace_listener._tool_call_storage) == 0
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_llm_call_pairing(self, trace_listener, mock_exporter):
+        """Test that concurrent LLM calls are correctly paired
+        
+        This verifies the fix for concurrent span pairing using contextvars.
+        Scenario: A start, B start, A end, B end should correctly pair A-A and B-B
+        """
+        import asyncio
+        
+        async def concurrent_llm_call(call_num: int):
+            """Simulate a concurrent LLM call"""
+            model_name = f"model-{call_num}"
+            
+            # Start LLM call
+            trace_listener.on_llm_start(
+                model=model_name,
+                messages=[{"role": "user", "content": f"query {call_num}"}],
+                block_type="chat",
+            )
+            
+            # Simulate async work (creates opportunity for interleaving)
+            await asyncio.sleep(0.01)
+            
+            # End LLM call
+            trace_listener.on_llm_end(
+                model=model_name,
+                response={"answer": f"response {call_num}"},
+                latency_ms=100 + call_num,  # Different latency to verify pairing
+                usage={"input_tokens": 10 + call_num, "output_tokens": 20 + call_num},
+                error=None,
+            )
+            
+            return call_num
+        
+        # Run 5 concurrent LLM calls
+        num_concurrent = 5
+        results = await asyncio.gather(*[
+            concurrent_llm_call(i) for i in range(num_concurrent)
+        ])
+        
+        # Verify all calls completed
+        assert len(results) == num_concurrent
+        assert len(mock_exporter.llm_calls) == num_concurrent
+        
+        # Verify each call has correct model and unique latency
+        # This proves correct pairing - each call's end matched its start
+        latencies_seen = set()
+        models_seen = set()
+        
+        for trace_data in mock_exporter.llm_calls:
+            attributes = trace_data['attributes']
+            model = attributes['gen_ai.request.model']
+            latency = attributes['agent.llm.latency_ms']
+            
+            # Extract call number from model name
+            call_num = int(model.split('-')[1])
+            
+            # Verify latency matches the call number (proves correct pairing)
+            assert latency == 100 + call_num, \
+                f"Latency mismatch for {model}: expected {100 + call_num}, got {latency}"
+            
+            # Verify token usage matches the call number
+            assert attributes['gen_ai.usage.input_tokens'] == 10 + call_num
+            assert attributes['gen_ai.usage.output_tokens'] == 20 + call_num
+            
+            latencies_seen.add(latency)
+            models_seen.add(model)
+        
+        # Verify all unique values (no cross-contamination)
+        assert len(latencies_seen) == num_concurrent
+        assert len(models_seen) == num_concurrent
+        
+        # Verify no calls left in storage
+        assert len(trace_listener._llm_call_storage) == 0
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_tool_call_pairing(self, trace_listener, mock_exporter):
+        """Test that concurrent tool calls are correctly paired"""
+        import asyncio
+        
+        async def concurrent_tool_call(call_num: int):
+            """Simulate a concurrent tool call"""
+            tool_name = f"tool-{call_num}"
+            
+            # Start tool call
+            trace_listener.on_tool_start(
+                tool_name=tool_name,
+                tool_type="function",
+                args={"arg": f"value-{call_num}"},
+            )
+            
+            # Simulate async work
+            await asyncio.sleep(0.01)
+            
+            # End tool call
+            trace_listener.on_tool_end(
+                tool_name=tool_name,
+                result=f"result-{call_num}",
+                latency_ms=50 + call_num,  # Different latency to verify pairing
+                error=None,
+            )
+            
+            return call_num
+        
+        # Run 5 concurrent tool calls
+        num_concurrent = 5
+        results = await asyncio.gather(*[
+            concurrent_tool_call(i) for i in range(num_concurrent)
+        ])
+        
+        # Verify all calls completed
+        assert len(results) == num_concurrent
+        assert len(mock_exporter.tool_calls) == num_concurrent
+        
+        # Verify each call has correct tool name and unique latency
+        latencies_seen = set()
+        tools_seen = set()
+        
+        for trace_data in mock_exporter.tool_calls:
+            attributes = trace_data['attributes']
+            tool_name = attributes['gen_ai.tool.name']
+            latency = attributes['agent.tool.latency_ms']
+            
+            # Extract call number from tool name
+            call_num = int(tool_name.split('-')[1])
+            
+            # Verify latency matches the call number (proves correct pairing)
+            assert latency == 50 + call_num, \
+                f"Latency mismatch for {tool_name}: expected {50 + call_num}, got {latency}"
+            
+            latencies_seen.add(latency)
+            tools_seen.add(tool_name)
+        
+        # Verify all unique values (no cross-contamination)
+        assert len(latencies_seen) == num_concurrent
+        assert len(tools_seen) == num_concurrent
+        
+        # Verify no calls left in storage
+        assert len(trace_listener._tool_call_storage) == 0

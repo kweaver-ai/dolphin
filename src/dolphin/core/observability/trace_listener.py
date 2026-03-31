@@ -6,12 +6,17 @@ docs/design/observability/agent_execution_tracing_design.md
 """
 
 import threading
+import contextvars
 from typing import Any, Dict, List, Optional
 from dolphin.core.interfaces import ITraceListener
 from dolphin.core.observability.trace_exporter import TraceExporter
 from dolphin.core.logging.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Context variables for tracking call IDs in concurrent scenarios
+_simple_llm_call_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar('simple_llm_call_id', default=None)
+_simple_tool_call_id_var: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar('simple_tool_call_id', default=None)
 
 
 class SimpleTraceListener(ITraceListener):
@@ -116,6 +121,9 @@ class SimpleTraceListener(ITraceListener):
             call_id = self.llm_call_count
             reasoning_step = self.reasoning_step
         
+        # Store call_id in context for concurrent-safe call pairing
+        _simple_llm_call_id_var.set(call_id)
+        
         # Store start info for computing latency in on_llm_end (thread-safe)
         call_info = {
             'call_id': call_id,
@@ -148,15 +156,21 @@ class SimpleTraceListener(ITraceListener):
             error: Exception if call failed, None otherwise
             **kwargs: Additional context
         """
+        # Retrieve call_id from context variable for concurrent-safe call pairing
+        call_id = _simple_llm_call_id_var.get()
+        
         # Retrieve call info using thread-safe storage
-        # Use most recent call if not explicitly tracked (fallback for backwards compatibility)
         with self._llm_calls_lock:
-            if self._llm_call_storage:
-                # Get the most recent call (highest call_id)
+            if call_id is not None and call_id in self._llm_call_storage:
+                start_info = self._llm_call_storage.pop(call_id)
+            elif self._llm_call_storage:
+                # Fallback: use most recent call if call_id not found (backwards compatibility)
                 call_id = max(self._llm_call_storage.keys())
                 start_info = self._llm_call_storage.pop(call_id)
+                logger.warning(f"[TRACE] on_llm_end: call_id not in context, using fallback (call_id={call_id})")
             else:
                 start_info = {}
+                logger.warning("[TRACE] on_llm_end: No call info found in storage")
         
         start_kwargs = start_info.get('kwargs', {})
         
@@ -273,6 +287,9 @@ class SimpleTraceListener(ITraceListener):
             self.tool_call_count += 1
             call_id = self.tool_call_count
         
+        # Store call_id in context for concurrent-safe call pairing
+        _simple_tool_call_id_var.set(call_id)
+        
         # Store start info for computing latency in on_tool_end (thread-safe)
         call_info = {
             'call_id': call_id,
@@ -302,15 +319,21 @@ class SimpleTraceListener(ITraceListener):
             error: Exception if execution failed, None otherwise
             **kwargs: Additional context
         """
+        # Retrieve call_id from context variable for concurrent-safe call pairing
+        call_id = _simple_tool_call_id_var.get()
+        
         # Retrieve call info using thread-safe storage
-        # Use most recent call if not explicitly tracked (fallback for backwards compatibility)
         with self._tool_calls_lock:
-            if self._tool_call_storage:
-                # Get the most recent call (highest call_id)
+            if call_id is not None and call_id in self._tool_call_storage:
+                start_info = self._tool_call_storage.pop(call_id)
+            elif self._tool_call_storage:
+                # Fallback: use most recent call if call_id not found (backwards compatibility)
                 call_id = max(self._tool_call_storage.keys())
                 start_info = self._tool_call_storage.pop(call_id)
+                logger.warning(f"[TRACE] on_tool_end: call_id not in context, using fallback (call_id={call_id})")
             else:
                 start_info = {}
+                logger.warning("[TRACE] on_tool_end: No call info found in storage")
         
         # Build Span Attributes following OTel GenAI spec
         attributes = {
