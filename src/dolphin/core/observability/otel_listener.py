@@ -29,6 +29,13 @@ class OTelTraceListener:
     - Root span: invoke_agent
     - LLM spans: chat {model_name}
     - Tool spans: execute_tool {tool_name}
+    
+    Important:
+        When using nested agents (agent-as-skill), the **same listener instance**
+        must be shared across parent and child agents.  Internally, span stacks
+        are keyed by asyncio Task / thread ID in module-level ContextVars;
+        creating separate listener instances within the same Task will cause
+        span push/pop pairing errors.
     """
     
     def __init__(

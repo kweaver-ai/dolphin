@@ -37,6 +37,13 @@ class SimpleTraceListener(ITraceListener):
     - Separates Attributes (metadata) from Events (content)
     - Tracks reasoning steps for explore mode
     
+    Important:
+        When using nested agents (agent-as-skill), the **same listener instance**
+        must be shared across parent and child agents.  Internally, call-info
+        stacks are keyed by asyncio Task / thread ID in module-level ContextVars;
+        creating separate listener instances within the same Task will cause
+        span push/pop pairing errors.
+    
     Usage:
         # Console output
         listener = SimpleTraceListener(ConsoleTraceExporter(verbose=True))
@@ -572,7 +579,6 @@ class SimpleTraceListener(ITraceListener):
                 return self._root_span_context
 
             current_context = self._extract_current_span_context()
-            self.session_start_time = time.time()
             if current_context is not None:
                 self._root_span_context = current_context
                 self._root_span_name = current_context.get('name', self._root_span_name)
