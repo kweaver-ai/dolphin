@@ -505,6 +505,20 @@ class SimpleTraceListener(ITraceListener):
         except Exception as e:
             logger.error(f"[TRACE] Failed to flush exporter: {e}")
 
+    def cleanup(self) -> None:
+        """Clear listener-local context state and flush pending exporter buffers."""
+        for stack_var in (
+            _simple_llm_call_stacks_var,
+            _simple_tool_call_stacks_var,
+            _simple_active_span_stacks_var,
+        ):
+            stack_var.set({})
+
+        try:
+            self.exporter.flush()
+        except Exception as e:
+            logger.error(f"[TRACE] Failed to flush exporter during cleanup: {e}")
+
     def _get_execution_key(self) -> int:
         import asyncio
 

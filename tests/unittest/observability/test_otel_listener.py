@@ -178,7 +178,7 @@ class TestOTelTraceListener:
         mock_span.end.assert_called_once()
     
     def test_thread_safety_llm_calls(self, trace_listener, mock_otel):
-        """Test thread-safe concurrent LLM calls"""
+        """Test thread-safe concurrent LLM calls with exact start/end pairing"""
         mock_spans = []
         
         def create_mock_span(*args, **kwargs):
@@ -187,6 +187,11 @@ class TestOTelTraceListener:
             span_context.trace_id = 12345678901234567890
             span_context.span_id = len(mock_spans)
             span.get_span_context.return_value = span_context
+            span._test_attributes = {}
+
+            def track_attribute(key, value):
+                span._test_attributes[key] = value
+            span.set_attribute.side_effect = track_attribute
             mock_spans.append(span)
             return span
         
@@ -207,8 +212,8 @@ class TestOTelTraceListener:
                 trace_listener.on_llm_end(
                     model=f"model-{call_id}",
                     response={"answer": f"response {call_id}"},
-                    latency_ms=10,
-                    usage=None,
+                    latency_ms=100 + call_id,
+                    usage={"input_tokens": 10 + call_id, "output_tokens": 20 + call_id},
                     error=None,
                 )
             except Exception as e:
@@ -228,9 +233,18 @@ class TestOTelTraceListener:
         assert len(errors) == 0, f"Errors occurred: {errors}"
         assert len(mock_spans) == num_threads
         
-        # Verify all spans were ended
+        # Verify all spans were ended and retained the attributes from their own call
+        seen_models = set()
         for span in mock_spans:
             span.end.assert_called_once()
+            model = span._test_attributes['gen_ai.request.model']
+            call_id = int(model.split('-')[1])
+            assert span._test_attributes['agent.llm.latency_ms'] == 100 + call_id
+            assert span._test_attributes['gen_ai.usage.input_tokens'] == 10 + call_id
+            assert span._test_attributes['gen_ai.usage.output_tokens'] == 20 + call_id
+            seen_models.add(model)
+
+        assert len(seen_models) == num_threads
     
     def test_error_handling_does_not_break_execution(self, trace_listener, mock_otel):
         """Test that errors in listener don't break agent execution"""
@@ -271,6 +285,51 @@ class TestOTelTraceListener:
             )
         
         assert trace_listener._reasoning_step == 3
+
+    def test_cleanup_ends_open_spans_and_clears_local_state(self, trace_listener, mock_otel):
+        """Test cleanup ends any remaining spans and clears ContextVar state."""
+        llm_span = MagicMock()
+        llm_context = MagicMock()
+        llm_context.trace_id = 123
+        llm_context.span_id = 1
+        llm_span.get_span_context.return_value = llm_context
+
+        tool_span = MagicMock()
+        tool_context = MagicMock()
+        tool_context.trace_id = 123
+        tool_context.span_id = 2
+        tool_span.get_span_context.return_value = tool_context
+
+        mock_otel['tracer'].start_span.side_effect = [llm_span, tool_span]
+
+        trace_listener.on_llm_start(
+            model="gpt-4",
+            messages=[],
+            block_type="chat",
+        )
+        trace_listener.on_tool_start(
+            tool_name="test_tool",
+            tool_type="function",
+            args={},
+        )
+
+        from dolphin.core.observability.otel_listener import (
+            _active_span_contexts_var,
+            _llm_spans_stacks_var,
+            _tool_spans_stacks_var,
+        )
+
+        assert _llm_spans_stacks_var.get({})
+        assert _tool_spans_stacks_var.get({})
+        assert _active_span_contexts_var.get({})
+
+        trace_listener.cleanup()
+
+        llm_span.end.assert_called_once()
+        tool_span.end.assert_called_once()
+        assert _llm_spans_stacks_var.get({}) == {}
+        assert _tool_spans_stacks_var.get({}) == {}
+        assert _active_span_contexts_var.get({}) == {}
     
     @pytest.mark.asyncio
     async def test_concurrent_llm_span_pairing_correctness(self, trace_listener, mock_otel):

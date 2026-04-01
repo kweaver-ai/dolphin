@@ -248,8 +248,8 @@ class OTelTraceListener:
             # Ensure span is ended even on error
             try:
                 llm_span.end()
-            except:
-                pass
+            except Exception as end_error:
+                logger.error(f"[OTelTraceListener] Failed to force end LLM span: {end_error}")
     
     def on_tool_start(
         self,
@@ -388,8 +388,47 @@ class OTelTraceListener:
             # Ensure span is ended even on error
             try:
                 tool_span.end()
-            except:
-                pass
+            except Exception as end_error:
+                logger.error(f"[OTelTraceListener] Failed to force end tool span: {end_error}")
+
+    def cleanup(self) -> None:
+        """End any remaining spans and clear listener-local context state."""
+        from opentelemetry import context as otel_context
+
+        for stack_var, stack_name in (
+            (_llm_spans_stacks_var, "llm"),
+            (_tool_spans_stacks_var, "tool"),
+        ):
+            stacks_dict = stack_var.get({})
+            if not stacks_dict:
+                continue
+
+            for task_id, stack in list(stacks_dict.items()):
+                while stack:
+                    span_entry = stack.pop()
+                    span = span_entry[0] if isinstance(span_entry, tuple) else span_entry
+                    try:
+                        span.end()
+                    except Exception as end_error:
+                        logger.error(
+                            f"[OTelTraceListener] cleanup failed to end {stack_name} span "
+                            f"for task_id={task_id}: {end_error}"
+                        )
+            stack_var.set({})
+
+        active_contexts = _active_span_contexts_var.get({})
+        if active_contexts:
+            for task_id, active_stack in list(active_contexts.items()):
+                while active_stack:
+                    entry = active_stack.pop()
+                    try:
+                        otel_context.detach(entry['token'])
+                    except Exception as detach_error:
+                        logger.error(
+                            f"[OTelTraceListener] cleanup failed to detach span context "
+                            f"for task_id={task_id}: {detach_error}"
+                        )
+            _active_span_contexts_var.set({})
 
     def _get_execution_key(self) -> int:
         import asyncio

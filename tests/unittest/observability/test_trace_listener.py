@@ -286,7 +286,7 @@ class TestSimpleTraceListener:
             assert attrs['gen_ai.request.model'] == f'model-{i}'
     
     def test_thread_safety(self, trace_listener, mock_exporter):
-        """Test thread-safe concurrent LLM calls"""
+        """Test thread-safe concurrent LLM calls with exact start/end pairing"""
         results = []
         errors = []
         
@@ -303,8 +303,8 @@ class TestSimpleTraceListener:
                 trace_listener.on_llm_end(
                     model=f"model-{call_id}",
                     response={"answer": f"response {call_id}"},
-                    latency_ms=10,
-                    usage={"input_tokens": 10, "output_tokens": 5},
+                    latency_ms=100 + call_id,
+                    usage={"input_tokens": 10 + call_id, "output_tokens": 20 + call_id},
                     error=None,
                 )
                 results.append(call_id)
@@ -326,6 +326,18 @@ class TestSimpleTraceListener:
         assert len(results) == num_threads
         assert trace_listener.llm_call_count == num_threads
         assert len(mock_exporter.llm_calls) == num_threads
+
+        seen_models = set()
+        for trace_data in mock_exporter.llm_calls:
+            attrs = trace_data['attributes']
+            model = attrs['gen_ai.request.model']
+            call_id = int(model.split('-')[1])
+            assert attrs['agent.llm.latency_ms'] == 100 + call_id
+            assert attrs['gen_ai.usage.input_tokens'] == 10 + call_id
+            assert attrs['gen_ai.usage.output_tokens'] == 20 + call_id
+            seen_models.add(model)
+
+        assert len(seen_models) == num_threads
     
     def test_context_ids_optional(self):
         """Test listener works without context IDs"""
@@ -349,6 +361,36 @@ class TestSimpleTraceListener:
         attrs = exporter.llm_calls[0]['attributes']
         assert attrs['gen_ai.agent.id'] is None
         assert attrs['gen_ai.conversation.id'] is None
+
+    def test_cleanup_clears_local_state_and_flushes_exporter(self, trace_listener, mock_exporter):
+        """Test cleanup clears ContextVar state and flushes exporter."""
+        trace_listener.on_llm_start(
+            model="gpt-4",
+            messages=[],
+            block_type="chat",
+        )
+        trace_listener.on_tool_start(
+            tool_name="test_tool",
+            tool_type="function",
+            args={},
+        )
+
+        from dolphin.core.observability.trace_listener import (
+            _simple_active_span_stacks_var,
+            _simple_llm_call_stacks_var,
+            _simple_tool_call_stacks_var,
+        )
+
+        assert _simple_llm_call_stacks_var.get({})
+        assert _simple_tool_call_stacks_var.get({})
+        assert _simple_active_span_stacks_var.get({})
+
+        trace_listener.cleanup()
+
+        assert _simple_llm_call_stacks_var.get({}) == {}
+        assert _simple_tool_call_stacks_var.get({}) == {}
+        assert _simple_active_span_stacks_var.get({}) == {}
+        assert mock_exporter.flush_count == 1
     
     def test_serialize_tool_data_handles_various_types(self, trace_listener):
         """Test _serialize_tool_data handles different data types"""
