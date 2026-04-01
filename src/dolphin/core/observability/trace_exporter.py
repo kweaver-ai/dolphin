@@ -55,6 +55,8 @@ class ConsoleTraceExporter(TraceExporter):
         """
         attrs = trace_data.get('attributes', {})
         events = trace_data.get('events', [])
+        context = trace_data.get('context')
+        parent_id = trace_data.get('parent_id')
         
         if not self.verbose:
             # Compact mode: one-line summary using OTel field names
@@ -94,6 +96,10 @@ class ConsoleTraceExporter(TraceExporter):
                 logger.debug(f"Agent ID: {attrs['gen_ai.agent.id']}")
             if attrs.get('gen_ai.conversation.id'):
                 logger.debug(f"Conversation ID: {attrs['gen_ai.conversation.id']}")
+            if context:
+                logger.debug(f"Trace ID: {context.get('trace_id')}")
+                logger.debug(f"Span ID: {context.get('span_id')}")
+                logger.debug(f"Parent ID: {parent_id}")
             
             # Event details (input/output messages)
             for event in events:
@@ -119,6 +125,8 @@ class ConsoleTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' (metadata) keys
         """
         attrs = trace_data.get('attributes', {})
+        context = trace_data.get('context')
+        parent_id = trace_data.get('parent_id')
         
         if not self.verbose:
             # Compact mode: one-line summary using OTel field names
@@ -145,6 +153,10 @@ class ConsoleTraceExporter(TraceExporter):
                 logger.debug(f"Agent ID: {attrs['gen_ai.agent.id']}")
             if attrs.get('gen_ai.conversation.id'):
                 logger.debug(f"Conversation ID: {attrs['gen_ai.conversation.id']}")
+            if context:
+                logger.debug(f"Trace ID: {context.get('trace_id')}")
+                logger.debug(f"Span ID: {context.get('span_id')}")
+                logger.debug(f"Parent ID: {parent_id}")
             
             # Arguments (Opt-In field)
             args_json = attrs.get('gen_ai.tool.call.arguments', '')
@@ -152,7 +164,7 @@ class ConsoleTraceExporter(TraceExporter):
                 try:
                     args = json.loads(args_json) if isinstance(args_json, str) else args_json
                     logger.debug(f"Arguments: {json.dumps(args, ensure_ascii=False, indent=2)}")
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
                     logger.debug(f"Arguments: {args_json}")
             
             # Result (Opt-In field)
@@ -163,7 +175,7 @@ class ConsoleTraceExporter(TraceExporter):
                     result_str = json.dumps(result, ensure_ascii=False, indent=2) if isinstance(result, dict) else str(result)
                     preview = result_str[:200] + '...' if len(result_str) > 200 else result_str
                     logger.debug(f"Result preview: {preview}")
-                except:
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
                     preview = result_json[:200] + '...' if len(result_json) > 200 else result_json
                     logger.debug(f"Result preview: {preview}")
             
@@ -176,6 +188,7 @@ class ConsoleTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key
         """
         attrs = trace_data.get('attributes', {})
+        context = trace_data.get('context')
         
         if self.verbose:
             logger.debug("=" * 80)
@@ -185,6 +198,9 @@ class ConsoleTraceExporter(TraceExporter):
             logger.debug(f"Agent ID: {attrs.get('gen_ai.agent.id')}")
             logger.debug(f"Conversation ID: {attrs.get('gen_ai.conversation.id')}")
             logger.debug(f"User ID: {attrs.get('agent.user.id')}")
+            if context:
+                logger.debug(f"Trace ID: {context.get('trace_id')}")
+                logger.debug(f"Span ID: {context.get('span_id')}")
             if attrs.get('agent.user.type'):
                 logger.debug(f"User Type: {attrs['agent.user.type']}")
             if attrs.get('agent.request.id'):
@@ -229,16 +245,20 @@ class FileTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' and 'events' keys following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data (attributes + events)
-        self.llm_traces.append({
+        entry = {
             'span_type': 'llm',
             'attributes': attrs,
             'events': trace_data.get('events', []),
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.llm_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.llm_traces) >= self.buffer_size:
@@ -251,16 +271,20 @@ class FileTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data (attributes only for tools per OTel spec)
-        self.tool_traces.append({
+        entry = {
             'span_type': 'tool',
             'attributes': attrs,
             'events': [],  # Tools don't use events per OTel spec
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.tool_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.tool_traces) >= self.buffer_size:
@@ -273,7 +297,7 @@ class FileTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
@@ -283,6 +307,9 @@ class FileTraceExporter(TraceExporter):
             'attributes': attrs,
             'events': [],
         }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                self.root_span[key] = trace_data[key]
     
     def flush(self) -> None:
         """Write buffered traces to file following OTel-compliant structure"""
@@ -412,16 +439,20 @@ class APITraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' and 'events' keys following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data
-        self.llm_traces.append({
+        entry = {
             'span_type': 'llm',
             'attributes': attrs,
             'events': trace_data.get('events', []),
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.llm_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.llm_traces) >= self.buffer_size:
@@ -434,16 +465,20 @@ class APITraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data
-        self.tool_traces.append({
+        entry = {
             'span_type': 'tool',
             'attributes': attrs,
             'events': [],
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.tool_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.tool_traces) >= self.buffer_size:
@@ -456,7 +491,7 @@ class APITraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
@@ -466,6 +501,9 @@ class APITraceExporter(TraceExporter):
             'attributes': attrs,
             'events': [],
         }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                self.root_span[key] = trace_data[key]
     
     def flush(self) -> None:
         """Send buffered traces to API endpoint following OTel structure"""

@@ -359,6 +359,16 @@ class BasicCodeBlock:
         """
         pass
 
+    def _build_trace_context_kwargs(self) -> Dict[str, Optional[str]]:
+        """Build trace metadata from the current execution context."""
+        current_agent = self.context.get_cur_agent() if self.context else None
+        agent_id = current_agent.get_name() if current_agent else None
+        return {
+            "agent_id": agent_id,
+            "conversation_id": self.context.get_session_id() if self.context else None,
+            "user_id": self.context.get_user_id() if self.context else None,
+        }
+
     async def execute(
         self, content, category: CategoryBlock, replace_variables=True
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -1454,6 +1464,7 @@ class BasicCodeBlock:
             tool_start_time = time.time()
             trace_listener = getattr(self.context, 'trace_listener', None)
             tool_type = getattr(skill, 'skill_type', 'function') if hasattr(skill, 'skill_type') else 'function'
+            trace_context_kwargs = self._build_trace_context_kwargs()
             
             if trace_listener:
                 try:
@@ -1461,6 +1472,7 @@ class BasicCodeBlock:
                         tool_name=skill_name,
                         tool_type=tool_type,
                         args=skill_params_json,
+                        **trace_context_kwargs,
                     )
                 except Exception as e:
                     logger.warning(f"Trace listener on_tool_start failed: {e}")
@@ -1704,6 +1716,7 @@ class BasicCodeBlock:
             try:
                 model_name_param = llm_params.get('model')
                 messages_dict = llm_params["messages"].get_messages_as_dict() if hasattr(llm_params["messages"], 'get_messages_as_dict') else []
+                trace_context_kwargs = self._build_trace_context_kwargs()
                 
                 # Get actual model config to extract model_name and request parameters
                 # These are the same values that will be sent in the API payload (llm.py:303-312)
@@ -1748,6 +1761,7 @@ class BasicCodeBlock:
                     messages=messages_dict,
                     block_type=block_type,
                     **trace_params,
+                    **trace_context_kwargs,
                 )
             except Exception as e:
                 logger.warning(f"Trace listener on_llm_start failed: {e}")

@@ -61,8 +61,8 @@ class TestOTelTraceListener:
         assert trace_listener.conversation_id == "test-conv-001"
         assert trace_listener.user_id == "test-user-001"
         assert trace_listener._reasoning_step == 0
-        assert len(trace_listener._llm_spans) == 0
-        assert len(trace_listener._tool_spans) == 0
+        
+        # Stacks are lazy-initialized on first use, so no need to check here
     
     def test_llm_span_creation(self, trace_listener, mock_otel):
         """Test LLM span is created with correct attributes"""
@@ -359,8 +359,15 @@ class TestOTelTraceListener:
             assert model_attr.startswith('model-'), \
                 f"Span {i} has unexpected model name: {model_attr}"
             
-        # Verify no spans left in storage (all were properly paired and removed)
-        assert len(trace_listener._llm_spans) == 0
+        # Verify no spans left in stack (all were properly paired and removed)
+        from dolphin.core.observability.otel_listener import _llm_spans_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _llm_spans_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            llm_stack = stacks_dict[task_id]
+            assert len(llm_stack) == 0, f"LLM stack not empty: {len(llm_stack)} spans remaining"
     
     @pytest.mark.asyncio
     async def test_concurrent_tool_span_pairing_correctness(self, trace_listener, mock_otel):
@@ -425,5 +432,90 @@ class TestOTelTraceListener:
         for span in created_spans:
             span.end.assert_called_once()
         
-        # Verify no spans left in storage
-        assert len(trace_listener._tool_spans) == 0
+        # Verify no spans left in stack
+        from dolphin.core.observability.otel_listener import _tool_spans_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _tool_spans_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            tool_stack = stacks_dict[task_id]
+            assert len(tool_stack) == 0, f"Tool stack not empty: {len(tool_stack)} spans remaining"
+    
+    @pytest.mark.asyncio
+    async def test_nested_agent_span_pairing(self, trace_listener, mock_otel):
+        """Test that nested agent calls (agent-as-skill) correctly manage separate stacks
+        
+        Scenario: Parent agent calls LLM, then invokes child agent (which also calls LLM),
+        then parent agent finishes. Each agent should have isolated span stacks.
+        """
+        created_spans = []
+        
+        def create_tracked_span(*args, **kwargs):
+            span = MagicMock()
+            span_context = MagicMock()
+            span_context.trace_id = 12345678901234567890
+            span_context.span_id = len(created_spans)
+            span.get_span_context.return_value = span_context
+            span._test_attributes = {}
+            span._test_name = args[0] if args else "unknown"
+            
+            def track_attribute(key, value):
+                span._test_attributes[key] = value
+            span.set_attribute.side_effect = track_attribute
+            
+            created_spans.append(span)
+            return span
+        
+        mock_otel['tracer'].start_span.side_effect = create_tracked_span
+        
+        # Simulate nested agent scenario
+        # Parent agent starts LLM call
+        trace_listener.on_llm_start(
+            model="parent-model",
+            messages=[{"role": "user", "content": "parent query"}],
+            block_type="parent_block",
+        )
+        parent_span = created_spans[-1]
+        assert parent_span._test_name == "chat parent-model"
+        
+        # Simulate child agent execution in same Task (agent-as-skill scenario)
+        # Child agent starts its own LLM call
+        trace_listener.on_llm_start(
+            model="child-model",
+            messages=[{"role": "user", "content": "child query"}],
+            block_type="child_block",
+        )
+        child_span = created_spans[-1]
+        assert child_span._test_name == "chat child-model"
+        
+        # Child agent finishes (should pop child span, NOT parent span)
+        trace_listener.on_llm_end(
+            model="child-model",
+            response={"content": "child response"},
+            latency_ms=50,
+            usage={"input_tokens": 5, "output_tokens": 10},
+            error=None,
+        )
+        child_span.end.assert_called_once()
+        parent_span.end.assert_not_called()  # Parent span should still be active
+        
+        # Parent agent finishes (should pop parent span)
+        trace_listener.on_llm_end(
+            model="parent-model",
+            response={"content": "parent response"},
+            latency_ms=100,
+            usage={"input_tokens": 10, "output_tokens": 20},
+            error=None,
+        )
+        parent_span.end.assert_called_once()
+        
+        # Verify all spans cleaned up
+        from dolphin.core.observability.otel_listener import _llm_spans_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _llm_spans_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            llm_stack = stacks_dict[task_id]
+            assert len(llm_stack) == 0, f"LLM stack not empty: {len(llm_stack)} spans remaining"

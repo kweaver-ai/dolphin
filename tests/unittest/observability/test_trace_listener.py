@@ -108,6 +108,9 @@ class TestSimpleTraceListener:
         assert attrs['agent.reasoning.step'] == 1
         assert attrs['agent.llm.latency_ms'] == 1500
         assert attrs['gen_ai.request.temperature'] == 0.7
+        assert llm_trace['context']['trace_id']
+        assert llm_trace['context']['span_id']
+        assert llm_trace['parent_id']
     
     def test_tool_call_tracking(self, trace_listener, mock_exporter):
         """Test tool call tracking"""
@@ -140,6 +143,9 @@ class TestSimpleTraceListener:
         assert attrs['agent.tool.latency_ms'] == 500
         assert 'gen_ai.tool.call.arguments' in attrs
         assert 'gen_ai.tool.call.result' in attrs
+        assert tool_trace['context']['trace_id']
+        assert tool_trace['context']['span_id']
+        assert tool_trace['parent_id']
     
     def test_llm_call_with_error(self, trace_listener, mock_exporter):
         """Test LLM call error handling"""
@@ -214,6 +220,45 @@ class TestSimpleTraceListener:
         assert attrs['gen_ai.conversation.id'] == 'test-conv-001'
         assert attrs['agent.user.id'] == 'test-user-001'
         assert 'agent.total.latency_ms' in attrs
+        assert root_span['context']['trace_id']
+        assert root_span['context']['span_id']
+        assert root_span['parent_id'] is None
+
+    def test_listener_adopts_active_root_span_context(self, trace_listener, mock_exporter):
+        """Test local traces inherit the active root span context when available."""
+        mock_span = MagicMock()
+        mock_span.is_recording.return_value = True
+        mock_span.name = "invoke_agent"
+        mock_span_context = MagicMock()
+        mock_span_context.trace_id = int("1" * 32, 16)
+        mock_span_context.span_id = int("2" * 16, 16)
+        mock_span.get_span_context.return_value = mock_span_context
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                "opentelemetry.trace.get_current_span",
+                lambda: mock_span,
+            )
+            trace_listener.on_llm_start(
+                model="gpt-4",
+                messages=[],
+                block_type="chat",
+            )
+            trace_listener.on_llm_end(
+                model="gpt-4",
+                response={"answer": "ok"},
+                latency_ms=10,
+                usage=None,
+                error=None,
+            )
+            trace_listener.flush()
+
+        llm_trace = mock_exporter.llm_calls[0]
+        root_span = mock_exporter.root_spans[0]
+        assert llm_trace['context']['trace_id'] == "11111111111111111111111111111111"
+        assert llm_trace['parent_id'] == "2222222222222222"
+        assert root_span['context']['trace_id'] == "11111111111111111111111111111111"
+        assert root_span['context']['span_id'] == "2222222222222222"
     
     def test_multiple_llm_calls(self, trace_listener, mock_exporter):
         """Test multiple LLM calls tracking"""
@@ -415,8 +460,15 @@ class TestSimpleTraceListener:
             assert attrs['gen_ai.usage.output_tokens'] == 20 * call_num
             assert attrs['agent.llm.latency_ms'] == 10 + call_num
         
-        # Verify no calls left in storage
-        assert len(trace_listener._llm_call_storage) == 0
+        # Verify no calls left in stack
+        from dolphin.core.observability.trace_listener import _simple_llm_call_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _simple_llm_call_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            llm_stack = stacks_dict[task_id]
+            assert len(llm_stack) == 0, f"LLM stack not empty: {len(llm_stack)} calls remaining"
     
     @pytest.mark.asyncio
     async def test_concurrent_tool_call_pairing(self, trace_listener, mock_exporter):
@@ -467,8 +519,15 @@ class TestSimpleTraceListener:
             # Verify this call's attributes match its call_num
             assert attrs['agent.tool.latency_ms'] == 10 + call_num
         
-        # Verify no calls left in storage
-        assert len(trace_listener._tool_call_storage) == 0
+        # Verify no calls left in stack
+        from dolphin.core.observability.trace_listener import _simple_tool_call_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _simple_tool_call_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            tool_stack = stacks_dict[task_id]
+            assert len(tool_stack) == 0, f"Tool stack not empty: {len(tool_stack)} calls remaining"
     
     @pytest.mark.asyncio
     async def test_concurrent_llm_call_pairing(self, trace_listener, mock_exporter):
@@ -542,8 +601,15 @@ class TestSimpleTraceListener:
         assert len(latencies_seen) == num_concurrent
         assert len(models_seen) == num_concurrent
         
-        # Verify no calls left in storage
-        assert len(trace_listener._llm_call_storage) == 0
+        # Verify no calls left in stack
+        from dolphin.core.observability.trace_listener import _simple_llm_call_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _simple_llm_call_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            llm_stack = stacks_dict[task_id]
+            assert len(llm_stack) == 0, f"LLM stack not empty: {len(llm_stack)} calls remaining"
     
     @pytest.mark.asyncio
     async def test_concurrent_tool_call_pairing(self, trace_listener, mock_exporter):
@@ -607,5 +673,209 @@ class TestSimpleTraceListener:
         assert len(latencies_seen) == num_concurrent
         assert len(tools_seen) == num_concurrent
         
-        # Verify no calls left in storage
-        assert len(trace_listener._tool_call_storage) == 0
+        # Verify no calls left in stack
+        from dolphin.core.observability.trace_listener import _simple_tool_call_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _simple_tool_call_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            tool_stack = stacks_dict[task_id]
+            assert len(tool_stack) == 0, f"Tool stack not empty: {len(tool_stack)} calls remaining"
+    
+    @pytest.mark.asyncio
+    async def test_nested_agent_llm_call_pairing(self, trace_listener, mock_exporter):
+        """Test that nested agent calls (agent-as-skill) correctly manage separate stacks for LLM calls
+        
+        Scenario: Parent agent calls LLM, then invokes child agent (which also calls LLM),
+        then parent agent finishes. Each agent should have isolated call stacks.
+        """
+        # Parent agent starts LLM call
+        trace_listener.on_llm_start(
+            model="parent-model",
+            messages=[{"role": "user", "content": "parent query"}],
+            block_type="parent_block",
+        )
+        
+        # Child agent (simulating agent-as-skill) starts its own LLM call
+        trace_listener.on_llm_start(
+            model="child-model",
+            messages=[{"role": "user", "content": "child query"}],
+            block_type="child_block",
+        )
+        
+        # Child agent finishes (should pop child call, NOT parent call)
+        trace_listener.on_llm_end(
+            model="child-model",
+            response={"content": "child response"},
+            latency_ms=50,
+            usage={"input_tokens": 5, "output_tokens": 10},
+            error=None,
+        )
+        
+        # Parent agent finishes (should pop parent call)
+        trace_listener.on_llm_end(
+            model="parent-model",
+            response={"content": "parent response"},
+            latency_ms=100,
+            usage={"input_tokens": 10, "output_tokens": 20},
+            error=None,
+        )
+        
+        # Verify both calls were exported with correct pairing
+        assert len(mock_exporter.llm_calls) == 2
+        
+        # Check child call (exported first, so index 0)
+        child_call = mock_exporter.llm_calls[0]
+        child_attrs = child_call['attributes']
+        assert child_attrs['gen_ai.request.model'] == 'child-model'
+        assert child_attrs['agent.llm.latency_ms'] == 50
+        
+        # Check parent call (exported second, so index 1)
+        parent_call = mock_exporter.llm_calls[1]
+        parent_attrs = parent_call['attributes']
+        assert parent_attrs['gen_ai.request.model'] == 'parent-model'
+        assert parent_attrs['agent.llm.latency_ms'] == 100
+        assert child_call['context']['trace_id'] == parent_call['context']['trace_id']
+        assert child_call['parent_id'] == parent_call['context']['span_id']
+        
+        # Verify no calls left in stack
+        from dolphin.core.observability.trace_listener import _simple_llm_call_stacks_var
+        task = asyncio.current_task()
+        task_id = id(task) if task else 0
+        
+        stacks_dict = _simple_llm_call_stacks_var.get({})
+        if stacks_dict and task_id in stacks_dict:
+            llm_stack = stacks_dict[task_id]
+            assert len(llm_stack) == 0, f"LLM stack not empty: {len(llm_stack)} calls remaining"
+
+    def test_nested_child_agent_attributes_must_not_reuse_parent_listener_values(self, trace_listener, mock_exporter):
+        """Child agent metadata must override parent-scoped listener defaults."""
+        trace_listener.on_llm_start(
+            model="parent-model",
+            messages=[{"role": "user", "content": "parent query"}],
+            block_type="parent_block",
+        )
+        trace_listener.on_llm_start(
+            model="child-model",
+            messages=[{"role": "user", "content": "child query"}],
+            block_type="child_block",
+            agent_id="child-agent-001",
+            conversation_id="child-conv-001",
+            user_id="child-user-001",
+        )
+
+        trace_listener.on_llm_end(
+            model="child-model",
+            response={"answer": "child response"},
+            latency_ms=50,
+            usage=None,
+            error=None,
+        )
+        trace_listener.on_llm_end(
+            model="parent-model",
+            response={"answer": "parent response"},
+            latency_ms=100,
+            usage=None,
+            error=None,
+        )
+
+        assert len(mock_exporter.llm_calls) == 2
+        child_call = mock_exporter.llm_calls[0]
+        parent_call = mock_exporter.llm_calls[1]
+
+        assert child_call['attributes']['gen_ai.request.model'] == 'child-model'
+        assert parent_call['attributes']['gen_ai.request.model'] == 'parent-model'
+
+        assert child_call['attributes']['gen_ai.agent.id'] == 'child-agent-001'
+        assert child_call['attributes']['gen_ai.conversation.id'] == 'child-conv-001'
+        assert child_call['attributes']['agent.user.id'] == 'child-user-001'
+        assert child_call['attributes']['gen_ai.agent.id'] != parent_call['attributes']['gen_ai.agent.id']
+        assert child_call['attributes']['gen_ai.conversation.id'] != parent_call['attributes']['gen_ai.conversation.id']
+        assert child_call['attributes']['agent.user.id'] != parent_call['attributes']['agent.user.id']
+    
+    @pytest.mark.asyncio
+    async def test_nested_agent_tool_call_pairing(self, trace_listener, mock_exporter):
+        """Test that nested agent calls (agent-as-skill) correctly manage separate stacks for tool calls
+        
+        Scenario: Parent agent calls tool, then invokes child agent (which also calls tool),
+        then parent agent finishes. Each agent should have isolated call stacks.
+        """
+        # Parent agent starts tool call
+        trace_listener.on_tool_start(
+            tool_name="parent-tool",
+            tool_type="function",
+            args={"query": "parent query"},
+        )
+        
+        # Child agent (simulating agent-as-skill) starts its own tool call
+        trace_listener.on_tool_start(
+            tool_name="child-tool",
+            tool_type="function",
+            args={"query": "child query"},
+        )
+        
+        # Child agent finishes (should pop child call, NOT parent call)
+        trace_listener.on_tool_end(
+            tool_name="child-tool",
+            result="child result",
+            latency_ms=30,
+            error=None,
+        )
+        
+        # Parent agent finishes (should pop parent call)
+        trace_listener.on_tool_end(
+            tool_name="parent-tool",
+            result="parent result",
+            latency_ms=80,
+            error=None,
+        )
+        
+        # Verify both calls were exported with correct pairing
+        assert len(mock_exporter.tool_calls) == 2
+        
+        # Check child call (exported first, so index 0)
+        child_call = mock_exporter.tool_calls[0]
+        child_attrs = child_call['attributes']
+        assert child_attrs['gen_ai.tool.name'] == 'child-tool'
+        assert child_attrs['agent.tool.latency_ms'] == 30
+        
+        # Check parent call (exported second, so index 1)
+        parent_call = mock_exporter.tool_calls[1]
+        parent_attrs = parent_call['attributes']
+        assert parent_attrs['gen_ai.tool.name'] == 'parent-tool'
+        assert parent_attrs['agent.tool.latency_ms'] == 80
+        assert child_call['context']['trace_id'] == parent_call['context']['trace_id']
+        assert child_call['parent_id'] == parent_call['context']['span_id']
+
+    def test_cross_type_hierarchy_uses_active_parent(self, trace_listener, mock_exporter):
+        """Test tool spans become children of the active LLM span."""
+        trace_listener.on_llm_start(
+            model="planner",
+            messages=[{"role": "user", "content": "plan"}],
+            block_type="explore",
+        )
+        trace_listener.on_tool_start(
+            tool_name="search",
+            tool_type="function",
+            args={"query": "weather"},
+        )
+
+        trace_listener.on_tool_end(
+            tool_name="search",
+            result="ok",
+            latency_ms=5,
+            error=None,
+        )
+        trace_listener.on_llm_end(
+            model="planner",
+            response={"answer": "done"},
+            latency_ms=10,
+            usage=None,
+            error=None,
+        )
+
+        tool_trace = mock_exporter.tool_calls[0]
+        llm_trace = mock_exporter.llm_calls[0]
+        assert tool_trace['context']['trace_id'] == llm_trace['context']['trace_id']
+        assert tool_trace['parent_id'] == llm_trace['context']['span_id']
