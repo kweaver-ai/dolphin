@@ -10,7 +10,8 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from pathlib import Path
-
+from dolphin.core.logging.logger import get_logger
+logger = get_logger()
 
 class TraceExporter(ABC):
     """Base class for trace exporters"""
@@ -54,45 +55,51 @@ class ConsoleTraceExporter(TraceExporter):
         """
         attrs = trace_data.get('attributes', {})
         events = trace_data.get('events', [])
+        context = trace_data.get('context')
+        parent_id = trace_data.get('parent_id')
         
         if not self.verbose:
             # Compact mode: one-line summary using OTel field names
-            print(f"[TRACE] LLM: {attrs.get('gen_ai.request.model')} | "
+            logger.debug(f"[TRACE] LLM: {attrs.get('gen_ai.request.model')} | "
                   f"{attrs.get('agent.llm.latency_ms')}ms | "
                   f"tokens: {attrs.get('gen_ai.usage.input_tokens', 0)}→{attrs.get('gen_ai.usage.output_tokens', 0)} | "
                   f"step: {attrs.get('agent.reasoning.step', 0)}")
         else:
             # Verbose mode: detailed output
-            print("=" * 80)
-            print(f"[TRACE] LLM Call - {attrs.get('agent.block.type', 'unknown')}")
-            print("-" * 80)
-            print(f"Operation: {attrs.get('gen_ai.operation.name', 'chat')}")
-            print(f"Model: {attrs.get('gen_ai.request.model')}")
-            print(f"Latency: {attrs.get('agent.llm.latency_ms')}ms")
-            print(f"Reasoning Step: {attrs.get('agent.reasoning.step')}")
-            print(f"Status: {'ERROR' if attrs.get('error.type') else 'SUCCESS'}")
+            logger.debug("=" * 80)
+            logger.debug(f"[TRACE] LLM Call - {attrs.get('agent.block.type', 'unknown')}")
+            logger.debug("-" * 80)
+            logger.debug(f"Operation: {attrs.get('gen_ai.operation.name', 'chat')}")
+            logger.debug(f"Model: {attrs.get('gen_ai.request.model')}")
+            logger.debug(f"Latency: {attrs.get('agent.llm.latency_ms')}ms")
+            logger.debug(f"Reasoning Step: {attrs.get('agent.reasoning.step')}")
+            logger.debug(f"Status: {'ERROR' if attrs.get('error.type') else 'SUCCESS'}")
             
             # Token usage
             input_tokens = attrs.get('gen_ai.usage.input_tokens', 0)
             output_tokens = attrs.get('gen_ai.usage.output_tokens', 0)
             if input_tokens or output_tokens:
-                print(f"Usage: {input_tokens} input → {output_tokens} output tokens")
+                logger.debug(f"Usage: {input_tokens} input → {output_tokens} output tokens")
             
             # Request parameters
             if 'gen_ai.request.temperature' in attrs:
-                print(f"Temperature: {attrs['gen_ai.request.temperature']}")
+                logger.debug(f"Temperature: {attrs['gen_ai.request.temperature']}")
             if 'gen_ai.request.top_p' in attrs:
-                print(f"Top-P: {attrs['gen_ai.request.top_p']}")
+                logger.debug(f"Top-P: {attrs['gen_ai.request.top_p']}")
             
             # Error info
             if attrs.get('error.type'):
-                print(f"Error Type: {attrs['error.type']}")
+                logger.debug(f"Error Type: {attrs['error.type']}")
             
             # Context IDs
             if attrs.get('gen_ai.agent.id'):
-                print(f"Agent ID: {attrs['gen_ai.agent.id']}")
+                logger.debug(f"Agent ID: {attrs['gen_ai.agent.id']}")
             if attrs.get('gen_ai.conversation.id'):
-                print(f"Conversation ID: {attrs['gen_ai.conversation.id']}")
+                logger.debug(f"Conversation ID: {attrs['gen_ai.conversation.id']}")
+            if context:
+                logger.debug(f"Trace ID: {context.get('trace_id')}")
+                logger.debug(f"Span ID: {context.get('span_id')}")
+                logger.debug(f"Parent ID: {parent_id}")
             
             # Event details (input/output messages)
             for event in events:
@@ -101,15 +108,15 @@ class ConsoleTraceExporter(TraceExporter):
                     input_messages = event_attrs.get('gen_ai.input.messages', [])
                     output_messages = event_attrs.get('gen_ai.output.messages', [])
                     
-                    print(f"Input Messages: {len(input_messages)} messages")
+                    logger.debug(f"Input Messages: {len(input_messages)} messages")
                     if output_messages:
                         # Show output preview
                         for msg in output_messages:
                             content = msg.get('content', '')
                             preview = content[:200] + '...' if len(content) > 200 else content
-                            print(f"Output preview: {preview}")
+                            logger.debug(f"Output preview: {preview}")
             
-            print("=" * 80)
+            logger.debug("=" * 80)
     
     def export_tool_call(self, trace_data: Dict[str, Any]) -> None:
         """Export tool call trace data to console
@@ -118,41 +125,47 @@ class ConsoleTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' (metadata) keys
         """
         attrs = trace_data.get('attributes', {})
+        context = trace_data.get('context')
+        parent_id = trace_data.get('parent_id')
         
         if not self.verbose:
             # Compact mode: one-line summary using OTel field names
-            print(f"[TRACE] Tool: {attrs.get('gen_ai.tool.name')} | "
+            logger.debug(f"[TRACE] Tool: {attrs.get('gen_ai.tool.name')} | "
                   f"{attrs.get('agent.tool.latency_ms')}ms | "
                   f"status: {'ERROR' if attrs.get('error.type') else 'OK'}")
         else:
             # Verbose mode: detailed output
-            print("=" * 80)
-            print(f"[TRACE] Tool Call")
-            print("-" * 80)
-            print(f"Operation: {attrs.get('gen_ai.operation.name', 'execute_tool')}")
-            print(f"Tool: {attrs.get('gen_ai.tool.name')}")
-            print(f"Type: {attrs.get('gen_ai.tool.type', 'function')}")
-            print(f"Latency: {attrs.get('agent.tool.latency_ms')}ms")
-            print(f"Status: {'ERROR' if attrs.get('error.type') else 'SUCCESS'}")
+            logger.debug("=" * 80)
+            logger.debug(f"[TRACE] Tool Call")
+            logger.debug("-" * 80)
+            logger.debug(f"Operation: {attrs.get('gen_ai.operation.name', 'execute_tool')}")
+            logger.debug(f"Tool: {attrs.get('gen_ai.tool.name')}")
+            logger.debug(f"Type: {attrs.get('gen_ai.tool.type', 'function')}")
+            logger.debug(f"Latency: {attrs.get('agent.tool.latency_ms')}ms")
+            logger.debug(f"Status: {'ERROR' if attrs.get('error.type') else 'SUCCESS'}")
             
             # Error info
             if attrs.get('error.type'):
-                print(f"Error Type: {attrs['error.type']}")
+                logger.debug(f"Error Type: {attrs['error.type']}")
             
             # Context IDs
             if attrs.get('gen_ai.agent.id'):
-                print(f"Agent ID: {attrs['gen_ai.agent.id']}")
+                logger.debug(f"Agent ID: {attrs['gen_ai.agent.id']}")
             if attrs.get('gen_ai.conversation.id'):
-                print(f"Conversation ID: {attrs['gen_ai.conversation.id']}")
+                logger.debug(f"Conversation ID: {attrs['gen_ai.conversation.id']}")
+            if context:
+                logger.debug(f"Trace ID: {context.get('trace_id')}")
+                logger.debug(f"Span ID: {context.get('span_id')}")
+                logger.debug(f"Parent ID: {parent_id}")
             
             # Arguments (Opt-In field)
             args_json = attrs.get('gen_ai.tool.call.arguments', '')
             if args_json:
                 try:
                     args = json.loads(args_json) if isinstance(args_json, str) else args_json
-                    print(f"Arguments: {json.dumps(args, ensure_ascii=False, indent=2)}")
-                except:
-                    print(f"Arguments: {args_json}")
+                    logger.debug(f"Arguments: {json.dumps(args, ensure_ascii=False, indent=2)}")
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
+                    logger.debug(f"Arguments: {args_json}")
             
             # Result (Opt-In field)
             result_json = attrs.get('gen_ai.tool.call.result', '')
@@ -161,12 +174,12 @@ class ConsoleTraceExporter(TraceExporter):
                     result = json.loads(result_json) if isinstance(result_json, str) else result_json
                     result_str = json.dumps(result, ensure_ascii=False, indent=2) if isinstance(result, dict) else str(result)
                     preview = result_str[:200] + '...' if len(result_str) > 200 else result_str
-                    print(f"Result preview: {preview}")
-                except:
+                    logger.debug(f"Result preview: {preview}")
+                except (json.JSONDecodeError, TypeError, ValueError) as e:
                     preview = result_json[:200] + '...' if len(result_json) > 200 else result_json
-                    print(f"Result preview: {preview}")
+                    logger.debug(f"Result preview: {preview}")
             
-            print("=" * 80)
+            logger.debug("=" * 80)
     
     def export_root_span(self, trace_data: Dict[str, Any]) -> None:
         """Export root span to console
@@ -175,21 +188,25 @@ class ConsoleTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key
         """
         attrs = trace_data.get('attributes', {})
+        context = trace_data.get('context')
         
         if self.verbose:
-            print("=" * 80)
-            print(f"[TRACE] Root Span - invoke_agent")
-            print("-" * 80)
-            print(f"Operation: {attrs.get('gen_ai.operation.name')}")
-            print(f"Agent ID: {attrs.get('gen_ai.agent.id')}")
-            print(f"Conversation ID: {attrs.get('gen_ai.conversation.id')}")
-            print(f"User ID: {attrs.get('agent.user.id')}")
+            logger.debug("=" * 80)
+            logger.debug(f"[TRACE] Root Span - invoke_agent")
+            logger.debug("-" * 80)
+            logger.debug(f"Operation: {attrs.get('gen_ai.operation.name')}")
+            logger.debug(f"Agent ID: {attrs.get('gen_ai.agent.id')}")
+            logger.debug(f"Conversation ID: {attrs.get('gen_ai.conversation.id')}")
+            logger.debug(f"User ID: {attrs.get('agent.user.id')}")
+            if context:
+                logger.debug(f"Trace ID: {context.get('trace_id')}")
+                logger.debug(f"Span ID: {context.get('span_id')}")
             if attrs.get('agent.user.type'):
-                print(f"User Type: {attrs['agent.user.type']}")
+                logger.debug(f"User Type: {attrs['agent.user.type']}")
             if attrs.get('agent.request.id'):
-                print(f"Request ID: {attrs['agent.request.id']}")
-            print(f"Total Latency: {attrs.get('agent.total.latency_ms')}ms")
-            print("=" * 80)
+                logger.debug(f"Request ID: {attrs['agent.request.id']}")
+            logger.debug(f"Total Latency: {attrs.get('agent.total.latency_ms')}ms")
+            logger.debug("=" * 80)
     
     def flush(self) -> None:
         """Flush console output"""
@@ -228,16 +245,20 @@ class FileTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' and 'events' keys following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data (attributes + events)
-        self.llm_traces.append({
+        entry = {
             'span_type': 'llm',
             'attributes': attrs,
             'events': trace_data.get('events', []),
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.llm_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.llm_traces) >= self.buffer_size:
@@ -250,16 +271,20 @@ class FileTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data (attributes only for tools per OTel spec)
-        self.tool_traces.append({
+        entry = {
             'span_type': 'tool',
             'attributes': attrs,
             'events': [],  # Tools don't use events per OTel spec
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.tool_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.tool_traces) >= self.buffer_size:
@@ -272,7 +297,7 @@ class FileTraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
@@ -282,6 +307,9 @@ class FileTraceExporter(TraceExporter):
             'attributes': attrs,
             'events': [],
         }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                self.root_span[key] = trace_data[key]
     
     def flush(self) -> None:
         """Write buffered traces to file following OTel-compliant structure"""
@@ -335,28 +363,25 @@ class FileTraceExporter(TraceExporter):
         try:
             with open(self.output_path, 'w', encoding='utf-8') as f:
                 json.dump(existing_data, f, ensure_ascii=False, indent=2)
-                # Explicitly flush to ensure data is written to disk
-                f.flush()
-                os.fsync(f.fileno())
-            # Add final newline for proper JSON formatting
-            with open(self.output_path, 'a', encoding='utf-8') as f:
+                # Add final newline for proper JSON formatting
                 f.write('\n')
+                # Explicitly flush to ensure data is written to disk
                 f.flush()
                 os.fsync(f.fileno())
             
             # Verify file size and content
             file_size = os.path.getsize(self.output_path)
-            print(f"[FileTraceExporter] Successfully wrote {file_size} bytes to {self.output_path}")
+            logger.debug(f"[FileTraceExporter] Successfully wrote {file_size} bytes to {self.output_path}")
             
             # Verify JSON is valid by reading it back
             with open(self.output_path, 'r', encoding='utf-8') as f:
                 verify_data = json.load(f)
                 llm_count = len(verify_data.get('llm_spans', []))
                 tool_count = len(verify_data.get('tool_spans', []))
-                print(f"[FileTraceExporter] Verified: {llm_count} LLM spans, {tool_count} tool spans")
+                logger.debug(f"[FileTraceExporter] Verified: {llm_count} LLM spans, {tool_count} tool spans")
                 
         except Exception as e:
-            print(f"[FileTraceExporter] Error writing to file: {e}")
+            logger.error(f"[FileTraceExporter] Error writing to file: {e}")
             import traceback
             traceback.print_exc()
         
@@ -365,7 +390,7 @@ class FileTraceExporter(TraceExporter):
         self.tool_traces.clear()
         self.root_span = None
         
-        print(f"[TRACE] Flushed traces to {self.output_path}")
+        logger.debug(f"[TRACE] Flushed traces to {self.output_path}")
 
 
 class APITraceExporter(TraceExporter):
@@ -404,8 +429,8 @@ class APITraceExporter(TraceExporter):
             self._requests = requests
             self._requests_available = True
         except ImportError:
-            print("[TRACE] Warning: requests library not available, API export disabled")
-            print("[TRACE] Install with: pip install requests")
+            logger.error("[TRACE] Warning: requests library not available, API export disabled")
+            logger.error("[TRACE] Install with: pip install requests")
     
     def export_llm_call(self, trace_data: Dict[str, Any]) -> None:
         """Export LLM call trace data to buffer (for API export)
@@ -414,16 +439,20 @@ class APITraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' and 'events' keys following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data
-        self.llm_traces.append({
+        entry = {
             'span_type': 'llm',
             'attributes': attrs,
             'events': trace_data.get('events', []),
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.llm_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.llm_traces) >= self.buffer_size:
@@ -436,16 +465,20 @@ class APITraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info to attributes
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
         # Store the complete trace data
-        self.tool_traces.append({
+        entry = {
             'span_type': 'tool',
             'attributes': attrs,
             'events': [],
-        })
+        }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                entry[key] = trace_data[key]
+        self.tool_traces.append(entry)
         
         # Auto-flush if buffer is full
         if len(self.tool_traces) >= self.buffer_size:
@@ -458,7 +491,7 @@ class APITraceExporter(TraceExporter):
             trace_data: Dict with 'attributes' key following OTel spec
         """
         # Add timestamp and session info
-        attrs = trace_data.get('attributes', {})
+        attrs = dict(trace_data.get('attributes', {}))
         attrs['timestamp'] = time.time()
         attrs['session_id'] = self.session_id
         
@@ -468,11 +501,14 @@ class APITraceExporter(TraceExporter):
             'attributes': attrs,
             'events': [],
         }
+        for key in ('name', 'context', 'parent_id', 'kind'):
+            if key in trace_data:
+                self.root_span[key] = trace_data[key]
     
     def flush(self) -> None:
         """Send buffered traces to API endpoint following OTel structure"""
         if not self._requests_available:
-            print("[TRACE] Cannot flush to API: requests library not available")
+            logger.debug("[TRACE] Cannot flush to API: requests library not available")
             return
         
         if not self.llm_traces and not self.tool_traces and not self.root_span:
@@ -501,17 +537,17 @@ class APITraceExporter(TraceExporter):
             )
             
             if response.status_code == 200:
-                print(f"[TRACE] Successfully sent root span + {len(self.llm_traces)} LLM spans + {len(self.tool_traces)} tool spans to {self.api_url}")
+                logger.debug(f"[TRACE] Successfully sent root span + {len(self.llm_traces)} LLM spans + {len(self.tool_traces)} tool spans to {self.api_url}")
                 # Clear buffers on success
                 self.llm_traces.clear()
                 self.tool_traces.clear()
                 self.root_span = None
             else:
-                print(f"[TRACE] API returned status {response.status_code}: {response.text[:200]}")
+                logger.warning(f"[TRACE] API returned status {response.status_code}: {response.text[:200]}")
                 # Keep traces in buffer for retry
         except Exception as e:
-            print(f"[TRACE] Failed to send traces to API: {e}")
-            print(f"[TRACE] Buffered traces retained: root + {len(self.llm_traces)} LLM + {len(self.tool_traces)} tool spans")
+            logger.error(f"[TRACE] Failed to send traces to API: {e}")
+            logger.error(f"[TRACE] Buffered traces retained: root + {len(self.llm_traces)} LLM + {len(self.tool_traces)} tool spans")
             # Keep traces in buffer for retry
 
 
@@ -531,7 +567,7 @@ class CompositeTraceExporter(TraceExporter):
             try:
                 exporter.export_llm_call(trace_data)
             except Exception as e:
-                print(f"[TRACE] Exporter {type(exporter).__name__} failed: {e}")
+                logger.debug(f"[TRACE] Exporter {type(exporter).__name__} failed: {e}")
     
     def export_tool_call(self, trace_data: Dict[str, Any]) -> None:
         """Export to all configured exporters"""
@@ -539,7 +575,7 @@ class CompositeTraceExporter(TraceExporter):
             try:
                 exporter.export_tool_call(trace_data)
             except Exception as e:
-                print(f"[TRACE] Exporter {type(exporter).__name__} failed: {e}")
+                logger.error(f"[TRACE] Exporter {type(exporter).__name__} failed: {e}")
     
     def export_root_span(self, trace_data: Dict[str, Any]) -> None:
         """Export root span to all configured exporters"""
@@ -547,7 +583,7 @@ class CompositeTraceExporter(TraceExporter):
             try:
                 exporter.export_root_span(trace_data)
             except Exception as e:
-                print(f"[TRACE] Exporter {type(exporter).__name__} failed: {e}")
+                logger.error(f"[TRACE] Exporter {type(exporter).__name__} failed: {e}")
     
     def flush(self) -> None:
         """Flush all exporters"""
@@ -555,4 +591,4 @@ class CompositeTraceExporter(TraceExporter):
             try:
                 exporter.flush()
             except Exception as e:
-                print(f"[TRACE] Exporter {type(exporter).__name__} flush failed: {e}")
+                logger.error(f"[TRACE] Exporter {type(exporter).__name__} flush failed: {e}")
