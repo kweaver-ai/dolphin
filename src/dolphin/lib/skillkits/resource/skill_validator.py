@@ -311,6 +311,114 @@ class SkillValidator:
         return bool(semver_pattern.match(version))
 
 
+_ALLOWED_FILE_PREFIXES = ("SKILL.md", "references/", "scripts/")
+_ALLOWED_SCRIPT_PREFIX = "scripts/"
+
+
+def _reject_bad_path_segments(normalized: str, original: str) -> Optional[str]:
+    """Return an error message if any path segment is illegal, otherwise None.
+
+    Illegal segments:
+    - empty string  (produced by leading/trailing/double slashes, e.g. "a//b")
+    - "."           (current-directory reference, e.g. "references/./a.md")
+    - ".."          (parent-directory traversal, e.g. "references/../etc/passwd")
+    """
+    for part in normalized.split("/"):
+        if part in ("", ".", ".."):
+            return f"Path contains illegal segment '{part}': {original}"
+    return None
+
+
+def _matches_allowed_prefix(normalized: str, prefixes: tuple) -> bool:
+    """Return True when *normalized* is permitted by the given prefix tuple.
+
+    For prefixes that end with "/" (e.g. "references/", "scripts/"), the path
+    must *start with* that prefix — meaning there must be at least one more
+    character after the slash.
+
+    For exact tokens without a trailing "/" (e.g. "SKILL.md"), the path must
+    *equal* that token exactly.  Using startswith here would wrongly accept
+    "SKILL.md.extra.md".
+    """
+    for prefix in prefixes:
+        if prefix.endswith("/"):
+            if normalized.startswith(prefix) and len(normalized) > len(prefix):
+                return True
+        else:
+            if normalized == prefix:
+                return True
+    return False
+
+
+def validate_skill_file_path(file_path: str) -> Tuple[bool, Optional[str]]:
+    """Validate the format of a file_path for builtin_skill_read_file.
+
+    Enforces the rules from the design document (section 6.4 / 7.3):
+    - Must be a non-empty string
+    - Backslashes converted to forward-slashes before checking
+    - No absolute paths or drive letters
+    - No empty, '.', or '..' path segments
+    - Only SKILL.md (exact), references/<something>, or scripts/<something>
+
+    Args:
+        file_path: The relative file path to validate
+
+    Returns:
+        Tuple of (is_valid, error_message) — error_message is None when valid
+    """
+    if not file_path or not file_path.strip():
+        return False, "file_path must not be empty"
+
+    normalized = file_path.replace("\\", "/").strip()
+
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        return False, f"Absolute paths are not allowed: {file_path}"
+
+    seg_error = _reject_bad_path_segments(normalized, file_path)
+    if seg_error:
+        return False, seg_error
+
+    if not _matches_allowed_prefix(normalized, _ALLOWED_FILE_PREFIXES):
+        return False, (
+            f"file_path must be exactly 'SKILL.md', or start with 'references/' "
+            f"or 'scripts/' followed by a filename: {file_path}"
+        )
+
+    return True, None
+
+
+def validate_skill_script_path(script_path: str) -> Tuple[bool, Optional[str]]:
+    """Validate the format of a script_path for builtin_skill_execute_script.
+
+    Enforces the rules from the design document (section 6.5 / 7.3):
+    - Must be a non-empty string
+    - Same normalisation rules as validate_skill_file_path
+    - Only scripts/<something> paths allowed
+
+    Args:
+        script_path: The relative script path to validate
+
+    Returns:
+        Tuple of (is_valid, error_message) — error_message is None when valid
+    """
+    if not script_path or not script_path.strip():
+        return False, "script_path must not be empty"
+
+    normalized = script_path.replace("\\", "/").strip()
+
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        return False, f"Absolute paths are not allowed: {script_path}"
+
+    seg_error = _reject_bad_path_segments(normalized, script_path)
+    if seg_error:
+        return False, seg_error
+
+    if not normalized.startswith(_ALLOWED_SCRIPT_PREFIX) or len(normalized) <= len(_ALLOWED_SCRIPT_PREFIX):
+        return False, f"script_path must start with 'scripts/' followed by a filename: {script_path}"
+
+    return True, None
+
+
 def validate_skill_name(name: str) -> Tuple[bool, Optional[str]]:
     """Validate a skill name.
 

@@ -871,14 +871,21 @@ class TestResourceSkillkitIntegration(unittest.TestCase):
         # Test getName
         self.assertEqual(skillkit.getName(), "resource_skillkit")
 
-        # Test getSkills returns SkillFunction list
-        # Note: _list_resource_skills is removed (Level 1 metadata auto-injected)
+        # Test getSkills returns SkillFunction list.
+        # 2 legacy entries + 3 unified builtin contract handlers = 5 total.
+        # Note: _list_resource_skills is not exposed (Level 1 metadata is
+        # auto-injected into the system prompt via get_metadata_prompt()).
         skills = skillkit.getSkills()
-        self.assertEqual(len(skills), 2)
+        self.assertEqual(len(skills), 5)
 
         skill_names = [s.func.__name__ for s in skills]
+        # Legacy interface (backwards compatibility)
         self.assertIn("_load_resource_skill", skill_names)
         self.assertIn("_read_skill_asset", skill_names)
+        # Unified builtin contract handlers (local testing mode)
+        self.assertIn("_builtin_skill_load_handler", skill_names)
+        self.assertIn("_builtin_skill_read_file_handler", skill_names)
+        self.assertIn("_builtin_skill_execute_script_handler", skill_names)
 
     def test_cache_functionality(self):
         """Test that caching works correctly."""

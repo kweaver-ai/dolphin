@@ -27,6 +27,18 @@ dolphin debug --agent my_agent --folder ./agents
 dolphin chat --agent my_agent --folder ./agents
 ```
 
+Windows PowerShell users should prefer the installed CLI entry:
+
+```powershell
+uv run dolphin run --agent my_agent --folder .\agents --query "your query"
+```
+
+If you want to invoke the repo-local launcher directly on Windows, use:
+
+```powershell
+uv run .\bin\dolphin.cmd run --agent my_agent --folder .\agents --query "your query"
+```
+
 ## Subcommands
 
 Dolphin CLI provides three subcommands for different use cases:

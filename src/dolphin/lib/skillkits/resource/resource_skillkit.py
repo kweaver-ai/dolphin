@@ -8,6 +8,8 @@ Key features:
 - Prefix Cache optimization
 - History bucket persistence
 - Local-first design
+- Unified builtin skill contracts for local testing mode:
+  builtin_skill_load / builtin_skill_read_file / builtin_skill_execute_script
 """
 
 from pathlib import Path
@@ -22,7 +24,26 @@ from .models.skill_meta import SkillMeta, SkillContent
 from .models.skill_config import ResourceSkillConfig
 from .skill_loader import SkillLoader, truncate_content
 from .skill_cache import SkillMetaCache, SkillContentCache
-from .skill_validator import validate_skill_name
+from .skill_validator import (
+    validate_skill_name,
+    validate_skill_file_path,
+    validate_skill_script_path,
+)
+from .local_script_executor import execute_skill_script
+from dolphin.sdk.skill.skill_contracts import (
+    BUILTIN_SKILL_LOAD,
+    BUILTIN_SKILL_READ_FILE,
+    BUILTIN_SKILL_EXECUTE_SCRIPT,
+    SKILL_LOAD_DESCRIPTION,
+    SKILL_READ_FILE_DESCRIPTION,
+    SKILL_EXECUTE_SCRIPT_DESCRIPTION,
+    SKILL_LOAD_INPUTS_SCHEMA,
+    SKILL_READ_FILE_INPUTS_SCHEMA,
+    SKILL_EXECUTE_SCRIPT_INPUTS_SCHEMA,
+    SKILL_LOAD_OPENAI_SCHEMA,
+    SKILL_READ_FILE_OPENAI_SCHEMA,
+    SKILL_EXECUTE_SCRIPT_OPENAI_SCHEMA,
+)
 
 logger = get_logger("resource_skillkit")
 
@@ -181,12 +202,33 @@ class ResourceSkillkit(Skillkit):
         Level 1 metadata is auto-injected into system prompt via
         get_metadata_prompt(). LLM sees available skills upfront.
 
+        Legacy entries (_load_resource_skill / _read_skill_asset) are kept for
+        backwards compatibility.  The three unified contract handlers are added
+        for local testing mode:
+        - builtin_skill_load
+        - builtin_skill_read_file
+        - builtin_skill_execute_script
+
         Returns:
             List of SkillFunction objects for Level 2/3 loading
         """
         return [
+            # Legacy interface (kept for backwards compatibility)
             SkillFunction(self._load_resource_skill),
             SkillFunction(self._read_skill_asset),
+            # Unified contract interface (local testing mode)
+            SkillFunction(
+                self._builtin_skill_load_handler,
+                openai_tool_schema=SKILL_LOAD_OPENAI_SCHEMA,
+            ),
+            SkillFunction(
+                self._builtin_skill_read_file_handler,
+                openai_tool_schema=SKILL_READ_FILE_OPENAI_SCHEMA,
+            ),
+            SkillFunction(
+                self._builtin_skill_execute_script_handler,
+                openai_tool_schema=SKILL_EXECUTE_SCRIPT_OPENAI_SCHEMA,
+            ),
         ]
 
     def get_metadata_prompt(self) -> str:
@@ -462,3 +504,162 @@ class ResourceSkillkit(Skillkit):
             "content_cache": self._content_cache.stats(),
             "directories": self.config.directories,
         }
+
+    # =====================================================================
+    # Unified contract handlers (local testing mode)
+    # Names must match the constants in skill_contracts.py exactly.
+    # =====================================================================
+
+    def _builtin_skill_load_handler(self, skill_id: str, **kwargs) -> Dict[str, Any]:
+        """Handler for builtin_skill_load contract (local testing mode).
+
+        Loads the full SKILL.md content plus available script / reference path
+        lists for a skill identified by its frontmatter name.
+
+        Args:
+            skill_id: Skill name matching SKILL.md frontmatter 'name' field
+
+        Returns:
+            Unified response dict with skill_md_content, available_scripts,
+            available_references, and source='local'
+        """
+        self._ensure_initialized()
+
+        is_valid, error = validate_skill_name(skill_id)
+        if not is_valid:
+            return self._contract_error(skill_id, f"Invalid skill_id: {error}")
+
+        if skill_id not in self._skills_meta:
+            available = sorted(self._skills_meta.keys())
+            return self._contract_error(
+                skill_id,
+                f"Skill '{skill_id}' not found. Available: {available or 'none'}",
+            )
+
+        meta = self._skills_meta[skill_id]
+        skill_dir = Path(meta.base_path)
+
+        content = self.loader.load_content(skill_dir)
+        if content is None:
+            return self._contract_error(
+                skill_id, f"Failed to load content for skill '{skill_id}'"
+            )
+
+        result = {
+            "skill_id": skill_id,
+            "skill_md_content": content.body.strip(),
+            "available_scripts": content.available_scripts,
+            "available_references": content.available_references,
+            "source": "local",
+        }
+        return {"answer": result, "block_answer": result}
+
+    def _builtin_skill_read_file_handler(
+        self, skill_id: str, file_path: str, **kwargs
+    ) -> Dict[str, Any]:
+        """Handler for builtin_skill_read_file contract (local testing mode).
+
+        Reads the full text content of a single file inside the skill package.
+
+        Args:
+            skill_id: Skill name matching SKILL.md frontmatter 'name' field
+            file_path: Relative file path inside the skill directory
+
+        Returns:
+            Unified response dict with file content and source='local'
+        """
+        self._ensure_initialized()
+
+        is_valid, error = validate_skill_name(skill_id)
+        if not is_valid:
+            return self._contract_error(skill_id, f"Invalid skill_id: {error}")
+
+        path_valid, path_error = validate_skill_file_path(file_path)
+        if not path_valid:
+            return self._contract_error(skill_id, path_error)
+
+        if skill_id not in self._skills_meta:
+            return self._contract_error(skill_id, f"Skill '{skill_id}' not found")
+
+        meta = self._skills_meta[skill_id]
+        skill_dir = Path(meta.base_path)
+
+        content_text, read_error = self.loader.load_resource(skill_dir, file_path)
+        if read_error:
+            return self._contract_error(skill_id, read_error)
+
+        result = {
+            "skill_id": skill_id,
+            "file_path": file_path,
+            "content": content_text,
+            "source": "local",
+        }
+        return {"answer": result, "block_answer": result}
+
+    def _builtin_skill_execute_script_handler(
+        self, skill_id: str, script_path: str, **kwargs
+    ) -> Dict[str, Any]:
+        """Handler for builtin_skill_execute_script contract (local testing mode).
+
+        Executes a script inside the skill's scripts/ directory using the local
+        runtime environment.
+
+        Args:
+            skill_id: Skill name matching SKILL.md frontmatter 'name' field
+            script_path: Relative path to the script (e.g. scripts/foo.py)
+
+        Returns:
+            Unified response dict with stdout, stderr, exit_code, duration_ms,
+            artifacts, and source='local'
+        """
+        self._ensure_initialized()
+
+        is_valid, error = validate_skill_name(skill_id)
+        if not is_valid:
+            return self._exec_error_result(skill_id, script_path, f"Invalid skill_id: {error}")
+
+        path_valid, path_error = validate_skill_script_path(script_path)
+        if not path_valid:
+            return self._exec_error_result(skill_id, script_path, path_error)
+
+        if skill_id not in self._skills_meta:
+            return self._exec_error_result(
+                skill_id, script_path, f"Skill '{skill_id}' not found"
+            )
+
+        meta = self._skills_meta[skill_id]
+        skill_dir = Path(meta.base_path)
+
+        exec_result = execute_skill_script(skill_dir, script_path)
+
+        result = {
+            "skill_id": skill_id,
+            "script_path": script_path,
+            **exec_result,
+        }
+        return {"answer": result, "block_answer": result}
+
+    # =====================================================================
+    # Private helpers
+    # =====================================================================
+
+    def _contract_error(self, skill_id: str, message: str) -> Dict[str, Any]:
+        """Build a unified error response for load / read_file failures."""
+        result = {"skill_id": skill_id, "error": message, "source": "local"}
+        return {"answer": result, "block_answer": result}
+
+    def _exec_error_result(
+        self, skill_id: str, script_path: str, message: str
+    ) -> Dict[str, Any]:
+        """Build a unified error response for execute_script failures."""
+        result = {
+            "skill_id": skill_id,
+            "script_path": script_path,
+            "stdout": "",
+            "stderr": message,
+            "exit_code": -1,
+            "duration_ms": 0,
+            "artifacts": [],
+            "source": "local",
+        }
+        return {"answer": result, "block_answer": result}
