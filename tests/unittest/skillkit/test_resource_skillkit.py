@@ -1147,5 +1147,365 @@ class TestResourceSkillkitIncludeExcludeFilter(unittest.TestCase):
         self.assertEqual(sk.get_available_skills(), ["beta"])
 
 
+class TestBuiltinSkillContractHandlers(unittest.TestCase):
+    """Tests for the three unified contract handlers added to ResourceSkillkit.
+
+    Each handler (_builtin_skill_load_handler, _builtin_skill_read_file_handler,
+    _builtin_skill_execute_script_handler) wraps the same logic used in the local
+    testing path and must return a consistent unified contract response dict.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from dolphin.lib.skillkits.resource import ResourceSkillkit
+            from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+            cls.ResourceSkillkit = ResourceSkillkit
+            cls.ResourceSkillConfig = ResourceSkillConfig
+            cls.available = True
+        except ImportError as e:
+            cls.available = False
+            cls.import_error = str(e)
+
+        # Build a temp skill directory with one complete skill
+        cls.temp_dir = tempfile.mkdtemp(prefix="test_contract_handlers_")
+        skill_dir = Path(cls.temp_dir) / "demo-skill"
+        skill_dir.mkdir()
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir()
+        refs_dir = skill_dir / "references"
+        refs_dir.mkdir()
+
+        # SKILL.md with frontmatter
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: demo-skill\ndescription: Demo skill for handler tests\n---\n\n"
+            "# Demo Skill\n\nThis skill is for testing contract handlers.\n",
+            encoding="utf-8",
+        )
+        # Python script that prints a known line
+        (scripts_dir / "run.py").write_text(
+            "print('contract handler test ok')\n", encoding="utf-8"
+        )
+        # Reference doc
+        (refs_dir / "guide.md").write_text("# Guide\n\nReference content.\n", encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, "temp_dir") and os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir)
+
+    def _make_skillkit(self):
+        config = self.ResourceSkillConfig(directories=[self.temp_dir], enabled=True)
+        sk = self.ResourceSkillkit(config)
+        sk.initialize()
+        return sk
+
+    def _skip_if_unavailable(self):
+        if not self.available:
+            self.skipTest(getattr(self, "import_error", "ResourceSkillkit not available"))
+
+    # ------------------------------------------------------------------
+    # _builtin_skill_load_handler
+    # ------------------------------------------------------------------
+
+    def test_load_handler_success_structure(self):
+        """load handler must return answer/block_answer with required contract fields."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="demo-skill")
+        self.assertIn("answer", result)
+        self.assertIn("block_answer", result)
+        payload = result["answer"]
+        for key in ("skill_id", "skill_md_content", "available_scripts",
+                    "available_references", "source"):
+            self.assertIn(key, payload, f"load result missing field: {key}")
+
+    def test_load_handler_skill_id_echoed(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        self.assertEqual(payload["skill_id"], "demo-skill")
+
+    def test_load_handler_source_is_local(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        self.assertEqual(payload["source"], "local")
+
+    def test_load_handler_skill_md_content_non_empty(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        self.assertTrue(payload["skill_md_content"].strip())
+
+    def test_load_handler_available_scripts_lists_script(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        scripts = payload["available_scripts"]
+        self.assertIsInstance(scripts, list)
+        self.assertTrue(
+            any("run.py" in s for s in scripts),
+            f"scripts/run.py should appear in available_scripts: {scripts}",
+        )
+
+    def test_load_handler_available_references_lists_guide(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        refs = payload["available_references"]
+        self.assertIsInstance(refs, list)
+        self.assertTrue(
+            any("guide.md" in r for r in refs),
+            f"references/guide.md should appear in available_references: {refs}",
+        )
+
+    def test_load_handler_unknown_skill_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="no-such-skill")
+        payload = result["answer"]
+        self.assertIn("error", payload)
+        self.assertEqual(payload["source"], "local")
+
+    def test_load_handler_empty_skill_id_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="")
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_load_handler_answer_and_block_answer_are_equal(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="demo-skill")
+        self.assertEqual(result["answer"], result["block_answer"])
+
+    # ------------------------------------------------------------------
+    # _builtin_skill_read_file_handler
+    # ------------------------------------------------------------------
+
+    def test_read_file_handler_skill_md_success(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="SKILL.md"
+        )
+        payload = result["answer"]
+        for key in ("skill_id", "file_path", "content", "source"):
+            self.assertIn(key, payload)
+        self.assertEqual(payload["source"], "local")
+        self.assertTrue(payload["content"].strip())
+
+    def test_read_file_handler_reference_file_success(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="references/guide.md"
+        )
+        payload = result["answer"]
+        self.assertNotIn("error", payload)
+        self.assertIn("Reference content", payload["content"])
+
+    def test_read_file_handler_script_file_success(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="scripts/run.py"
+        )
+        payload = result["answer"]
+        self.assertNotIn("error", payload)
+        self.assertTrue(payload["content"].strip())
+
+    def test_read_file_handler_invalid_path_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="references/../etc/passwd"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_path_outside_allowed_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="README.md"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_unknown_skill_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="ghost-skill", file_path="SKILL.md"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_nonexistent_file_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="references/nosuchfile.md"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_answer_and_block_answer_are_equal(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="SKILL.md"
+        )
+        self.assertEqual(result["answer"], result["block_answer"])
+
+    # ------------------------------------------------------------------
+    # _builtin_skill_execute_script_handler
+    # ------------------------------------------------------------------
+
+    def test_execute_script_handler_success_structure(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="scripts/run.py"
+        )
+        payload = result["answer"]
+        for key in ("skill_id", "script_path", "stdout", "stderr",
+                    "exit_code", "duration_ms", "artifacts", "source"):
+            self.assertIn(key, payload)
+
+    def test_execute_script_handler_exit_code_zero(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="scripts/run.py"
+        )["answer"]
+        self.assertEqual(payload["exit_code"], 0)
+
+    def test_execute_script_handler_stdout_contains_output(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="scripts/run.py"
+        )["answer"]
+        self.assertIn("contract handler test ok", payload["stdout"])
+
+    def test_execute_script_handler_source_is_local(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="scripts/run.py"
+        )["answer"]
+        self.assertEqual(payload["source"], "local")
+
+    def test_execute_script_handler_invalid_path_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="scripts/../etc/passwd"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+        self.assertTrue(payload["stderr"])
+
+    def test_execute_script_handler_path_not_under_scripts_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="references/guide.md"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+
+    def test_execute_script_handler_unknown_skill_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="ghost-skill", script_path="scripts/run.py"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+        self.assertIn("not found", payload["stderr"].lower())
+
+    def test_execute_script_handler_nonexistent_script_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="scripts/nosuch.py"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+
+    def test_execute_script_handler_answer_and_block_answer_are_equal(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", script_path="scripts/run.py"
+        )
+        self.assertEqual(result["answer"], result["block_answer"])
+
+    # ------------------------------------------------------------------
+    # Helper methods (_contract_error, _exec_error_result)
+    # ------------------------------------------------------------------
+
+    def test_contract_error_structure(self):
+        """_contract_error must produce answer/block_answer with error and source."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._contract_error("some-skill", "something went wrong")
+        for key in ("answer", "block_answer"):
+            self.assertIn(key, result)
+        payload = result["answer"]
+        self.assertEqual(payload["skill_id"], "some-skill")
+        self.assertIn("something went wrong", payload["error"])
+        self.assertEqual(payload["source"], "local")
+
+    def test_exec_error_result_structure(self):
+        """_exec_error_result must produce answer/block_answer with all script result fields."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._exec_error_result("some-skill", "scripts/x.py", "boom")
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+        self.assertIn("boom", payload["stderr"])
+        self.assertEqual(payload["stdout"], "")
+        self.assertEqual(payload["artifacts"], [])
+        self.assertEqual(payload["source"], "local")
+
+    # ------------------------------------------------------------------
+    # OpenAI schema wiring on the three new SkillFunction entries
+    # ------------------------------------------------------------------
+
+    def test_builtin_skill_load_has_openai_schema(self):
+        """The SkillFunction for _builtin_skill_load_handler must carry the OpenAI schema."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        sf = skill_by_name.get("_builtin_skill_load_handler")
+        self.assertIsNotNone(sf, "_builtin_skill_load_handler not found in skills")
+        schema = sf.get_openai_tool_schema()
+        self.assertEqual(schema["function"]["name"], "builtin_skill_load")
+
+    def test_builtin_skill_read_file_has_openai_schema(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        sf = skill_by_name.get("_builtin_skill_read_file_handler")
+        self.assertIsNotNone(sf)
+        schema = sf.get_openai_tool_schema()
+        self.assertEqual(schema["function"]["name"], "builtin_skill_read_file")
+
+    def test_builtin_skill_execute_script_has_openai_schema(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        sf = skill_by_name.get("_builtin_skill_execute_script_handler")
+        self.assertIsNotNone(sf)
+        schema = sf.get_openai_tool_schema()
+        self.assertEqual(schema["function"]["name"], "builtin_skill_execute_script")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
