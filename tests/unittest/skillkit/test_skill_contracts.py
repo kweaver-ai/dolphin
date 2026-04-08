@@ -108,7 +108,7 @@ class TestContractInputSchemas(unittest.TestCase):
         self._assert_valid_schema(self.read_schema, ["skill_id", "file_path"])
 
     def test_execute_script_requires_skill_id_and_script_path(self):
-        self._assert_valid_schema(self.exec_schema, ["skill_id", "script_path"])
+        self._assert_valid_schema(self.exec_schema, ["skill_id", "entry_shell"])
 
     def test_all_property_types_are_strings(self):
         for schema in (self.load_schema, self.read_schema, self.exec_schema):
@@ -156,7 +156,7 @@ class TestContractOutputSchemas(unittest.TestCase):
             self.assertIn(field, self.read_out, f"read_file outputs missing: {field}")
 
     def test_execute_script_outputs_fields(self):
-        for field in ("skill_id", "script_path", "stdout", "stderr",
+        for field in ("skill_id", "entry_shell", "stdout", "stderr",
                       "exit_code", "duration_ms", "artifacts", "source"):
             self.assertIn(field, self.exec_out, f"execute_script outputs missing: {field}")
 
@@ -236,7 +236,7 @@ class TestPreBuiltOpenAISchemas(unittest.TestCase):
 
     def test_exec_schema_has_script_path_parameter(self):
         params = self.exec_schema["function"]["parameters"]
-        self.assertIn("script_path", params["properties"])
+        self.assertIn("entry_shell", params["properties"])
 
 
 if __name__ == "__main__":

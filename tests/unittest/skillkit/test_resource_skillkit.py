@@ -1369,10 +1369,10 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         result = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="scripts/run.py"
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
         )
         payload = result["answer"]
-        for key in ("skill_id", "script_path", "stdout", "stderr",
+        for key in ("skill_id", "entry_shell", "stdout", "stderr",
                     "exit_code", "duration_ms", "artifacts", "source"):
             self.assertIn(key, payload)
 
@@ -1380,7 +1380,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         payload = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="scripts/run.py"
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
         )["answer"]
         self.assertEqual(payload["exit_code"], 0)
 
@@ -1388,7 +1388,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         payload = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="scripts/run.py"
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
         )["answer"]
         self.assertIn("contract handler test ok", payload["stdout"])
 
@@ -1396,7 +1396,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         payload = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="scripts/run.py"
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
         )["answer"]
         self.assertEqual(payload["source"], "local")
 
@@ -1404,7 +1404,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         result = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="scripts/../etc/passwd"
+            skill_id="demo-skill", entry_shell="python scripts/../etc/passwd"
         )
         payload = result["answer"]
         self.assertEqual(payload["exit_code"], -1)
@@ -1414,7 +1414,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         result = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="references/guide.md"
+            skill_id="demo-skill", entry_shell="python references/guide.md"
         )
         payload = result["answer"]
         self.assertEqual(payload["exit_code"], -1)
@@ -1423,7 +1423,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         result = sk._builtin_skill_execute_script_handler(
-            skill_id="ghost-skill", script_path="scripts/run.py"
+            skill_id="ghost-skill", entry_shell="python scripts/run.py"
         )
         payload = result["answer"]
         self.assertEqual(payload["exit_code"], -1)
@@ -1433,7 +1433,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         result = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="scripts/nosuch.py"
+            skill_id="demo-skill", entry_shell="python scripts/nosuch.py"
         )
         payload = result["answer"]
         self.assertEqual(payload["exit_code"], -1)
@@ -1442,7 +1442,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
         result = sk._builtin_skill_execute_script_handler(
-            skill_id="demo-skill", script_path="scripts/run.py"
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
         )
         self.assertEqual(result["answer"], result["block_answer"])
 

@@ -27,7 +27,6 @@ from .skill_cache import SkillMetaCache, SkillContentCache
 from .skill_validator import (
     validate_skill_name,
     validate_skill_file_path,
-    validate_skill_script_path,
 )
 from .local_script_executor import execute_skill_script
 from dolphin.sdk.skill.skill_contracts import (
@@ -597,16 +596,16 @@ class ResourceSkillkit(Skillkit):
         return {"answer": result, "block_answer": result}
 
     def _builtin_skill_execute_script_handler(
-        self, skill_id: str, script_path: str, **kwargs
+        self, skill_id: str, entry_shell: str, **kwargs
     ) -> Dict[str, Any]:
         """Handler for builtin_skill_execute_script contract (local testing mode).
 
         Executes a script inside the skill's scripts/ directory using the local
-        runtime environment.
+        runtime environment. Matches the online factory execution behavior.
 
         Args:
             skill_id: Skill name matching SKILL.md frontmatter 'name' field
-            script_path: Relative path to the script (e.g. scripts/foo.py)
+            entry_shell: Shell command to execute (e.g., 'python scripts/analyze.py')
 
         Returns:
             Unified response dict with stdout, stderr, exit_code, duration_ms,
@@ -616,25 +615,21 @@ class ResourceSkillkit(Skillkit):
 
         is_valid, error = validate_skill_name(skill_id)
         if not is_valid:
-            return self._exec_error_result(skill_id, script_path, f"Invalid skill_id: {error}")
-
-        path_valid, path_error = validate_skill_script_path(script_path)
-        if not path_valid:
-            return self._exec_error_result(skill_id, script_path, path_error)
+            return self._exec_error_result(skill_id, entry_shell, f"Invalid skill_id: {error}")
 
         if skill_id not in self._skills_meta:
             return self._exec_error_result(
-                skill_id, script_path, f"Skill '{skill_id}' not found"
+                skill_id, entry_shell, f"Skill '{skill_id}' not found"
             )
 
         meta = self._skills_meta[skill_id]
         skill_dir = Path(meta.base_path)
 
-        exec_result = execute_skill_script(skill_dir, script_path)
+        exec_result = execute_skill_script(skill_dir, entry_shell)
 
         result = {
             "skill_id": skill_id,
-            "script_path": script_path,
+            "entry_shell": entry_shell,
             **exec_result,
         }
         return {"answer": result, "block_answer": result}
@@ -649,12 +644,12 @@ class ResourceSkillkit(Skillkit):
         return {"answer": result, "block_answer": result}
 
     def _exec_error_result(
-        self, skill_id: str, script_path: str, message: str
+        self, skill_id: str, entry_shell: str, message: str
     ) -> Dict[str, Any]:
         """Build a unified error response for execute_script failures."""
         result = {
             "skill_id": skill_id,
-            "script_path": script_path,
+            "entry_shell": entry_shell,
             "stdout": "",
             "stderr": message,
             "exit_code": -1,
