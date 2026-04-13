@@ -331,6 +331,11 @@ class DolphinExecutor:
     async def run(self, content, output_variables: Optional[list] = None, **kwargs):
         start_time = time.perf_counter()
 
+        # Populate context.skillkit from global_skills if not already set.
+        # This ensures agent skills (registered via GlobalSkills) are
+        # available for @agent_name() calls in DPH scripts.
+        self._prepare_for_run(**kwargs)
+
         # Pass the debug mode parameter to Executor
         debug_mode = kwargs.get("debug_mode", False)
         break_on_start = kwargs.get("break_on_start", False)
