@@ -111,3 +111,156 @@ async def test_parallel_tool_calls_assign_to_correct_variables():
         "var_a should be set by SlowTool, but was None -- "
         "the parallel race condition dropped it"
     )
+
+
+@pytest.mark.asyncio
+async def test_parallel_many_concurrent_branches():
+    """Stress test: 5 tool calls in /parallel/ must all write correctly."""
+    ctx = Context(verbose=False)
+
+    skills = [
+        _make_skill(f"Tool{i}", delay=0.01 * i, return_value=f"value_{i}")
+        for i in range(5)
+    ]
+    ctx.skillkit._skills_cache = list(skills)
+    ctx.set_var_output("q", "hello")
+
+    lines = [f"@Tool{i}(input=$q) -> result_{i}" for i in range(5)]
+    dph_script = "/parallel/\n" + "\n".join(lines) + "\n/end/"
+
+    with patch(
+        "dolphin.core.executor.executor.ExploreBlockV2",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.ExploreBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.JudgeBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.PromptBlock",
+        return_value=MagicMock(),
+    ):
+        executor = Executor(context=ctx)
+        async for _ in executor.run(dph_script):
+            pass
+
+    for i in range(5):
+        val = ctx.get_var_value(f"result_{i}")
+        assert val is not None, (
+            f"result_{i} should be set by Tool{i}, but was None"
+        )
+
+
+@pytest.mark.asyncio
+async def test_sequential_tool_calls_unaffected():
+    """Regression: sequential (non-parallel) tool calls must still work."""
+    ctx = Context(verbose=False)
+
+    skill_a = _make_skill("ToolA", delay=0.01, return_value="alpha")
+    skill_b = _make_skill("ToolB", delay=0.01, return_value="beta")
+    ctx.skillkit._skills_cache = [skill_a, skill_b]
+    ctx.set_var_output("q", "hello")
+
+    dph_script = (
+        "@ToolA(input=$q) -> seq_a\n"
+        "@ToolB(input=$q) -> seq_b"
+    )
+
+    with patch(
+        "dolphin.core.executor.executor.ExploreBlockV2",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.ExploreBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.JudgeBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.PromptBlock",
+        return_value=MagicMock(),
+    ):
+        executor = Executor(context=ctx)
+        async for _ in executor.run(dph_script):
+            pass
+
+    assert ctx.get_var_value("seq_a") is not None, "seq_a should be set by ToolA"
+    assert ctx.get_var_value("seq_b") is not None, "seq_b should be set by ToolB"
+
+
+@pytest.mark.asyncio
+async def test_parallel_variable_isolation_no_cross_write():
+    """Parallel variable isolation: slow and fast tools write to their own vars."""
+    ctx = Context(verbose=False)
+
+    slow_skill = _make_skill("SlowOne", delay=0.1, return_value="slow_val")
+    fast_skill = _make_skill("FastOne", delay=0.01, return_value="fast_val")
+    ctx.skillkit._skills_cache = [slow_skill, fast_skill]
+    ctx.set_var_output("q", "hello")
+
+    dph_script = (
+        "/parallel/\n"
+        "@SlowOne(input=$q) -> slow_result\n"
+        "@FastOne(input=$q) -> fast_result\n"
+        "/end/"
+    )
+
+    with patch(
+        "dolphin.core.executor.executor.ExploreBlockV2",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.ExploreBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.JudgeBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.PromptBlock",
+        return_value=MagicMock(),
+    ):
+        executor = Executor(context=ctx)
+        async for _ in executor.run(dph_script):
+            pass
+
+    slow_val = ctx.get_var_value("slow_result")
+    fast_val = ctx.get_var_value("fast_result")
+    assert slow_val is not None, "slow_result should be set by SlowOne"
+    assert fast_val is not None, "fast_result should be set by FastOne"
+
+
+@pytest.mark.asyncio
+async def test_parallel_with_assign_and_tool_mixed():
+    """Parallel block with mixed block types: one @tool and one assign."""
+    ctx = Context(verbose=False)
+
+    skill = _make_skill("MyTool", delay=0.05, return_value="tool_val")
+    ctx.skillkit._skills_cache = [skill]
+    ctx.set_var_output("q", "hello")
+    ctx.set_var_output("x", "assign_val")
+
+    dph_script = (
+        "/parallel/\n"
+        "@MyTool(input=$q) -> tool_result\n"
+        "$x -> assign_result\n"
+        "/end/"
+    )
+
+    with patch(
+        "dolphin.core.executor.executor.ExploreBlockV2",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.ExploreBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.JudgeBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.PromptBlock",
+        return_value=MagicMock(),
+    ):
+        executor = Executor(context=ctx)
+        async for _ in executor.run(dph_script):
+            pass
+
+    assert ctx.get_var_value("tool_result") is not None, "tool_result should be set by MyTool"
+    assert ctx.get_var_value("assign_result") is not None, "assign_result should be set by assign block"
