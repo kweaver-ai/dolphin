@@ -837,13 +837,13 @@ class CategoryBlock(Enum):
     ASSIGN = "assign"
 
 
-class SkillType(Enum):
+class ToolType(Enum):
     TOOL = "TOOL"
     AGENT = "AGENT"
     MCP = "MCP"
 
 
-class SkillArg:
+class ToolArg:
     def __init__(self, name: str, type: str, value: Any):
         self.name = name
         self.type = type
@@ -855,7 +855,7 @@ class SkillArg:
 
 class SkillInfo:
     def __init__(
-        self, type: SkillType, name: str, args: list[SkillArg], checked: bool = True
+        self, type: ToolType, name: str, args: list[ToolArg], checked: bool = True
     ):
         self.type = type
         self.name = name
@@ -875,12 +875,12 @@ class SkillInfo:
 
     @staticmethod
     def build(
-        skill_type: SkillType,
+        skill_type: ToolType,
         skill_name: str,
         skill_args: dict = {},
         checked: bool = True,
     ) -> "SkillInfo":
-        args = [SkillArg(k, type(v).__name__, v) for k, v in skill_args.items()]
+        args = [ToolArg(k, type(v).__name__, v) for k, v in skill_args.items()]
         return SkillInfo(skill_type, skill_name, args, checked)
 
     @staticmethod
@@ -888,10 +888,10 @@ class SkillInfo:
         if not dict_data:
             return None
         return SkillInfo(
-            type=SkillType(dict_data["type"]),
+            type=ToolType(dict_data["type"]),
             name=dict_data["name"],
             args=[
-                SkillArg(arg["name"], arg["type"], arg["value"])
+                ToolArg(arg["name"], arg["type"], arg["value"])
                 for arg in dict_data["args"]
             ],
             checked=dict_data["checked"],

@@ -23,7 +23,7 @@ from dolphin.core.common.enums import (
     MessageRole,
     Messages,
     SkillInfo,
-    SkillType,
+    ToolType,
     Status,
     StreamItem,
     TypeStage,
@@ -1334,7 +1334,7 @@ class BasicCodeBlock:
                 stage=TypeStage.SKILL,
                 status=Status.PROCESSING,
                 skill_info=SkillInfo.build(
-                    skill_type=SkillType.TOOL,
+                    skill_type=ToolType.TOOL,
                     skill_name=skill_name,
                     skill_args=skill_params_json,
                 ),

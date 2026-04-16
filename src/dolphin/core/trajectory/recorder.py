@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dolphin.core.common.enums import StreamItem
-from dolphin.core.common.enums import TypeStage, Status, SkillInfo, SkillType
+from dolphin.core.common.enums import TypeStage, Status, SkillInfo, ToolType
 from dolphin.core.runtime.runtime_instance import ProgressInstance
 from dolphin.core.common.types import SourceType
 from typing import Union, Dict, Any
@@ -53,7 +53,7 @@ class Recorder:
             stage = TypeStage.SKILL
             # Use provided skill_type or default to TOOL
             if skill_type is None:
-                skill_type = SkillType.TOOL
+                skill_type = ToolType.TOOL
             skill_info = SkillInfo.build(
                 skill_type=skill_type,
                 skill_name=skill_name,
@@ -141,7 +141,7 @@ class Recorder:
         if skill_name:
             # Use provided skill_type or default to TOOL
             if skill_type is None:
-                skill_type = SkillType.TOOL
+                skill_type = ToolType.TOOL
             skill_info = SkillInfo.build(
                 skill_type=skill_type,
                 skill_name=skill_name,

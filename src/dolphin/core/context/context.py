@@ -6,7 +6,7 @@ from collections import deque
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
 
-from dolphin.core.common.enums import MessageRole, SkillInfo, Messages, SkillType
+from dolphin.core.common.enums import MessageRole, SkillInfo, Messages, ToolType
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.common.constants import (
     KEY_HISTORY_COMPACT_RECENT_TURNS,
@@ -608,22 +608,22 @@ class Context:
     def get_skill(self, name):
         return self.skillkit.getSkill(name)
 
-    def get_skill_type(self, skill_name: str) -> SkillType:
+    def get_skill_type(self, skill_name: str) -> ToolType:
         """Get the type of a skill
 
         Args:
             skill_name: The name of the skill
 
         Returns:
-            SkillType: The type of the skill
+            ToolType: The type of the skill
         """
         skill = self.get_skill(skill_name)
         if skill:
             # Try to get the tool type, return the default type if not available
-            return getattr(skill, "tool_type", SkillType.TOOL)
+            return getattr(skill, "tool_type", ToolType.TOOL)
         else:
             # Default returns TOOL type
-            return SkillType.TOOL
+            return ToolType.TOOL
 
     def is_skillkit_empty(self):
         return self.skillkit is None or self.skillkit.isEmpty()

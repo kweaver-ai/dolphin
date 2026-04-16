@@ -53,7 +53,7 @@ from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.config.global_config import GlobalConfig
 
 # Common
-from dolphin.core.common.enums import MessageRole, SkillType
+from dolphin.core.common.enums import MessageRole, ToolType
 from dolphin.core.common.exceptions import DolphinException
 
 # Logging
@@ -93,7 +93,7 @@ __all__ = [
     "GlobalConfig",
     # Common
     "MessageRole",
-    "SkillType",
+    "ToolType",
     "DolphinException",
     # Logging
     "get_logger",
