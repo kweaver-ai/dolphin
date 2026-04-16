@@ -229,8 +229,8 @@ async def test_parallel_variable_isolation_no_cross_write():
 
 
 @pytest.mark.asyncio
-async def test_parallel_with_assign_and_tool_mixed():
-    """Parallel block with mixed block types: one @tool and one assign."""
+async def test_parallel_rejects_assign_block():
+    """Parallel block must reject non-tool block types (assign)."""
     ctx = Context(verbose=False)
 
     skill = _make_skill("MyTool", delay=0.05, return_value="tool_val")
@@ -259,8 +259,78 @@ async def test_parallel_with_assign_and_tool_mixed():
         return_value=MagicMock(),
     ):
         executor = Executor(context=ctx)
-        async for _ in executor.run(dph_script):
-            pass
+        with pytest.raises(ValueError, match="Unsupported block type 'assign' inside /parallel/"):
+            async for _ in executor.run(dph_script):
+                pass
 
-    assert ctx.get_var_value("tool_result") is not None, "tool_result should be set by MyTool"
-    assert ctx.get_var_value("assign_result") is not None, "assign_result should be set by assign block"
+
+@pytest.mark.asyncio
+async def test_parallel_rejects_if_block():
+    """Parallel block must reject /if/ control flow."""
+    ctx = Context(verbose=False)
+
+    skill = _make_skill("MyTool", delay=0.05, return_value="tool_val")
+    ctx.skillkit._skills_cache = [skill]
+    ctx.set_var_output("q", "hello")
+    ctx.set_var_output("cond", True)
+
+    dph_script = (
+        "/parallel/\n"
+        "/if/ $cond: @MyTool(input=$q) -> result_a /end/\n"
+        "@MyTool(input=$q) -> result_b\n"
+        "/end/"
+    )
+
+    with patch(
+        "dolphin.core.executor.executor.ExploreBlockV2",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.ExploreBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.JudgeBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.PromptBlock",
+        return_value=MagicMock(),
+    ):
+        executor = Executor(context=ctx)
+        with pytest.raises(ValueError, match="Unsupported block type 'if' inside /parallel/"):
+            async for _ in executor.run(dph_script):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_parallel_rejects_for_block():
+    """Parallel block must reject /for/ control flow."""
+    ctx = Context(verbose=False)
+
+    skill = _make_skill("MyTool", delay=0.05, return_value="tool_val")
+    ctx.skillkit._skills_cache = [skill]
+    ctx.set_var_output("q", "hello")
+    ctx.set_var_output("items", ["a", "b"])
+
+    dph_script = (
+        "/parallel/\n"
+        "/for/ $item in $items: @MyTool(input=$item) -> result_a /end/\n"
+        "@MyTool(input=$q) -> result_b\n"
+        "/end/"
+    )
+
+    with patch(
+        "dolphin.core.executor.executor.ExploreBlockV2",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.ExploreBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.JudgeBlock",
+        return_value=MagicMock(),
+    ), patch(
+        "dolphin.core.executor.executor.PromptBlock",
+        return_value=MagicMock(),
+    ):
+        executor = Executor(context=ctx)
+        with pytest.raises(ValueError, match="Unsupported block type 'for' inside /parallel/"):
+            async for _ in executor.run(dph_script):
+                pass

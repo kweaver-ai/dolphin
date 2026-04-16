@@ -123,22 +123,13 @@ class Executor:
         self.prompt_block = PromptBlock(context=self.context)
         self.assign_block = AssignBlock(context=self.context)
 
-    def _create_blocks(self):
-        """Create a fresh set of code block instances.
+    def _create_tool_block(self):
+        """Create a fresh ToolBlock instance.
 
         Used by parallel_block() to give each concurrent branch its own
         mutable state, avoiding the race condition described in Issue #49.
         """
-        tool_block = ToolBlock(context=self.context)
-        explore_block = (
-            ExploreBlockV2(context=self.context)
-            if flags.is_enabled(flags.EXPLORE_BLOCK_V2)
-            else ExploreBlock(context=self.context)
-        )
-        judge_block = JudgeBlock(context=self.context)
-        prompt_block = PromptBlock(context=self.context)
-        assign_block = AssignBlock(context=self.context)
-        return tool_block, explore_block, judge_block, prompt_block, assign_block
+        return ToolBlock(context=self.context)
 
     def _increment_stage_counter(self, stage_name: str):
         """Only increment counters for the specified stage, without saving trajectories.
@@ -310,47 +301,23 @@ class Executor:
                 async for resp in self.parallel_block(action_block[1]):
                     yield resp
 
-    async def _blocks_act_isolated(self, action_blocks, blocks):
-        """Like blocks_act(), but uses the provided block instances.
+    async def _blocks_act_isolated(self, action_blocks, tool_block):
+        """Execute action blocks using an isolated ToolBlock instance.
 
+        Only @tool calls are allowed inside /parallel/ branches.
         This avoids the race condition (Issue #49) where concurrent parallel
-        branches share self.tool_block / self.judge_block / etc.
-
-        Note: step_mode / previous_status logic is intentionally omitted —
-        parallel branches do not support step-mode resume.
+        branches share mutable ToolBlock state.
         """
-        tool_block, explore_block, judge_block, prompt_block, assign_block = blocks
-
         for block_index, action_block in enumerate(action_blocks):
-            if action_block[0] == "if":
-                async for resp in self.ifelse_block(action_block[1]):
-                    yield resp
-            elif action_block[0] == "for":
-                async for resp in self.for_block(action_block[1]):
-                    yield resp
-            elif action_block[0] == "judge":
-                async for resp in judge_block.execute(action_block[1]):
-                    yield resp
-                self._increment_and_save_stage("judge")
-            elif action_block[0] == "tool":
+            if action_block[0] == "tool":
                 async for resp in tool_block.execute(action_block[1]):
                     yield resp
                 self._increment_and_save_stage("tool")
-            elif action_block[0] == "explore":
-                async for resp in explore_block.execute(action_block[1]):
-                    yield resp
-                self._increment_stage_counter("explore")
-            elif action_block[0] == "prompt":
-                async for resp in prompt_block.execute(action_block[1]):
-                    yield resp
-                self._increment_and_save_stage("prompt")
-            elif action_block[0] == "assign":
-                async for resp in assign_block.execute(action_block[1]):
-                    yield resp
-                self._increment_and_save_stage("assign")
-            elif action_block[0] == "parallel":
-                async for resp in self.parallel_block(action_block[1]):
-                    yield resp
+            else:
+                raise ValueError(
+                    f"Unsupported block type '{action_block[0]}' inside /parallel/. "
+                    f"Only @tool calls are allowed in parallel branches."
+                )
 
     async def ifelse_block(self, content):
         pre = ["/if/", "elif", "/for/", "/parallel/", "else", "/end/"]
@@ -470,13 +437,23 @@ class Executor:
         content = content[10:-5]
         action_blocks = self.parser.parse(self, content)
 
+        # Validate: only @tool calls are allowed inside /parallel/.
+        # Other block types (if/for/judge/explore/prompt/assign) are not
+        # supported due to shared-state race conditions (Issue #49).
+        for i, action_block in enumerate(action_blocks):
+            if action_block[0] != "tool":
+                raise ValueError(
+                    f"Unsupported block type '{action_block[0]}' inside /parallel/. "
+                    f"Only @tool calls are allowed in parallel branches."
+                )
+
         # Create a list of asynchronous generator objects.
-        # Each branch gets its own block instances to avoid race conditions
+        # Each branch gets its own ToolBlock instance to avoid race conditions
         # where concurrent branches share mutable state (Issue #49).
         tasks = []
         for i in range(len(action_blocks)):
-            blocks = self._create_blocks()
-            tasks.append(("task" + str(i + 1), self._blocks_act_isolated([action_blocks[i]], blocks)))
+            tool_block = self._create_tool_block()
+            tasks.append(("task" + str(i + 1), self._blocks_act_isolated([action_blocks[i]], tool_block)))
         active_generators = list(tasks)
 
         # Loop until all generators are complete
