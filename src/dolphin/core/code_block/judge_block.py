@@ -48,7 +48,7 @@ class JudgeBlock(BasicCodeBlock):
 
             # Get tool list and skillkit information
             available_skill_names = [
-                str(name) for name in self.get_skillkit().getSkillNames()
+                str(name) for name in self.get_skillkit().getToolNames()
             ]
 
             # To ensure the LLM prioritizes using tools, add an explicit system prompt

@@ -18,7 +18,7 @@ from dolphin.core.common.enums import StreamItem, Messages, MessageRole
 from dolphin.core.common.constants import TOOL_CALL_ID_PREFIX
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.core.code_block.skill_call_deduplicator import (
     SkillCallDeduplicator,
     DefaultSkillCallDeduplicator,
@@ -54,7 +54,7 @@ class ExploreStrategy(ABC):
     @abstractmethod
     def make_system_message(
         self,
-        skillkit: Skillkit,
+        skillkit: Toolkit,
         system_prompt: str,
         tools_format: str = "medium",
         context: Optional[Context] = None
@@ -67,7 +67,7 @@ class ExploreStrategy(ABC):
         self,
         messages: Messages,
         model: str,
-        skillkit: Skillkit,
+        skillkit: Toolkit,
         tool_choice: Optional[str] = None,
         no_cache: bool = False,
     ) -> Dict[str, Any]:
@@ -311,7 +311,7 @@ class PromptStrategy(ExploreStrategy):
 
     def make_system_message(
         self,
-        skillkit: Skillkit,
+        skillkit: Toolkit,
         system_prompt: str,
         tools_format: str = "medium",
         context: Optional[Context] = None
@@ -320,7 +320,7 @@ class PromptStrategy(ExploreStrategy):
 
         Includes:
         - Goals and tool schemas
-        - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
+        - Metadata prompt from skillkits (e.g., ResourceToolkit Level 1)
         - User-provided system prompt
         - Auto-injected context variables
         """
@@ -348,8 +348,8 @@ class PromptStrategy(ExploreStrategy):
 {system_prompt}"""
             role = role_format
 
-        # Inject metadata prompt from skillkits via skill.owner_skillkit
-        metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
+        # Inject metadata prompt from skillkits via skill.owner_toolkit
+        metadata_prompt = Toolkit.collect_metadata_from_tools(skillkit)
         role = role.replace(r"{metadata_prompt}", metadata_prompt)
 
         # Auto-inject context_variables
@@ -391,7 +391,7 @@ class PromptStrategy(ExploreStrategy):
         self,
         messages: Messages,
         model: str,
-        skillkit: Skillkit,
+        skillkit: Toolkit,
         tool_choice: Optional[str] = None,
         no_cache: bool = False,
     ) -> Dict[str, Any]:
@@ -417,7 +417,7 @@ class PromptStrategy(ExploreStrategy):
             return None
 
         skillkit = context.get_skillkit()
-        if skillkit is None or skill_name not in skillkit.getSkillNames():
+        if skillkit is None or skill_name not in skillkit.getToolNames():
             return None
 
         skill_call = self._complete_skill_call(answer)
@@ -449,7 +449,7 @@ class PromptStrategy(ExploreStrategy):
             return False
 
         skillkit = context.get_skillkit()
-        return skillkit is not None and skill_name in skillkit.getSkillNames()
+        return skillkit is not None and skill_name in skillkit.getToolNames()
 
     def get_tool_call_content(
         self,
@@ -547,7 +547,7 @@ class ToolCallStrategy(ExploreStrategy):
 
     def make_system_message(
         self,
-        skillkit: Skillkit,
+        skillkit: Toolkit,
         system_prompt: str,
         tools_format: str = "medium",
         context: Optional[Context] = None
@@ -556,7 +556,7 @@ class ToolCallStrategy(ExploreStrategy):
 
         Includes:
         - Goals and tool descriptions
-        - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
+        - Metadata prompt from skillkits (e.g., ResourceToolkit Level 1)
         - User-provided system prompt
         - Auto-injected context variables
         """
@@ -587,8 +587,8 @@ class ToolCallStrategy(ExploreStrategy):
                 r"{tools}", "用户没有配置工具，你只能自己回答问题！"
             )
 
-        # Inject metadata prompt from skillkits via skill.owner_skillkit
-        metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
+        # Inject metadata prompt from skillkits via skill.owner_toolkit
+        metadata_prompt = Toolkit.collect_metadata_from_tools(skillkit)
         role_format = role_format.replace(r"{metadata_prompt}", metadata_prompt)
 
         # Auto-inject context_variables
@@ -629,12 +629,12 @@ class ToolCallStrategy(ExploreStrategy):
         self,
         messages: Messages,
         model: str,
-        skillkit: Skillkit,
+        skillkit: Toolkit,
         tool_choice: Optional[str] = None,
         no_cache: bool = False,
     ) -> Dict[str, Any]:
         """Includes the tools parameter and an optional tool_choice"""
-        tools = skillkit.getSkillsSchema() if skillkit and not skillkit.isEmpty() else []
+        tools = skillkit.getToolsSchema() if skillkit and not skillkit.isEmpty() else []
         llm_params = {
             "messages": messages,
             "model": model,

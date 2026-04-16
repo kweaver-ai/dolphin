@@ -16,7 +16,7 @@ from dolphin.core.common.types import SourceType, Var
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.core.context_manager import ContextManager
 from dolphin.core.logging.logger import get_logger
-from dolphin.core.skill.skillset import Skillset
+from dolphin.core.tool.toolset import ToolSet
 from dolphin.core.context.variable_pool import VariablePool
 
 logger = get_logger("cow_context")
@@ -79,7 +79,7 @@ class COWContext(Context):
             global_skills=parent.global_skills,
             memory_manager=parent.memory_manager,
             global_types=parent.global_types,
-            skillkit_hook=getattr(parent, "skillkit_hook", None),
+            toolkit_hook=getattr(parent, "toolkit_hook", None),
             context_manager=ContextManager(),
             # Subtasks should not stream raw output to stdout. Their outputs are
             # captured and surfaced via plan events (plan_task_output) instead.
@@ -116,16 +116,16 @@ class COWContext(Context):
         self._plan_id = parent.get_plan_id()
         self.task_registry = None
 
-        # Filter out orchestration-only tools (e.g., PlanSkillkit) from subtask toolset.
-        # Create a new isolated Skillset instead of referencing parent's skillkit directly
-        # to prevent permission escalation via context.skillkit.getSkills()
+        # Filter out orchestration-only tools (e.g., PlanToolkit) from subtask toolset.
+        # Create a new isolated ToolSet instead of referencing parent's skillkit directly
+        # to prevent permission escalation via context.skillkit.getTools()
         self._calc_all_skills()
         self.all_skills = self._filter_subtask_skills(self.all_skills)
-        # Create a new Skillset that contains only filtered skills
-        # This ensures context.get_skill() and context.skillkit.getSkills() both respect filtering
-        filtered_skillkit = Skillset()
-        for skill in self.all_skills.getSkills():
-            filtered_skillkit.addSkill(skill)
+        # Create a new ToolSet that contains only filtered skills
+        # This ensures context.get_skill() and context.skillkit.getTools() both respect filtering
+        filtered_skillkit = ToolSet()
+        for skill in self.all_skills.getTools():
+            filtered_skillkit.addTool(skill)
         self.skillkit = filtered_skillkit
 
         # Inherit last-session configs where safe.
@@ -137,13 +137,13 @@ class COWContext(Context):
         logger.debug(f"COWContext initialized for task: {task_id}")
 
     @staticmethod
-    def _filter_subtask_skills(skillset: Skillset) -> Skillset:
-        """Filter out skillkits that should not be exposed to subtasks."""
-        filtered = Skillset()
-        for skill in skillset.getSkills():
+    def _filter_subtask_skills(skillset: ToolSet) -> ToolSet:
+        """Filter out toolkits that should not be exposed to subtasks."""
+        filtered = ToolSet()
+        for skill in skillset.getTools():
             owner = None
-            if hasattr(skill, "get_owner_skillkit"):
-                owner = skill.get_owner_skillkit()
+            if hasattr(skill, "get_owner_toolkit"):
+                owner = skill.get_owner_toolkit()
             if owner is not None:
                 should_exclude = getattr(owner, "should_exclude_from_subtask", None)
                 if callable(should_exclude):
@@ -153,7 +153,7 @@ class COWContext(Context):
                     except Exception:
                         # Fail-open: do not exclude if the hook misbehaves.
                         pass
-            filtered.addSkill(skill)
+            filtered.addTool(skill)
         return filtered
 
     def get_variable(self, key: str, default_value: Any = None) -> Any:

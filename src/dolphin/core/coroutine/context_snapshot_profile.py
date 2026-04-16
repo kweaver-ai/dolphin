@@ -488,7 +488,7 @@ class MarkdownFormatter:
             self._format_messages(),
             self._format_variables(),
             self._format_compression(),
-            self._format_runtime_skillkit(),
+            self._format_runtime_toolkit(),
             self._format_summary(),
         ]
         return '\n\n'.join(sections)
@@ -639,15 +639,15 @@ Timestamp: {timestamp_str} | Schema Version: {self.profile.schema_version}
 
         return '\n'.join(sections) + "\n\n---"
 
-    def _format_runtime_skillkit(self) -> str:
-        """Formatting runtime and Skillkit status"""
+    def _format_runtime_toolkit(self) -> str:
+        """Formatting runtime and Toolkit status"""
         p = self.profile
         b = p.compression_buckets
 
         runtime_comp = b.components.get('runtime_state') if b else None
         skillkit_comp = b.components.get('skillkit_state') if b else None
 
-        lines = ["## Runtime & Skillkit", ""]
+        lines = ["## Runtime & Toolkit", ""]
 
         if runtime_comp:
             lines.append(f"- Runtime State: {self._format_bytes(runtime_comp.original_bytes)} → "
@@ -656,10 +656,10 @@ Timestamp: {timestamp_str} | Schema Version: {self.profile.schema_version}
 
         if skillkit_comp:
             if skillkit_comp.compression_ratio >= 0.99:
-                lines.append(f"- Skillkit State: {self._format_bytes(skillkit_comp.original_bytes)} "
+                lines.append(f"- Toolkit State: {self._format_bytes(skillkit_comp.original_bytes)} "
                            f"(uncompressed, {skillkit_comp.compressibility} compressibility)")
             else:
-                lines.append(f"- Skillkit State: {self._format_bytes(skillkit_comp.original_bytes)} → "
+                lines.append(f"- Toolkit State: {self._format_bytes(skillkit_comp.original_bytes)} → "
                            f"{self._format_bytes(skillkit_comp.compressed_bytes)} "
                            f"(compression_ratio {skillkit_comp.compression_ratio:.1%}, {skillkit_comp.compressibility})")
 

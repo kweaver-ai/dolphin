@@ -39,8 +39,8 @@ from dolphin.core.logging.logger import (
     get_logger,
 )
 from dolphin.core.trajectory.recorder import Recorder
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skill_matcher import SkillMatcher
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.tool_matcher import ToolMatcher
 from dolphin.core.runtime.runtime_instance import ProgressInstance
 from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.common.types import SourceType
@@ -49,7 +49,7 @@ from dolphin.core.common.output_format import (
     OutputFormat,
     OutputFormatFactory,
 )
-from dolphin.lib.skill_results.skillkit_hook import SkillkitHook
+from dolphin.lib.skill_results.toolkit_hook import ToolkitHook
 from dolphin.lib.skill_results.cache_backend import MemoryCacheBackend
 from dolphin.lib.skill_results.strategy_registry import StrategyRegistry
 from dolphin.lib.skill_results.strategies import (
@@ -312,9 +312,9 @@ class BasicCodeBlock:
         self.skills = None
         self.system_prompt = ""
 
-        # Get skillkit_hook from Context, use the default if not available
-        if context and context.has_skillkit_hook():
-            self.skillkit_hook = context.get_skillkit_hook()
+        # Get toolkit_hook from Context, use the default if not available
+        if context and context.has_toolkit_hook():
+            self.toolkit_hook = context.get_toolkit_hook()
         else:
             # Register with default strategy
             default_strategy_app = DefaultAppStrategy()
@@ -322,7 +322,7 @@ class BasicCodeBlock:
             strategy_registry = StrategyRegistry()
             strategy_registry.register("default", default_strategy_app, category="app")
             strategy_registry.register("default", default_strategy_llm, category="llm")
-            self.skillkit_hook = SkillkitHook(
+            self.toolkit_hook = ToolkitHook(
                 cache_backend=MemoryCacheBackend(),
                 strategy_registry=strategy_registry,
             )
@@ -330,7 +330,7 @@ class BasicCodeBlock:
             # Set it back to Context so other components can use it
             # This ensures context retention strategies work correctly
             if context:
-                context.set_skillkit_hook(self.skillkit_hook)
+                context.set_toolkit_hook(self.toolkit_hook)
 
     @staticmethod
     def _normalize_bool_param(value: Any, default: bool) -> bool:
@@ -979,12 +979,12 @@ class BasicCodeBlock:
         if self.skills is not None and self.context:
             current_skillkit = self.context.get_skillkit()
             if current_skillkit:
-                available_skills = current_skillkit.getSkills()
-                owner_names = SkillMatcher.get_owner_skillkits(available_skills)
+                available_skills = current_skillkit.getTools()
+                owner_names = ToolMatcher.get_owner_toolkits(available_skills)
 
                 for pattern in self.skills:
                     if not any(
-                        SkillMatcher.match_skill(
+                        ToolMatcher.match_tool(
                             skill, pattern, owner_names=owner_names
                         )
                         for skill in available_skills
@@ -1016,7 +1016,7 @@ class BasicCodeBlock:
                                 "Possible fixes:",
                                 "  1. Check if the skill name/pattern is spelled correctly",
                                 "  2. Ensure the skill is registered in your skillkit configuration",
-                                "  3. Verify that the required skillkit module is loaded",
+                                "  3. Verify that the required toolkit module is loaded",
                                 "  4. If using wildcards, ensure the pattern matches at least one skill (e.g. '*_resource*')",
                                 "  5. If using skillkit namespace, use '<skillkit>.<pattern>' (e.g. 'resource_skillkit.*')",
                             ]
@@ -1088,7 +1088,7 @@ class BasicCodeBlock:
                 skillkit = self.get_skillkit()
                 if skillkit:
                     # 获取工具的 schema
-                    skill = skillkit.getSkill(tool_name)
+                    skill = skillkit.getTool(tool_name)
                     if skill:
                         tool_schema = skill.get_openai_tool_schema()
             except Exception:
@@ -1180,7 +1180,7 @@ class BasicCodeBlock:
         }
 
         if with_skill:
-            llm_params["tools"] = self.get_skillkit().getSkillsSchema()
+            llm_params["tools"] = self.get_skillkit().getToolsSchema()
             if self.tool_choice:
                 llm_params["tool_choice"] = self.tool_choice
         elif self.output_format and isinstance(
@@ -1307,8 +1307,8 @@ class BasicCodeBlock:
 
         skill = self.context.get_skill(skill_name)
         if not skill:
-            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
-            skill = SystemFunctions.getSkill(skill_name)
+            from dolphin.lib.toolkits.system_toolkit import SystemFunctions
+            skill = SystemFunctions.getTool(skill_name)
 
         if skill is None:
             async for result in self.yield_message(
@@ -1481,9 +1481,9 @@ class BasicCodeBlock:
             tool_result = None
             result = None
             try:
-                async for result in Skillkit.arun(
-                    skill=skill,
-                    skill_params=skill_params_json if skill_params_json is not None else {},
+                async for result in Toolkit.arun(
+                    tool=skill,
+                    tool_params=skill_params_json if skill_params_json is not None else {},
                     props=props,
                 ):
                     # Debug: log result type and keys
@@ -1518,7 +1518,7 @@ class BasicCodeBlock:
 
                     # After tool execution, store the result in cache
                     try:
-                        ref = self.skillkit_hook.on_tool_after_execute(skill_name, result)
+                        ref = self.toolkit_hook.on_tool_after_execute(skill_name, result)
                         # Remove problematic code
                     except Exception as e:
                         import traceback
@@ -1529,7 +1529,7 @@ class BasicCodeBlock:
                     raw_output = ref
                     # Process the response data to return to frontend
                     try:
-                        result = self.skillkit_hook.on_before_reply_app(
+                        result = self.toolkit_hook.on_before_reply_app(
                             reference_id=ref.reference_id, skill=skill
                         )
                     except Exception as e:
@@ -2036,8 +2036,8 @@ class BasicCodeBlock:
 
             # Get tools schema based on skillkit type
             if skillkit and not skillkit.isEmpty():
-                if hasattr(skillkit, "getSkillsSchema"):
-                    tools_schema = skillkit.getSkillsSchema()
+                if hasattr(skillkit, "getToolsSchema"):
+                    tools_schema = skillkit.getToolsSchema()
                 elif hasattr(skillkit, "getSchemas"):
                     tools_schema = skillkit.getSchemas()
 
@@ -2372,7 +2372,7 @@ class BasicCodeBlock:
         Returns:
             int: Number of successfully loaded tools
         """
-        from dolphin.core.skill.skillset import Skillset
+        from dolphin.core.tool.toolset import ToolSet
         import json
 
         # Parse result if it's a string
@@ -2406,15 +2406,15 @@ class BasicCodeBlock:
         # Get current skillkit
         current_skillkit = self.context.skillkit
 
-        # If current skillkit is not a Skillset, create a new Skillset and merge
-        if not isinstance(current_skillkit, Skillset):
+        # If current skillkit is not a ToolSet, create a new ToolSet and merge
+        if not isinstance(current_skillkit, ToolSet):
             self.context.debug(
-                f"Current skillkit is {type(current_skillkit).__name__}, converting to Skillset"
+                f"Current skillkit is {type(current_skillkit).__name__}, converting to ToolSet"
             )
-            new_skillset = Skillset()
+            new_skillset = ToolSet()
             # Add existing tools
-            for skill in current_skillkit.getSkills():
-                new_skillset.addSkill(skill)
+            for skill in current_skillkit.getTools():
+                new_skillset.addTool(skill)
             current_skillkit = new_skillset
             self.context.set_skills(current_skillkit)
 
@@ -2432,9 +2432,9 @@ class BasicCodeBlock:
                     self.context.debug(f"Loading pre-instantiated tool: {tool_name}")
 
                 elif "api_call_strategy" in tool_def:
-                    # 类型 2: API 工具 - 自动创建 DynamicAPISkillFunction
-                    from dolphin.core.skill.skill_function import (
-                        DynamicAPISkillFunction,
+                    # 类型 2: API 工具 - 自动创建 DynamicAPIToolFunction
+                    from dolphin.core.tool.tool_function import (
+                        DynamicAPIToolFunction,
                     )
 
                     api_url = tool_def.get("api_url")
@@ -2445,7 +2445,7 @@ class BasicCodeBlock:
                     api_call_strategy = tool_def.get("api_call_strategy")
 
                     self.context.debug(
-                        f"Creating DynamicAPISkillFunction for: {tool_name}, "
+                        f"Creating DynamicAPIToolFunction for: {tool_name}, "
                         f"api_url={api_url}, api_call_strategy={api_call_strategy}, "
                         f"fixed_params={fixed_params}, headers={headers}"
                     )
@@ -2459,7 +2459,7 @@ class BasicCodeBlock:
                     else:
                         result_process_strategies = None
 
-                    tool_instance = DynamicAPISkillFunction(
+                    tool_instance = DynamicAPIToolFunction(
                         name=tool_name,
                         description=description,
                         parameters=parameters,
@@ -2468,7 +2468,7 @@ class BasicCodeBlock:
                         fixed_params=fixed_params,
                         headers=headers,
                         result_process_strategies=result_process_strategies,
-                        owner_skillkit=current_skillkit,
+                        owner_toolkit=current_skillkit,
                     )
 
                 else:
@@ -2497,7 +2497,7 @@ class BasicCodeBlock:
                         self.context.error(f"Error in on_dynamic_tool_loaded hook: {e}")
 
                 # Add tool instance to skillkit
-                current_skillkit.addSkill(tool_instance)
+                current_skillkit.addTool(tool_instance)
                 loaded_count += 1
 
                 # CRITICAL FIX: Also update self.skills if it exists (for ExploreBlock to see new tools)
@@ -2539,7 +2539,7 @@ class BasicCodeBlock:
         if hasattr(self.context, "_calc_all_skills"):
             self.context._calc_all_skills()
             self.context.debug(
-                f"[_load_dynamic_tools] all_skills updated, now has {len(list(self.context.all_skills.getSkillNames()))} tools"
+                f"[_load_dynamic_tools] all_skills updated, now has {len(list(self.context.all_skills.getToolNames()))} tools"
             )
             self.context.debug(
                 "[BasicCodeBlock] Recalculated all_skills after loading dynamic tools"
@@ -2547,7 +2547,7 @@ class BasicCodeBlock:
 
         # Log current available tools (for debugging)
         if self.context.is_verbose():
-            all_tools = list(current_skillkit.getSkillNames())
+            all_tools = list(current_skillkit.getToolNames())
             self.context.debug(f"Current available tools: {all_tools}")
 
         return loaded_count

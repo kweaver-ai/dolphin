@@ -301,21 +301,21 @@ def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=N
     This function uses the new console_ui module for enhanced visual display
     inspired by Codex CLI and Claude Code's terminal interfaces.
     
-    Supports custom UI rendering via Skillkit.has_custom_ui() protocol.
+    Supports custom UI rendering via Toolkit.has_custom_ui() protocol.
     
     Args:
         skill_name: Name of the skill being called
         params: Parameters passed to the skill
         max_length: Maximum length for parameter display
         verbose: Whether to display (None uses default, False suppresses)
-        skill: Optional SkillFunction object (for custom UI lookup)
+        skill: Optional ToolFunction object (for custom UI lookup)
     """
     if verbose is False:
         return
 
     # Check if skill has custom UI rendering
-    if skill and hasattr(skill, 'owner_skillkit') and skill.owner_skillkit:
-        skillkit = skill.owner_skillkit
+    if skill and hasattr(skill, 'owner_toolkit') and skill.owner_toolkit:
+        skillkit = skill.owner_toolkit
         if hasattr(skillkit, 'has_custom_ui') and skillkit.has_custom_ui(skill_name):
             # Use custom rendering (start phase)
             if hasattr(skillkit, 'render_skill_start'):
@@ -356,29 +356,29 @@ def console_skill_response(skill_name, response, max_length=200, verbose=None, s
     This function uses the new console_ui module for enhanced visual display
     inspired by Codex CLI and Claude Code's terminal interfaces.
     
-    Supports custom UI rendering via Skillkit.has_custom_ui() protocol.
+    Supports custom UI rendering via Toolkit.has_custom_ui() protocol.
     
     Args:
         skill_name: Name of the skill that completed
         response: Response from the skill
         max_length: Maximum length for response display
         verbose: Whether to display (None uses default, False suppresses)
-        skill: Optional SkillFunction object (for custom UI lookup)
+        skill: Optional ToolFunction object (for custom UI lookup)
         params: Optional parameters that were passed to the skill
         duration_ms: Execution duration in milliseconds
         is_cli: Whether to use CLI UI (overrides default TTY detection)
     """
-    from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
+    from dolphin.lib.toolkits.cognitive_toolkit import CognitiveToolkit
 
-    if CognitiveSkillkit.is_cognitive_skill(skill_name):
+    if CognitiveToolkit.is_cognitive_skill(skill_name):
         return
 
     if verbose is False:
         return
 
     # Check if skill has custom UI rendering
-    if skill and hasattr(skill, 'owner_skillkit') and skill.owner_skillkit:
-        skillkit = skill.owner_skillkit
+    if skill and hasattr(skill, 'owner_toolkit') and skill.owner_toolkit:
+        skillkit = skill.owner_toolkit
         if hasattr(skillkit, 'has_custom_ui') and skillkit.has_custom_ui(skill_name):
             # Use custom rendering (end phase)
             if hasattr(skillkit, 'render_skill_end'):

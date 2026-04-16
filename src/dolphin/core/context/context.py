@@ -22,10 +22,10 @@ from dolphin.core.context_engineer.core.context_manager import (
     ContextManager,
 )
 from dolphin.core.runtime.runtime_graph import RuntimeGraph
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skillset import Skillset
-from dolphin.core.skill.skill_matcher import SkillMatcher
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.toolset import ToolSet
+from dolphin.core.tool.tool_matcher import ToolMatcher
 
 from dolphin.core.common.types import Var
 from dolphin.core.context.var_output import VarOutput, SourceType
@@ -35,9 +35,9 @@ from dolphin.core.trajectory.trajectory import Trajectory
 
 # Import sdk/lib modules under TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
-    from dolphin.sdk.skill.global_skills import GlobalSkills
+    from dolphin.sdk.tool.global_toolkits import GlobalToolkits
     from dolphin.lib.memory.manager import MemoryManager
-    from dolphin.lib.skill_results.skillkit_hook import SkillkitHook
+    from dolphin.lib.skill_results.toolkit_hook import ToolkitHook
 
 
 logger = get_logger("context")
@@ -68,10 +68,10 @@ class Context:
     def __init__(
         self,
         config: Optional[GlobalConfig] = None,
-        global_skills: Optional["GlobalSkills"] = None,
+        global_skills: Optional["GlobalToolkits"] = None,
         memory_manager: Optional["MemoryManager"] = None,
         global_types=None,
-        skillkit_hook: Optional["SkillkitHook"] = None,
+        toolkit_hook: Optional["ToolkitHook"] = None,
         context_manager: Optional[ContextManager] = None,
         verbose: bool = False,
         is_cli: bool = False,
@@ -81,7 +81,7 @@ class Context:
         self.memory_manager = memory_manager
         self.global_types = global_types
         self.variable_pool = VariablePool()
-        self.skillkit = Skillkit()
+        self.skillkit = Toolkit()
         self.messages: Dict[str, Messages] = (
             dict()
         )  # Use Messages class instead of list
@@ -98,13 +98,13 @@ class Context:
         self.runtime_graph = RuntimeGraph()
         
         # Initialize all_skills to avoid AttributeError
-        self.all_skills = Skillset()
+        self.all_skills = ToolSet()
 
-        # Initialize skillkit_hook
-        if skillkit_hook is not None:
-            self.skillkit_hook = skillkit_hook
+        # Initialize toolkit_hook
+        if toolkit_hook is not None:
+            self.toolkit_hook = toolkit_hook
         else:
-            self.skillkit_hook = None
+            self.toolkit_hook = None
 
         # Initialize context_manager
         self.context_manager = context_manager or ContextManager()
@@ -149,18 +149,18 @@ class Context:
         # Calculate all skills initially
         self._calc_all_skills()
 
-    def set_skillkit_hook(self, skillkit_hook: "SkillkitHook"):
-        """Set skillkit_hook"""
-        self.skillkit_hook = skillkit_hook
-        logger.debug("skillkit_hook has been set")
+    def set_toolkit_hook(self, toolkit_hook: "ToolkitHook"):
+        """Set toolkit_hook"""
+        self.toolkit_hook = toolkit_hook
+        logger.debug("toolkit_hook has been set")
 
-    def get_skillkit_hook(self) -> Optional["SkillkitHook"]:
-        """Get skillkit_hook"""
-        return self.skillkit_hook
+    def get_toolkit_hook(self) -> Optional["ToolkitHook"]:
+        """Get toolkit_hook"""
+        return self.toolkit_hook
 
-    def has_skillkit_hook(self) -> bool:
-        """Check if skillkit_hook exists"""
-        return self.skillkit_hook is not None
+    def has_toolkit_hook(self) -> bool:
+        """Check if toolkit_hook exists"""
+        return self.toolkit_hook is not None
 
     def init_trajectory(self, trajectory_path: str, overwrite: bool = True):
         """Initialize trajectory recording
@@ -348,7 +348,7 @@ class Context:
         """
         self.variable_pool.init_variables(variables)
 
-    def init_skillkit(self, skillkit: Skillkit):
+    def init_skillkit(self, skillkit: Toolkit):
         self.set_skills(skillkit)
 
     def init_agents(self, agents):
@@ -371,9 +371,9 @@ class Context:
         """
         # Support direct use of agent_name and skill names with prefixes
         return (
-            self.skillkit.hasSkill(agent_name)
-            or self.skillkit.hasSkill(f"run_{agent_name}")
-            or self.skillkit.hasSkill(f"arun_{agent_name}")
+            self.skillkit.hasTool(agent_name)
+            or self.skillkit.hasTool(f"run_{agent_name}")
+            or self.skillkit.hasTool(f"arun_{agent_name}")
         )
 
     def exec_agent(self, agent_name, **kwargs):
@@ -384,10 +384,10 @@ class Context:
         """
         # First try directly using agent_name, then try the run_ prefix
         skill_name = agent_name
-        if not self.skillkit.hasSkill(skill_name):
+        if not self.skillkit.hasTool(skill_name):
             skill_name = f"run_{agent_name}"
 
-        if not self.skillkit.hasSkill(skill_name):
+        if not self.skillkit.hasTool(skill_name):
             raise ValueError(
                 f"Agent skill not found: {agent_name} (tried: {agent_name}, run_{agent_name})"
             )
@@ -403,10 +403,10 @@ class Context:
         """
         # First try directly using agent_name, then try the arun_ prefix
         skill_name = agent_name
-        if not self.skillkit.hasSkill(skill_name):
+        if not self.skillkit.hasTool(skill_name):
             skill_name = f"arun_{agent_name}"
 
-        if not self.skillkit.hasSkill(skill_name):
+        if not self.skillkit.hasTool(skill_name):
             raise ValueError(
                 f"Agent skill not found: {agent_name} (tried: {agent_name}, arun_{agent_name})"
             )
@@ -511,17 +511,17 @@ class Context:
         return result
 
     def get_skillkit(self, skillNames: Optional[List[str]] = None):
-        """Get the skill set, supporting wildcard (glob), exact matching, and optional skillkit namespace.
+        """Get the skill set, supporting wildcard (glob), exact matching, and optional toolkit namespace.
 
         Args:
             skillNames: List of skill patterns.
                                - Plain tool name/pattern: "_python", "*_resource*"
-                               - Namespaced pattern: "<skillkit>.<pattern>", e.g. "resource_skillkit.*"
+                               - Namespaced pattern: "<toolkit>.<pattern>", e.g. "resource_toolkit.*"
                                If None, return the merged skill set;
                                If empty list [], indicates no skills are enabled
 
         Returns:
-            Skillset: The matched skill set, or the merged skill set if no skills match
+            ToolSet: The matched skill set, or the merged skill set if no skills match
         """
 
         # If no matching pattern is provided, return the merged skill set
@@ -531,13 +531,13 @@ class Context:
         # When an explicit empty list is passed in, it indicates that the caller does not wish to expose any tools.
         # For example, the scenario where tools=[] is configured in DPH
         if isinstance(skillNames, list) and len(skillNames) == 0:
-            return Skillset()
+            return ToolSet()
 
-        skills = self.all_skills.getSkills()
-        owner_names = SkillMatcher.get_owner_skillkits(skills)
+        skills = self.all_skills.getTools()
+        owner_names = ToolMatcher.get_owner_toolkits(skills)
 
         # Use optimized batch matching (pre-parses patterns, deduplicates results)
-        matched_skills, any_namespaced_pattern = SkillMatcher.match_skills_batch(
+        matched_skills, any_namespaced_pattern = ToolMatcher.match_tools_batch(
             skills, skillNames, owner_names
         )
 
@@ -546,28 +546,28 @@ class Context:
         # - otherwise keep the historical behavior and return the merged skill set
         if not matched_skills:
             if any_namespaced_pattern:
-                return Skillset()
+                return ToolSet()
             return self.all_skills
 
         # Return the matching skill set
-        result_skillset = Skillset()
+        result_skillset = ToolSet()
         for skill in matched_skills:
-            result_skillset.addSkill(skill)
+            result_skillset.addTool(skill)
         
         # Auto-inject _get_result_detail if needed
         self._inject_detail_skill_if_needed(result_skillset)
         
         return result_skillset
 
-    def _inject_detail_skill_if_needed(self, skillset: Skillset):
+    def _inject_detail_skill_if_needed(self, skillset: ToolSet):
         """Auto-inject _get_cached_result_detail if any skill uses omitting modes (SUMMARY/REFERENCE)"""
         try:
-            from dolphin.core.skill.context_retention import ContextRetentionMode
-            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
+            from dolphin.core.tool.context_retention import ContextRetentionMode
+            from dolphin.lib.toolkits.system_toolkit import SystemFunctions
         except ImportError:
             return
 
-        skills = skillset.getSkills()
+        skills = skillset.getTools()
         should_inject = False
         
         for skill in skills:
@@ -590,23 +590,23 @@ class Context:
             if not has_detail_skill:
                 # Try to get the skill from SystemFunctions
                 # We try different name variations just in case
-                detail_skill = SystemFunctions.getSkill("_get_cached_result_detail")
+                detail_skill = SystemFunctions.getTool("_get_cached_result_detail")
                 if not detail_skill:
-                    detail_skill = SystemFunctions.getSkill("system_functions._get_cached_result_detail")
+                    detail_skill = SystemFunctions.getTool("system_functions._get_cached_result_detail")
                 
                 # If still not found (e.g. SystemFunctions not initialized with it), we can pick it manually if possible
                 # But typically SystemFunctions singleton has it.
                 if detail_skill:
-                     skillset.addSkill(detail_skill)
+                     skillset.addTool(detail_skill)
                 else:
-                    # Fallback: look through SystemFunctions.getSkills() manually
-                    for s in SystemFunctions.getSkills():
+                    # Fallback: look through SystemFunctions.getTools() manually
+                    for s in SystemFunctions.getTools():
                         if "_get_cached_result_detail" in s.get_function_name():
-                            skillset.addSkill(s)
+                            skillset.addTool(s)
                             break
 
     def get_skill(self, name):
-        return self.skillkit.getSkill(name)
+        return self.skillkit.getTool(name)
 
     def get_skill_type(self, skill_name: str) -> ToolType:
         """Get the type of a skill
@@ -634,7 +634,7 @@ class Context:
     async def aexec_skill(self, name, **kwargs):
         return self.skillkit.aexec(name, **kwargs)
 
-    def get_agent_skill(self, skill_function: SkillFunction):
+    def get_agent_skill(self, skill_function: ToolFunction):
         if self.global_skills is None:
             return None
         return self.global_skills.getAgent(skill_function.get_function_name())
@@ -1364,7 +1364,7 @@ class Context:
         # Delegate to Trajectory class for actual saving
         Trajectory.save_simple(
             messages=self.get_messages().get_messages(),
-            tools=self.skillkit.getSkillsSchema(),
+            tools=self.skillkit.getToolsSchema(),
             file_path=trajectory_path,
             pretty_format=pretty_format,
             user_id=self.user_id
@@ -1386,15 +1386,15 @@ class Context:
         """
         Calculate all skills
         """
-        self.all_skills = Skillset()
+        self.all_skills = ToolSet()
 
         # Add skills from self.skillkit
         if self.skillkit and not self.skillkit.isEmpty():
-            self.all_skills.addSkillkit(self.skillkit)
+            self.all_skills.addToolkit(self.skillkit)
 
         # Add skills from global_skills
         if self.global_skills is not None:
-            self.all_skills.addSkillkit(self.global_skills.getAllSkills())
+            self.all_skills.addToolkit(self.global_skills.getAllTools())
 
     def _make_log(self, log_str):
         if len(log_str) < MAX_LOG_LENGTH:
@@ -1525,8 +1525,8 @@ class Context:
         if self.skillkit and not self.skillkit.isEmpty():
             try:
                 skillkit_state = {
-                    "skills_schema": self.skillkit.getSkillsSchema(),
-                    "skill_count": len(self.skillkit.getSkills()),
+                    "skills_schema": self.skillkit.getToolsSchema(),
+                    "skill_count": len(self.skillkit.getTools()),
                 }
             except Exception as e:
                 logger.warning(f"Failed to export skillkit state: {e}")

@@ -416,7 +416,7 @@ class ConsoleUI:
             elif v is None:
                 val_display = f"{Theme.NULL_VALUE}null{Theme.RESET}"
                 lines.append(f"  {Theme.PARAM_KEY}{display_key}{Theme.RESET}:{padding} {val_display}")
-            # Special case for tasks list in PlanSkillkit
+            # Special case for tasks list in PlanToolkit
             elif key_lower == "tasks" and isinstance(v, list) and v and isinstance(v[0], dict):
                 lines.append(f"  {Theme.PARAM_KEY}{display_key}{Theme.RESET}:{padding}")
                 for i, task in enumerate(v[:10]):
@@ -1047,23 +1047,23 @@ class ConsoleUI:
 
     def display_session_info(
         self,
-        skillkit_info: dict = None,
+        toolkit_info: dict = None,
         show_commands: bool = True,
         verbose: Optional[bool] = None
     ) -> None:
-        """Display available skillkits and command hints after session start.
+        """Display available toolkits and command hints after session start.
 
         Args:
-            skillkit_info: Dict mapping skillkit name to tool count
+            toolkit_info: Dict mapping toolkit name to tool count
             show_commands: Whether to show available slash commands
             verbose: Override verbose setting
         """
         if verbose is False or (verbose is None and not self.verbose):
             return
 
-        if skillkit_info:
-            safe_print(f"{Theme.SECONDARY}📦 Available Skillkits:{Theme.RESET}")
-            for name, count in sorted(skillkit_info.items()):
+        if toolkit_info:
+            safe_print(f"{Theme.SECONDARY}📦 Available Toolkits:{Theme.RESET}")
+            for name, count in sorted(toolkit_info.items()):
                 safe_print(f"{Theme.MUTED}   • {name} ({count} tools){Theme.RESET}")
 
         if show_commands:
@@ -1769,14 +1769,14 @@ def console_session_end() -> None:
 console_conversation_end = console_session_end
 
 
-def console_display_session_info(skillkit_info: dict = None, show_commands: bool = True) -> None:
-    """Display available skillkits and command hints after session start.
+def console_display_session_info(toolkit_info: dict = None, show_commands: bool = True) -> None:
+    """Display available toolkits and command hints after session start.
 
     Args:
-        skillkit_info: Dict mapping skillkit name to tool count, e.g. {"python_skillkit": 3}
+        toolkit_info: Dict mapping toolkit name to tool count, e.g. {"python_toolkit": 3}
         show_commands: Whether to show available slash commands
     """
-    get_console_ui().display_session_info(skillkit_info, show_commands, verbose=True)
+    get_console_ui().display_session_info(toolkit_info, show_commands, verbose=True)
 
 
 def console_user_input(user_input: str) -> None:

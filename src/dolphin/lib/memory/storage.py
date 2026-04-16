@@ -64,7 +64,7 @@ class MemoryStorage(abc.ABC):
 
 
 class MemoryFileSys(MemoryStorage):
-    """A simple memory storage for filesystem implementation - for MemorySkillkit"""
+    """A simple memory storage for filesystem implementation - for MemoryToolkit"""
 
     TimeFormat = "%Y%m%d%H%M"
 

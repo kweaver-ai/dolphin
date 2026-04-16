@@ -10,7 +10,7 @@ from typing import Dict, Optional, AsyncGenerator, Any
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.sdk.agent.dolphin_agent import DolphinAgent
 from dolphin.core.logging.logger import console
-from dolphin.sdk.skill.global_skills import GlobalSkills
+from dolphin.sdk.tool.global_toolkits import GlobalToolkits
 from dolphin.core.common.object_type import ObjectTypeFactory
 
 
@@ -54,7 +54,7 @@ class Env:
             raise ValueError(f"Agent folder path not found: {agentFolderPath}")
 
         # Initialize global skills manager
-        self.globalSkills = GlobalSkills(globalConfig)
+        self.globalSkills = GlobalToolkits(globalConfig)
 
         # Initialize global types manager
         self.global_types = ObjectTypeFactory()
@@ -64,7 +64,7 @@ class Env:
 
         # Load custom skillkits if specified
         if skillkitFolderPath is not None:
-            self._loadCustomSkillkits()
+            self._loadCustomToolkits()
 
         # Scan and load agents
         self._scanAndLoadAgents()
@@ -89,14 +89,14 @@ class Env:
                 console(f"Failed to load type file {filePath}: {str(e)}")
                 continue
 
-    def _loadCustomSkillkits(self):
+    def _loadCustomToolkits(self):
         """
-        Load all skillkits from custom skillkit folder
+        Load all toolkits from custom toolkit folder
         """
         if self.skillkitFolderPath is not None and not os.path.exists(
             self.skillkitFolderPath
         ):
-            console(f"Custom skillkit folder not found: {self.skillkitFolderPath}")
+            console(f"Custom toolkit folder not found: {self.skillkitFolderPath}")
             return
 
         # Initialize VM if needed
@@ -131,33 +131,33 @@ class Env:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
-                # Find all Skillkit classes in the module
+                # Find all Toolkit classes in the module
                 for name, obj in inspect.getmembers(module, inspect.isclass):
-                    # Check if it's a Skillkit subclass but not Skillkit itself
+                    # Check if it's a Toolkit subclass but not Toolkit itself
                     if (
                         hasattr(obj, "__bases__")
-                        and any(base.__name__ == "Skillkit" for base in obj.__bases__)
-                        and obj.__name__ != "Skillkit"
+                        and any(base.__name__ == "Toolkit" for base in obj.__bases__)
+                        and obj.__name__ != "Toolkit"
                     ):
-                        # Create an instance of the skillkit
-                        skillkit_instance = obj()
+                        # Create an instance of the toolkit
+                        toolkit_instance = obj()
 
-                        # Set VM if this is VMSkillkit and we have a VM configured
-                        if hasattr(skillkit_instance, "setVM") and vm is not None:
-                            skillkit_instance.setVM(vm)
+                        # Set VM if this is VMToolkit and we have a VM configured
+                        if hasattr(toolkit_instance, "setVM") and vm is not None:
+                            toolkit_instance.setVM(vm)
 
-                        # Add all skills from this skillkit to the installed skillset
-                        for skill in skillkit_instance.getSkills():
-                            self.globalSkills.installedSkillset.addSkill(skill)
+                        # Add all tools from this toolkit to the installed toolset
+                        for skill in toolkit_instance.getTools():
+                            self.globalSkills.installedToolSet.addTool(skill)
 
                         if self.verbose:
                             console(
-                                f"Loaded custom skillkit: {obj.__name__} from {filePath}"
+                                f"Loaded custom toolkit: {obj.__name__} from {filePath}"
                             )
 
             except Exception as e:
                 # Log error but continue with other files
-                console(f"Failed to load custom skillkit from {filePath}: {str(e)}")
+                console(f"Failed to load custom toolkit from {filePath}: {str(e)}")
                 traceback.print_exc()
                 continue
 
@@ -170,7 +170,7 @@ class Env:
 
         for filePath in dolphinFiles:
             try:
-                # Pass the shared GlobalSkills instance and global_types to DolphinAgent
+                # Pass the shared GlobalToolkits instance and global_types to DolphinAgent
                 agent = DolphinAgent(
                     file_path=filePath,
                     global_config=self.globalConfig,
@@ -223,7 +223,7 @@ class Env:
         Register all loaded agents as skills in the global skills manager
         """
         for agentName, agent in self.agents.items():
-            self.globalSkills.registerAgentSkill(agentName, agent)
+            self.globalSkills.registerAgentTool(agentName, agent)
 
     def getAgent(self, agentName: str) -> Optional[DolphinAgent]:
         """
@@ -264,7 +264,7 @@ class Env:
         """
         # Set global skills (including agent skills) into the agent's executor context.
         if hasattr(agent, "executor") and hasattr(agent.executor, "context"):
-            allSkills = self.globalSkills.getAllSkills()
+            allSkills = self.globalSkills.getAllTools()
             agent.set_skills(allSkills)
 
     async def arun(self, agentName: str, **kwargs) -> AsyncGenerator[Any, None]:
@@ -291,12 +291,12 @@ class Env:
         async for result in agent.arun(**kwargs):
             yield result
 
-    def getGlobalSkills(self) -> GlobalSkills:
+    def getGlobalToolkits(self) -> GlobalToolkits:
         """
         Get the global skills manager
 
         Returns:
-            GlobalSkills instance
+            GlobalToolkits instance
         """
         return self.globalSkills
 
@@ -318,7 +318,7 @@ class Env:
             agent (DolphinAgent): DolphinAgent instance
         """
         self.agents[agentName] = agent
-        self.globalSkills.registerAgentSkill(agentName, agent)
+        self.globalSkills.registerAgentTool(agentName, agent)
 
     async def ashutdown(self):
         """

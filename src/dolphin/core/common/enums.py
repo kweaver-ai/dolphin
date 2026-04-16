@@ -245,7 +245,7 @@ class SingleMessage:
     @staticmethod
     def _compress_cognitive(content: str) -> str:
         """
-        Compress cognitive skill call messages using CognitiveSkillkit.compress_msg
+        Compress cognitive skill call messages using CognitiveToolkit.compress_msg
 
         Args:
             content (str): The message content to compress
@@ -254,11 +254,11 @@ class SingleMessage:
             str: Compressed content
         """
         # Import here to avoid circular import
-        from dolphin.lib.skillkits.cognitive_skillkit import (
-            CognitiveSkillkit,
+        from dolphin.lib.toolkits.cognitive_toolkit import (
+            CognitiveToolkit,
         )
 
-        return CognitiveSkillkit.compress_msg(content)
+        return CognitiveToolkit.compress_msg(content)
 
     def has_tool_calls(self) -> bool:
         """Check if this message has tool calls"""

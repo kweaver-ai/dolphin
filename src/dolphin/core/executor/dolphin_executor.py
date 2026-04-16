@@ -25,8 +25,8 @@ from dolphin.core.common.enums import MessageRole
 # Import sdk/lib modules under TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
     from dolphin.lib.memory.manager import MemoryManager
-    from dolphin.sdk.skill.global_skills import GlobalSkills
-    from dolphin.sdk.skill.traditional_toolkit import TriditionalToolkit
+    from dolphin.sdk.tool.global_toolkits import GlobalToolkits
+    from dolphin.sdk.tool.traditional_toolkit import TriditionalToolkit
     from dolphin.lib.vm.vm import VM, VMFactory
 
 logger = get_logger()
@@ -45,7 +45,7 @@ class DolphinExecutor:
         is_cli: bool = False,
     ):
         # Lazy imports to avoid circular dependencies
-        from dolphin.sdk.skill.global_skills import GlobalSkills
+        from dolphin.sdk.tool.global_toolkits import GlobalToolkits
         from dolphin.lib.memory.manager import MemoryManager
         from dolphin.lib.vm.vm import VM, VMFactory
         
@@ -57,7 +57,7 @@ class DolphinExecutor:
         else:
             self.config = GlobalConfig()
         self.global_skills = (
-            global_skills if global_skills is not None else GlobalSkills(self.config)
+            global_skills if global_skills is not None else GlobalToolkits(self.config)
         )
         self.global_types = (
             global_types if global_types is not None else ObjectTypeFactory()
@@ -189,8 +189,8 @@ class DolphinExecutor:
                 await self.context_initialize(tool_dict=value)
             elif key == "skillkit":
                 await self.context_initialize(skillkit=value)
-            elif key == "skillkit_hook":
-                await self.context_initialize(skillkit_hook=value)
+            elif key == "toolkit_hook":
+                await self.context_initialize(toolkit_hook=value)
             else:
                 pass
 
@@ -230,7 +230,7 @@ class DolphinExecutor:
         param_dict=None,
         tool_dict=None,
         skillkit=None,
-        skillkit_hook=None,
+        toolkit_hook=None,
     ):
         if param_dict is not None:
             for name, value in param_dict.items():
@@ -239,13 +239,13 @@ class DolphinExecutor:
                 self.context.set_variable(name=name, value=value)
 
         if tool_dict is not None:
-            from dolphin.sdk.skill.traditional_toolkit import TriditionalToolkit
+            from dolphin.sdk.tool.traditional_toolkit import TriditionalToolkit
             triditional_toolkit = TriditionalToolkit.buildFromTooldict(tool_dict)
             self.context.set_skills(triditional_toolkit)
         elif skillkit is not None:
             self.context.set_skills(skillkit)
-        elif skillkit_hook is not None:
-            self.context.set_skillkit_hook(skillkit_hook)
+        elif toolkit_hook is not None:
+            self.context.set_toolkit_hook(toolkit_hook)
 
     def set_context(self, context: Context):
         self.context = context
@@ -332,7 +332,7 @@ class DolphinExecutor:
         start_time = time.perf_counter()
 
         # Populate context.skillkit from global_skills if not already set.
-        # This ensures agent skills (registered via GlobalSkills) are
+        # This ensures agent skills (registered via GlobalToolkits) are
         # available for @agent_name() calls in DPH scripts.
         self._prepare_for_run(**kwargs)
 
@@ -392,14 +392,14 @@ class DolphinExecutor:
         # Only set skills if not already set (to preserve agent skills set by Environment)
         if self.context.is_skillkit_empty():
             # Try to get all skills including custom skills from global skills
-            # If global_skills has getAllSkills method, use it; otherwise fall back to installed skills
-            if hasattr(self.global_skills, "getAllSkills") and callable(
-                getattr(self.global_skills, "getAllSkills")
+            # If global_skills has getAllTools method, use it; otherwise fall back to installed skills
+            if hasattr(self.global_skills, "getAllTools") and callable(
+                getattr(self.global_skills, "getAllTools")
             ):
-                all_skills = self.global_skills.getAllSkills()
+                all_skills = self.global_skills.getAllTools()
                 self.context.set_skills(all_skills)
             else:
-                installed_skills = self.global_skills.getInstalledSkills()
+                installed_skills = self.global_skills.getInstalledTools()
                 self.context.set_skills(installed_skills)
 
         if KEY_USER_ID in kwargs:

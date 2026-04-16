@@ -96,7 +96,7 @@ def _addAgentArguments(parser: argparse.ArgumentParser, required: bool = True) -
     )
     parser.add_argument(
         "--skill-folder", "--skill_folder", type=str, dest="skill_folder",
-        help="Custom skillkit directory"
+        help="Custom toolkit directory"
     )
     parser.add_argument(
         "--query", "-q", type=str,

@@ -21,16 +21,16 @@ if TYPE_CHECKING:
         Context,
         BaseAgent,
         AgentState,
-        Skillset,
-        Skillkit,
-        SkillFunction,
+        ToolSet,
+        Toolkit,
+        ToolFunction,
         RuntimeInstance,
         RuntimeGraph,
     )
     from dolphin.sdk import (
         DolphinAgent,
         Env,
-        GlobalSkills,
+        GlobalToolkits,
     )
 
 _module_lookup = {
@@ -38,15 +38,15 @@ _module_lookup = {
     "Context": "dolphin.core",
     "BaseAgent": "dolphin.core",
     "AgentState": "dolphin.core",
-    "Skillset": "dolphin.core",
-    "Skillkit": "dolphin.core",
-    "SkillFunction": "dolphin.core",
+    "ToolSet": "dolphin.core",
+    "Toolkit": "dolphin.core",
+    "ToolFunction": "dolphin.core",
     "RuntimeInstance": "dolphin.core",
     "RuntimeGraph": "dolphin.core",
     # SDK
     "DolphinAgent": "dolphin.sdk",
     "Env": "dolphin.sdk",
-    "GlobalSkills": "dolphin.sdk",
+    "GlobalToolkits": "dolphin.sdk",
 }
 
 def __getattr__(name):

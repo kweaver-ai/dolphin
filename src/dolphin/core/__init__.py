@@ -12,7 +12,7 @@ Dolphin Core - 核心运行时引擎（内核态）
 - 协程调度（Coroutine）
 - 代码块执行（Code Block）
 - LLM 调用抽象层
-- Skill 核心（Skillkit、skill_function、skill_matcher）
+- Tool 核心（Toolkit、tool_function、tool_matcher）
 - 轨迹记录（Trajectory）
 - Agent 核心定义（BaseAgent、AgentState）
 - Runtime 核心（RuntimeInstance、RuntimeGraph）
@@ -39,11 +39,11 @@ from dolphin.core.runtime.runtime_graph import RuntimeGraph
 from dolphin.core.agent.base_agent import BaseAgent
 from dolphin.core.agent.agent_state import AgentState
 
-# Skill
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skillset import Skillset
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skill_matcher import SkillMatcher
+# Tool
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.toolset import ToolSet
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.tool_matcher import ToolMatcher
 
 # LLM
 from dolphin.core.llm.llm import LLM
@@ -81,11 +81,11 @@ __all__ = [
     # Agent
     "BaseAgent",
     "AgentState",
-    # Skill
-    "Skillkit",
-    "Skillset",
-    "SkillFunction",
-    "SkillMatcher",
+    # Tool
+    "Toolkit",
+    "ToolSet",
+    "ToolFunction",
+    "ToolMatcher",
     # LLM
     "LLM",
     "LLMClient",

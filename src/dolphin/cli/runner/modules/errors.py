@@ -115,7 +115,7 @@ def extract_skill_error_message(e: Exception) -> Optional[str]:
     # Pattern: "Skill 'xxx' not found.\n\nAvailable skills..."
 
     # Try to find the skill error block
-    skill_error_pattern = r"(Skill '[^']+' not found\..*?Verify that the required skillkit module is loaded)"
+    skill_error_pattern = r"(Skill '[^']+' not found\..*?Verify that the required toolkit module is loaded)"
     match = re.search(skill_error_pattern, error_str, re.DOTALL)
 
     if match:
@@ -127,7 +127,7 @@ def extract_skill_error_message(e: Exception) -> Optional[str]:
         start_idx = error_str.find("Skill '")
         if start_idx != -1:
             # Find the end of the message (after "Possible fixes" section)
-            end_patterns = ["module is loaded", "skillkit module is loaded"]
+            end_patterns = ["module is loaded", "toolkit module is loaded"]
             end_idx = len(error_str)
             for pattern in end_patterns:
                 idx = error_str.find(pattern, start_idx)

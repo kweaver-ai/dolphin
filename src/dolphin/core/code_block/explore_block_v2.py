@@ -19,7 +19,7 @@ from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.logging.logger import console, console_skill_response, get_logger
-from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
+from dolphin.lib.toolkits.cognitive_toolkit import CognitiveToolkit
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.common.types import SourceType
 
@@ -178,7 +178,7 @@ class ExploreBlockV2(BasicCodeBlock):
 
         Includes:
         - Goals and tool descriptions
-        - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
+        - Metadata prompt from skillkits (e.g., ResourceToolkit Level 1)
         - User-provided system prompt
         """
         role_format = """
@@ -208,9 +208,9 @@ class ExploreBlockV2(BasicCodeBlock):
                 r"{tools}", "用户没有配置工具，你只能自己回答问题！"
             )
 
-        # Inject metadata prompt from skillkits via skill.owner_skillkit
-        from dolphin.core.skill.skillkit import Skillkit
-        metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
+        # Inject metadata prompt from skillkits via skill.owner_toolkit
+        from dolphin.core.tool.toolkit import Toolkit
+        metadata_prompt = Toolkit.collect_metadata_from_tools(skillkit)
         role_format = role_format.replace(r"{metadata_prompt}", metadata_prompt)
 
         # Replace user system prompt
@@ -491,7 +491,7 @@ class ExploreBlockV2(BasicCodeBlock):
             "messages": llm_messages,
             "model": self.model,
             "no_cache": no_cache,
-            "tools": self.get_skillkit().getSkillsSchema(),
+            "tools": self.get_skillkit().getToolsSchema(),
         }
         # propagate tool_choice if provided in params/block
         if getattr(self, "tool_choice", None):
@@ -629,7 +629,7 @@ class ExploreBlockV2(BasicCodeBlock):
             answer_content: str = (
                 tool_response
                 if tool_response is not None
-                and not CognitiveSkillkit.is_cognitive_skill(stream_item.tool_name)
+                and not CognitiveToolkit.is_cognitive_skill(stream_item.tool_name)
                 else ""
             )
 
@@ -715,7 +715,7 @@ class ExploreBlockV2(BasicCodeBlock):
         return True
 
     def _process_skill_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
-        """Handle skill results using skillkit_hook
+        """Handle skill results using toolkit_hook
 
         Args:
             skill_name: Name of the skill
@@ -726,20 +726,20 @@ class ExploreBlockV2(BasicCodeBlock):
         # Get skill object
         skill = self.context.get_skill(skill_name)
         if not skill:
-            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
-            skill = SystemFunctions.getSkill(skill_name)
+            from dolphin.lib.toolkits.system_toolkit import SystemFunctions
+            skill = SystemFunctions.getTool(skill_name)
 
         # Get the last stage as reference
         last_stage = self.recorder.getProgress().get_last_stage()
         reference = last_stage.get_raw_output() if last_stage else None
-        # Handle results using skillkit_hook (handles dynamic tools automatically)
-        if reference and self.skillkit_hook and self.context.has_skillkit_hook():
+        # Handle results using toolkit_hook (handles dynamic tools automatically)
+        if reference and self.toolkit_hook and self.context.has_toolkit_hook():
             # Use new hook to get context-optimized content
-            content, metadata = self.skillkit_hook.on_before_send_to_context(
+            content, metadata = self.toolkit_hook.on_before_send_to_context(
                 reference_id=reference.reference_id,
-                skill=skill,
-                skillkit_name=type(skill.owner_skillkit).__name__ if skill.owner_skillkit else "",
-                resource_skill_path=getattr(skill, 'resource_skill_path', None),
+                tool=skill,
+                toolkit_name=type(skill.owner_toolkit).__name__ if skill.owner_toolkit else "",
+                resource_tool_path=getattr(skill, 'resource_tool_path', None),
             )
             return content, metadata
         

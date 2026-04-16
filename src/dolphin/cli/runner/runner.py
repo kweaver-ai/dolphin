@@ -44,7 +44,7 @@ from dolphin.cli.runner.modules.execution import _runFirstExecution, _runSubsequ
 from dolphin.cli.runner.modules.agent_lifecycle import (
     loadAndPrepareAgent,
     _recoverAgentFromError,
-    _get_skillkit_info,
+    _get_toolkit_info,
 )
 from dolphin.cli.runner.modules.conversation import (
     runConversationLoop,
@@ -63,7 +63,7 @@ from dolphin.core.utils.rich_status import safe_rich_status
 # - conversation.py: _handle_user_interrupt, runConversationLoop, _promptUserInput
 # - artifacts.py: saveExecutionArtifacts, _saveExecutionTrace, _saveSnapshotAnalysis
 # - execution.py: _runFirstExecution, _runSubsequentExecution
-# - agent_lifecycle.py: loadAndPrepareAgent, _recoverAgentFromError, _get_skillkit_info
+# - agent_lifecycle.py: loadAndPrepareAgent, _recoverAgentFromError, _get_toolkit_info
 # - debugger.py: _handleLiveDebugCommand, enterPostmortemIfNeeded
 # - errors.py: handle_execution_error
 # - environment.py: initializeEnvironment
@@ -162,7 +162,7 @@ async def runBuiltinExploreAgent(args: Args) -> None:
     from dolphin.cli.builtin_agents import BUILTIN_AGENTS_DIR, DEFAULT_EXPLORE_AGENT
     from dolphin.sdk.runtime.env import Env
     from dolphin.core.config.global_config import GlobalConfig
-    from dolphin.lib.skillkits.env_skillkit import EnvSkillkit
+    from dolphin.lib.toolkits.env_toolkit import EnvToolkit
     import logging
     
     # Set the builtin agent directory and agent name
@@ -189,12 +189,12 @@ async def runBuiltinExploreAgent(args: Args) -> None:
         ),
     )
     
-    # Register EnvSkillkit for local bash/python execution
-    env_skillkit = EnvSkillkit()
-    env_skillkit.setGlobalConfig(globalConfig)
-    for skill in env_skillkit.getSkills():
-        env.globalSkills.installedSkillset.addSkill(skill)
-    env.globalSkills._syncAllSkills()
+    # Register EnvToolkit for local bash/python execution
+    env_toolkit = EnvToolkit()
+    env_toolkit.setGlobalConfig(globalConfig)
+    for skill in env_toolkit.getTools():
+        env.globalSkills.installedToolSet.addTool(skill)
+    env.globalSkills._syncAllTools()
     
     console(f"[bold green]👋 Hi! I'm Dolphin, your AI Pair Programmer.[/]")
     console(f"   I can help you write code, debug issues, and explore this project.")

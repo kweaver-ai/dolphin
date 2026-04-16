@@ -653,7 +653,7 @@ class SkillConfig:
         Args:
             enabled_skills: List of enabled skills, None means load all skills
                                  Supports the following formats:
-                                 - "vm_skillkit": Load a specific skillkit
+                                 - "vm_toolkit": Load a specific toolkit
                                  - "mcp": Load all MCP servers
                                  - "mcp.filesystem": Load a specific MCP server
         """
@@ -663,15 +663,17 @@ class SkillConfig:
     def _normalize_skill_name(name: str) -> str:
         """Normalize skill identifiers for backward compatibility.
 
-        Historically, config examples used names like "vm_skillkit" while the
-        entry-point based loader uses names like "vm". We accept both by
-        normalizing the "_skillkit" suffix for non-namespaced skill ids.
+        Historically, config examples used names like "vm_skillkit" or "vm_toolkit"
+        while the entry-point based loader uses names like "vm". We accept both by
+        normalizing the "_skillkit" or "_toolkit" suffix for non-namespaced skill ids.
         """
         if not isinstance(name, str):
             return name
         # Keep namespaced ids as-is (e.g. "mcp.playwright", "system_functions.grep")
         if "." in name:
             return name
+        if name.endswith("_toolkit"):
+            return name[: -len("_toolkit")]
         if name.endswith("_skillkit"):
             return name[: -len("_skillkit")]
         return name
@@ -1072,7 +1074,7 @@ class GlobalConfig:
             skill = config_dict.get("skill", None)
             skill_config = SkillConfig.from_dict(skill) if skill else None
 
-            # ResourceSkillkit configuration (Claude Skill format support)
+            # ResourceToolkit configuration (Claude Skill format support)
             resource_skills = config_dict.get("resource_skills", None)
 
             ontology = config_dict.get("ontology", None)

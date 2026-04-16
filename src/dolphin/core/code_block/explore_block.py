@@ -54,7 +54,7 @@ from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.context.var_output import SourceType
 from dolphin.core.logging.logger import get_logger
-from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
+from dolphin.lib.toolkits.cognitive_toolkit import CognitiveToolkit
 from dolphin.core.code_block.explore_strategy import (
     ExploreStrategy,
     PromptStrategy,
@@ -64,7 +64,7 @@ from dolphin.core.code_block.explore_strategy import (
 from dolphin.core.code_block.skill_call_deduplicator import (
     DefaultSkillCallDeduplicator,
 )
-from dolphin.core.skill.skill_matcher import SkillMatcher
+from dolphin.core.tool.tool_matcher import ToolMatcher
 from dolphin.core import flags
 
 logger = get_logger("code_block.explore_block")
@@ -1062,7 +1062,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             answer_content = (
                 tool_response
                 if tool_response is not None
-                and not CognitiveSkillkit.is_cognitive_skill(tool_call.name)
+                and not CognitiveToolkit.is_cognitive_skill(tool_call.name)
                 else ""
             )
 
@@ -1442,25 +1442,25 @@ Please reconsider your approach and improve your answer based on the feedback ab
         return counts and max(counts) >= DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT
 
     def _process_skill_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
-        """Handle skill results using skillkit_hook"""
+        """Handle skill results using toolkit_hook"""
         # Get skill object
         skill = self.context.get_skill(skill_name)
         if not skill:
-            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
-            skill = SystemFunctions.getSkill(skill_name)
+            from dolphin.lib.toolkits.system_toolkit import SystemFunctions
+            skill = SystemFunctions.getTool(skill_name)
 
         # Get the last stage as reference
         last_stage = self.recorder.getProgress().get_last_stage()
         reference = last_stage.get_raw_output() if last_stage else None
 
-        # Process results using skillkit_hook (handles dynamic tools automatically)
-        if reference and self.skillkit_hook and self.context.has_skillkit_hook():
+        # Process results using toolkit_hook (handles dynamic tools automatically)
+        if reference and self.toolkit_hook and self.context.has_toolkit_hook():
             # Use new hook to get context-optimized content
-            content, metadata = self.skillkit_hook.on_before_send_to_context(
+            content, metadata = self.toolkit_hook.on_before_send_to_context(
                 reference_id=reference.reference_id,
-                skill=skill,
-                skillkit_name=type(skill.owner_skillkit).__name__ if skill.owner_skillkit else "",
-                resource_skill_path=getattr(skill, 'resource_skill_path', None),
+                tool=skill,
+                toolkit_name=type(skill.owner_toolkit).__name__ if skill.owner_toolkit else "",
+                resource_tool_path=getattr(skill, 'resource_tool_path', None),
             )
             return content, metadata
         return self.recorder.getProgress().get_step_answers(), {}
@@ -1651,23 +1651,23 @@ Please reconsider your approach and improve your answer based on the feedback ab
             self._inject_context_to_skillkits()
     
     def _inject_context_to_skillkits(self):
-        """Inject execution context to skillkits that need it (e.g., PlanSkillkit)."""
+        """Inject execution context to toolkits that need it (e.g., PlanToolkit)."""
         if not self.skills or not self.context:
             return
 
-        # Resolve skills to a list of SkillFunction objects
+        # Resolve skills to a list of ToolFunction objects
         if hasattr(self.skills, 'getSkills'):
-            skill_list = self.skills.getSkills()
+            skill_list = self.skills.getTools()
         elif isinstance(self.skills, list) and self.skills and isinstance(self.skills[0], str):
             current_skillkit = self.context.get_skillkit()
             if not current_skillkit:
                 return
-            available_skills = current_skillkit.getSkills()
-            owner_names = SkillMatcher.get_owner_skillkits(available_skills)
+            available_skills = current_skillkit.getTools()
+            owner_names = ToolMatcher.get_owner_toolkits(available_skills)
             skill_list = [
                 skill for pattern in self.skills
                 for skill in available_skills
-                if SkillMatcher.match_skill(skill, pattern, owner_names=owner_names)
+                if ToolMatcher.match_tool(skill, pattern, owner_names=owner_names)
             ]
         elif isinstance(self.skills, list):
             skill_list = self.skills
@@ -1677,7 +1677,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         # Inject context to each unique skillkit instance
         processed = set()
         for skill in skill_list:
-            skillkit = getattr(skill, 'owner_skillkit', None)
+            skillkit = getattr(skill, 'owner_toolkit', None)
             if not skillkit or not hasattr(skillkit, 'setContext'):
                 continue
             if id(skillkit) not in processed:

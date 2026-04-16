@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Any, Dict, Optional
 import asyncio
 
 from dolphin.core.context.context import Context
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.core.common.object_type import ObjectTypeFactory
 from dolphin.core.parser.parser import Parser
 
@@ -33,7 +33,7 @@ class DolphinAgent(BaseAgent):
         self,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        skillkit: Optional[Skillkit] = None,
+        skillkit: Optional[Toolkit] = None,
         variables: Optional[Dict[str, Any]] = None,
         global_skills=None,
         file_path: Optional[str] = None,
@@ -52,7 +52,7 @@ class DolphinAgent(BaseAgent):
         Args:
             name: Agent name, automatically generated if not provided
             description: Agent description
-            skillkit: Skillkit instance
+            skillkit: Toolkit instance
             variables: Initial variables
             file_path: DPH file path (optional, mutually exclusive with content)
             content: DPH content as a string (optional, mutually exclusive with file_path)
