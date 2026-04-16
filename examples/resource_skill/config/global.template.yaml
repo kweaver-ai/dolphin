@@ -55,9 +55,9 @@ context_engineer:
 # ----------------------------------------------------------------------------
 skill:
   enabled_skills:
-    - "resource_skillkit"   # Enable ResourceSkillkit for Claude Skill support
-    - "vm_skillkit"         # Enable Python execution
-    - "cognitive_skillkit"  # Enable thinking tools
+    - "resource_toolkit"    # Enable ResourceToolkit for Claude Skill support
+    - "vm_toolkit"          # Enable Python execution
+    - "cognitive_toolkit"   # Enable thinking tools
 
 # ----------------------------------------------------------------------------
 # Resource Skills Configuration
