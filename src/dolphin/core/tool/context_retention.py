@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 class ContextRetentionMode(Enum):
-    """Context retention mode for skill results"""
+    """Context retention mode for tool results"""
     SUMMARY = "summary"      # Keep head and tail, truncate middle
     FULL = "full"           # Keep everything, no processing (default)
     PIN = "pin"             # Keep full, skip compression, persist to history
@@ -20,8 +20,8 @@ DEFAULT_SUMMARY_MAX_LENGTH = 8000
 
 
 @dataclass
-class SkillContextRetention:
-    """Skill context retention configuration"""
+class ToolContextRetention:
+    """Tool context retention configuration"""
     mode: ContextRetentionMode = ContextRetentionMode.FULL
     max_length: int = DEFAULT_SUMMARY_MAX_LENGTH  # Only used by SUMMARY mode
     detail_hint_min_omitted: int = 0  # SUMMARY: minimum omitted chars to add detail hint
@@ -34,7 +34,7 @@ class ContextRetentionStrategy(ABC):
     """Base class for context retention strategies"""
     
     @abstractmethod
-    def process(self, result: str, config: SkillContextRetention, 
+    def process(self, result: str, config: ToolContextRetention, 
                 reference_id: str = None) -> str:
         """Process result and return content for context
         
@@ -49,7 +49,7 @@ class ContextRetentionStrategy(ABC):
 class SummaryContextStrategy(ContextRetentionStrategy):
     """Summary strategy - keep head and tail, truncate middle"""
     
-    def process(self, result: str, config: SkillContextRetention,
+    def process(self, result: str, config: ToolContextRetention,
                 reference_id: str = None) -> str:
         if len(result) <= config.max_length:
             return result
@@ -86,7 +86,7 @@ class FullContextStrategy(ContextRetentionStrategy):
     it will be handled by the Compression Strategy at LLM call time.
     """
     
-    def process(self, result: str, config: SkillContextRetention,
+    def process(self, result: str, config: ToolContextRetention,
                 reference_id: str = None) -> str:
         # No processing, return as-is
         # Compression Strategy will handle if context is too large
@@ -96,7 +96,7 @@ class FullContextStrategy(ContextRetentionStrategy):
 class PinContextStrategy(ContextRetentionStrategy):
     """Pin strategy - keep full, mark as non-compressible, persist to history"""
     
-    def process(self, result: str, config: SkillContextRetention,
+    def process(self, result: str, config: ToolContextRetention,
                 reference_id: str = None) -> str:
         # Keep full, compression behavior controlled by metadata
         # PIN_MARKER is recognized by _update_history_and_cleanup
@@ -116,7 +116,7 @@ class ReferenceContextStrategy(ContextRetentionStrategy):
     - Minimize context usage as much as possible
     """
     
-    def process(self, result: str, config: SkillContextRetention,
+    def process(self, result: str, config: ToolContextRetention,
                 reference_id: str = None) -> str:
         if not reference_id:
             # Fallback to SUMMARY if no reference_id
@@ -152,14 +152,14 @@ def context_retention(
     ttl_turns: int = -1,
     reference_hint: str = None,
 ):
-    """Skill context retention strategy decorator"""
+    """Tool context retention strategy decorator"""
     def decorator(func):
         try:
             retention_mode = ContextRetentionMode(mode)
         except ValueError:
             retention_mode = ContextRetentionMode.FULL
             
-        func._context_retention = SkillContextRetention(
+        func._context_retention = ToolContextRetention(
             mode=retention_mode,
             max_length=max_length,
             detail_hint_min_omitted=detail_hint_min_omitted,

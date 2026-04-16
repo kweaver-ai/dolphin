@@ -6,17 +6,17 @@ import json
 from typing import Any, Callable, List, Tuple, Dict, Optional
 
 from dolphin.core.logging.logger import MaxLenLog
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skill_matcher import SkillMatcher
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.tool_matcher import ToolMatcher
 from dolphin.core.logging.logger import get_logger
 
-logger = get_logger("skill")
+logger = get_logger("tool")
 
 
-class SkillExecRecord:
-    """Skill Execution Log"""
+class ToolExecRecord:
+    """Tool Execution Log"""
 
-    def __init__(self, toolCall: Tuple[str, dict], tool: SkillFunction, result: Any):
+    def __init__(self, toolCall: Tuple[str, dict], tool: ToolFunction, result: Any):
         self.toolCall = toolCall
         self.tool = tool
         self.result = result
@@ -27,19 +27,19 @@ class SkillExecRecord:
     def get_tool_call(self) -> Tuple[str, dict]:
         return self.toolCall
 
-    def get_tool(self) -> SkillFunction:
+    def get_tool(self) -> ToolFunction:
         return self.tool
 
     def get_result(self) -> Any:
         return self.result
 
 
-class Skillkit:
+class Toolkit:
     def __init__(self) -> None:
         self.records = []
         self.queryAsArg = False
-        self._skills_cache: Optional[List[SkillFunction]] = None
-        """Skill result processing strategy configuration. The strategies used must be registered strategies in StrategyRegistry.
+        self._tools_cache: Optional[List[ToolFunction]] = None
+        """Tool result processing strategy configuration. The strategies used must be registered strategies in StrategyRegistry.
                 Example:
                 [
                     {
@@ -55,109 +55,109 @@ class Skillkit:
         self.result_process_strategy_cfg: list[Dict[str, str]] = None
 
     def getName(self) -> str:
-        return "skillkit"
+        return "toolkit"
 
     # ─────────────────────────────────────────────────────────────
     # UI Rendering Protocol (Custom UI Support)
     # ─────────────────────────────────────────────────────────────
-    
-    def has_custom_ui(self, skill_name: str) -> bool:
-        """Check if this skillkit provides custom UI rendering for a skill.
-        
+
+    def has_custom_ui(self, tool_name: str) -> bool:
+        """Check if this toolkit provides custom UI rendering for a tool.
+
         Subclasses can override this to indicate that they provide
-        custom UI rendering instead of the default skill_call box.
-        
+        custom UI rendering instead of the default tool_call box.
+
         Args:
-            skill_name: Name of the skill being rendered
-            
+            tool_name: Name of the tool being rendered
+
         Returns:
             True if custom UI is provided, False to use default rendering
         """
         return False
-    
-    def render_skill_start(
+
+    def render_tool_start(
         self,
-        skill_name: str,
+        tool_name: str,
         params: dict,
         verbose: bool = True
     ) -> None:
-        """Custom UI rendering for skill start (before execution).
-        
-        Called instead of skill_call_start when has_custom_ui returns True.
+        """Custom UI rendering for tool start (before execution).
+
+        Called instead of tool_call_start when has_custom_ui returns True.
         Subclasses should override to provide custom rendering.
-        
+
         Args:
-            skill_name: Name of the skill being called
-            params: Parameters passed to the skill
+            tool_name: Name of the tool being called
+            params: Parameters passed to the tool
             verbose: Whether to render UI
         """
         pass  # Default: no-op, subclasses implement
-    
-    def render_skill_end(
+
+    def render_tool_end(
         self,
-        skill_name: str,
+        tool_name: str,
         params: dict,
         result: Any,
         success: bool = True,
         duration_ms: float = 0,
         verbose: bool = True
     ) -> None:
-        """Custom UI rendering for skill end (after execution).
-        
-        Called instead of skill_call_end when has_custom_ui returns True.
+        """Custom UI rendering for tool end (after execution).
+
+        Called instead of tool_call_end when has_custom_ui returns True.
         Subclasses should override to provide custom rendering.
-        
+
         Args:
-            skill_name: Name of the skill that completed
-            params: Parameters that were passed to the skill
-            result: Result from the skill execution
-            success: Whether the skill succeeded
+            tool_name: Name of the tool that completed
+            params: Parameters that were passed to the tool
+            result: Result from the tool execution
+            success: Whether the tool succeeded
             duration_ms: Execution duration in milliseconds
             verbose: Whether to render UI
         """
         pass  # Default: no-op, subclasses implement
 
-    def _createSkills(self) -> List[SkillFunction]:
-        """Subclasses override this method to create the skill list.
+    def _createTools(self) -> List[ToolFunction]:
+        """Subclasses override this method to create the tool list.
 
-        This is the template method pattern: subclasses implement skill creation,
-        and the base class handles owner binding in getSkills().
+        This is the template method pattern: subclasses implement tool creation,
+        and the base class handles owner binding in getTools().
 
         Returns:
-            List[SkillFunction]: List of skills created by this skillkit
+            List[ToolFunction]: List of tools created by this toolkit
         """
         return []
 
-    def getSkills(self) -> List[SkillFunction]:
-        """Get the skill list with owner_skillkit automatically bound.
+    def getTools(self) -> List[ToolFunction]:
+        """Get the tool list with owner_toolkit automatically bound.
 
-        This method caches the skills and ensures owner_skillkit is set
-        for all skills. Subclasses should override _createSkills() instead
+        This method caches the tools and ensures owner_toolkit is set
+        for all tools. Subclasses should override _createTools() instead
         of this method.
 
         Returns:
-            List[SkillFunction]: List of skills with owner_skillkit set
+            List[ToolFunction]: List of tools with owner_toolkit set
         """
-        if self._skills_cache is None:
-            self._skills_cache = self._createSkills()
-            self._bindOwnerToSkills(self._skills_cache)
-        return self._skills_cache
+        if self._tools_cache is None:
+            self._tools_cache = self._createTools()
+            self._bindOwnerToTools(self._tools_cache)
+        return self._tools_cache
 
-    def _bindOwnerToSkills(self, skills: List[SkillFunction]) -> None:
-        """Bind owner_skillkit to all skills that don't have one set.
-        
-        This passes the Skillkit object (self) so that metadata prompt
-        can be collected dynamically via skill.owner_skillkit.get_metadata_prompt().
+    def _bindOwnerToTools(self, tools: List[ToolFunction]) -> None:
+        """Bind owner_toolkit to all tools that don't have one set.
+
+        This passes the Toolkit object (self) so that metadata prompt
+        can be collected dynamically via tool.owner_toolkit.get_metadata_prompt().
         """
-        for skill in skills:
-            if hasattr(skill, "set_owner_skillkit"):
-                current_owner = getattr(skill, "get_owner_skillkit", lambda: None)()
+        for tool in tools:
+            if hasattr(tool, "set_owner_toolkit"):
+                current_owner = getattr(tool, "get_owner_toolkit", lambda: None)()
                 if current_owner is None:
-                    skill.set_owner_skillkit(self)
+                    tool.set_owner_toolkit(self)
 
-    def invalidateSkillsCache(self) -> None:
-        """Invalidate the skills cache, forcing recreation on next getSkills() call."""
-        self._skills_cache = None
+    def invalidateToolsCache(self) -> None:
+        """Invalidate the tools cache, forcing recreation on next getTools() call."""
+        self._tools_cache = None
 
     def getResultProcessStrategyCfg(self) -> list[Dict[str, str]]:
         return self.result_process_strategy_cfg
@@ -167,51 +167,51 @@ class Skillkit:
     ) -> None:
         self.result_process_strategy_cfg = result_process_strategy_cfg
 
-    def getSkillNames(self) -> List[str]:
-        return [skill.get_function_name() for skill in self.getSkills()]
+    def getToolNames(self) -> List[str]:
+        return [tool.get_function_name() for tool in self.getTools()]
 
     def setGlobalConfig(self, globalConfig):
         self.globalConfig = globalConfig
 
-    def getCertainSkills(
-        self, skillNames: List[str] | str | None
-    ) -> List[SkillFunction]:
-        if skillNames is None:
-            return self.getSkills()
-        elif isinstance(skillNames, str):
-            # Use SkillMatcher to support wildcard matching
-            return SkillMatcher.filter_skills_by_pattern(self.getSkills(), skillNames)
+    def getCertainTools(
+        self, toolNames: List[str] | str | None
+    ) -> List[ToolFunction]:
+        if toolNames is None:
+            return self.getTools()
+        elif isinstance(toolNames, str):
+            # Use ToolMatcher to support wildcard matching
+            return ToolMatcher.filter_tools_by_pattern(self.getTools(), toolNames)
         else:
-            # Use SkillMatcher to support wildcard matching
-            return SkillMatcher.filter_skills_by_patterns(self.getSkills(), skillNames)
+            # Use ToolMatcher to support wildcard matching
+            return ToolMatcher.filter_tools_by_patterns(self.getTools(), toolNames)
 
-    def hasSkill(self, skillName: str) -> bool:
-        return SkillMatcher.get_skill_by_name(self.getSkills(), skillName) is not None
+    def hasTool(self, toolName: str) -> bool:
+        return ToolMatcher.get_tool_by_name(self.getTools(), toolName) is not None
 
-    def getSkill(self, skillName: str) -> Optional[SkillFunction]:
-        return SkillMatcher.get_skill_by_name(self.getSkills(), skillName)
+    def getTool(self, toolName: str) -> Optional[ToolFunction]:
+        return ToolMatcher.get_tool_by_name(self.getTools(), toolName)
 
     @staticmethod
-    def getSkillsWithSingleSkill(skill: Callable) -> List[SkillFunction]:
-        return [SkillFunction(skill)]
+    def getToolsWithSingleTool(tool: Callable) -> List[ToolFunction]:
+        return [ToolFunction(tool)]
 
-    def getSkillsSchema(self) -> list:
-        return [skill.get_openai_tool_schema() for skill in self.getSkills()]
+    def getToolsSchema(self) -> list:
+        return [tool.get_openai_tool_schema() for tool in self.getTools()]
 
-    def getSkillsSchemaForCertainSkills(self, skillNames: List[str]) -> list:
+    def getToolsSchemaForCertainTools(self, toolNames: List[str]) -> list:
         return [
-            skill.get_openai_tool_schema()
-            for skill in self.getCertainSkills(skillNames)
+            tool.get_openai_tool_schema()
+            for tool in self.getCertainTools(toolNames)
         ]
 
-    def getSkillsDict(self) -> dict:
-        return {skill.get_function_name(): skill for skill in self.getSkills()}
+    def getToolsDict(self) -> dict:
+        return {tool.get_function_name(): tool for tool in self.getTools()}
 
-    def getSchemas(self, skillNames: Optional[List[str]] = None) -> str:
-        skills = self.getCertainSkills(skillNames)
+    def getSchemas(self, toolNames: Optional[List[str]] = None) -> str:
+        tools = self.getCertainTools(toolNames)
         functionSchemas = [
-            json.dumps(skill.get_openai_tool_schema()["function"], ensure_ascii=False)
-            for skill in skills
+            json.dumps(tool.get_openai_tool_schema()["function"], ensure_ascii=False)
+            for tool in tools
         ]
         return "|".join(functionSchemas)
 
@@ -219,11 +219,11 @@ class Skillkit:
     # Compression (generic)
     # =========================
 
-    # Default rules for compressing skill-call messages; subclasses can override
+    # Default rules for compressing tool-call messages; subclasses can override
     DEFAULT_COMPRESS_RULES: Dict[str, Dict[str, List[str]]] = {}
 
     def get_compress_rules(self) -> Dict[str, Dict[str, List[str]]]:
-        """Return default compression rules for this skillkit instance."""
+        """Return default compression rules for this toolkit instance."""
         return self.DEFAULT_COMPRESS_RULES
 
     @classmethod
@@ -238,12 +238,12 @@ class Skillkit:
         marker_prefix: str = "=>#",
     ) -> str:
         """
-        Compress skill-call messages using include/exclude rules per skill name.
+        Compress tool-call messages using include/exclude rules per tool name.
 
         Args:
-            message: Raw message text containing markers like '=>#skillName:{...}'.
-            rules: Per-skill rules, e.g. {"_cog_think": {"include": ["action"]}}
-            marker_prefix: Prefix that denotes a skill-call marker.
+            message: Raw message text containing markers like '=>#toolName:{...}'.
+            rules: Per-tool rules, e.g. {"_cog_think": {"include": ["action"]}}
+            marker_prefix: Prefix that denotes a tool-call marker.
 
         Returns:
             Compressed message text.
@@ -257,9 +257,9 @@ class Skillkit:
 
         active_rules: Dict[str, Dict[str, List[str]]] = rules or {}
 
-        def apply_rule(skill_name: str, data: dict) -> tuple[dict, bool]:
+        def apply_rule(tool_name: str, data: dict) -> tuple[dict, bool]:
             """Return (possibly_transformed_data, applied_flag)."""
-            rule = active_rules.get(skill_name) or active_rules.get("*")
+            rule = active_rules.get(tool_name) or active_rules.get("*")
             if not rule:
                 return data, False
             include_fields = (
@@ -277,14 +277,14 @@ class Skillkit:
                 )
             return data, False
 
-        # Regex to find markers and capture the skill name
+        # Regex to find markers and capture the tool name
         pattern = re.compile(re.escape(marker_prefix) + r"([A-Za-z0-9_]+):")
 
         idx = 0
         out_parts: List[str] = []
         for match in pattern.finditer(message):
             start, end = match.start(), match.end()
-            skill_name = match.group(1)
+            tool_name = match.group(1)
             # Append text before marker and the marker itself
             out_parts.append(message[idx:start])
             out_parts.append(message[start:end])
@@ -307,7 +307,7 @@ class Skillkit:
             try:
                 data = safe_json_loads(json_text, strict=False)
                 if isinstance(data, dict):
-                    transformed, applied = apply_rule(skill_name, data)
+                    transformed, applied = apply_rule(tool_name, data)
                     if applied:
                         out_parts.append(json.dumps(transformed, ensure_ascii=False))
                     else:
@@ -324,10 +324,10 @@ class Skillkit:
         out_parts.append(message[idx:])
         return "".join(out_parts)
 
-    def getSkillsDescs(self) -> dict[str, str]:
+    def getToolsDescs(self) -> dict[str, str]:
         return {
-            skill.get_function_name(): skill.get_function_description()
-            for skill in self.getSkills()
+            tool.get_function_name(): tool.get_function_description()
+            for tool in self.getTools()
         }
 
     def getFormattedToolsDescription(self, format_type: str = "medium") -> str:
@@ -340,44 +340,44 @@ class Skillkit:
         Returns:
             str: Formatted tools description
         """
-        skills = self.getSkills()
-        if not skills:
+        tools = self.getTools()
+        if not tools:
             return "No tools available"
 
         if format_type.lower() == "concise":
-            return self._formatToolsConcise(skills)
+            return self._formatToolsConcise(tools)
         elif format_type.lower() == "medium":
-            return self._formatToolsMedium(skills)
+            return self._formatToolsMedium(tools)
         elif format_type.lower() == "detailed":
-            return self._formatToolsDetailed(skills)
+            return self._formatToolsDetailed(tools)
         else:
-            return self._formatToolsMedium(skills)  # Default to medium format
+            return self._formatToolsMedium(tools)  # Default to medium format
 
-    def _formatToolsConcise(self, skills: List[SkillFunction]) -> str:
+    def _formatToolsConcise(self, tools: List[ToolFunction]) -> str:
         """
         Format tools in concise style: toolName - brief description
         """
         formatted_tools = []
-        for skill in skills:
-            name = skill.get_function_name()
-            desc = skill.get_function_description()
+        for tool in tools:
+            name = tool.get_function_name()
+            desc = tool.get_function_description()
             # Extract first sentence as brief description
             brief_desc = desc.split(".")[0] if desc else "Tool function"
             formatted_tools.append(f"- {name}: {brief_desc}")
 
         return "\n".join(formatted_tools)
 
-    def _formatToolsMedium(self, skills: List[SkillFunction]) -> str:
+    def _formatToolsMedium(self, tools: List[ToolFunction]) -> str:
         """
         Format tools in medium style: toolName(key_params) - description + purpose
         """
         formatted_tools = []
-        for skill in skills:
-            name = skill.get_function_name()
-            desc = skill.get_function_description()
+        for tool in tools:
+            name = tool.get_function_name()
+            desc = tool.get_function_description()
 
             # Extract key parameters from schema
-            key_params = self._extractKeyParameters(skill)
+            key_params = self._extractKeyParameters(tool)
             param_str = f"({key_params})" if key_params else ""
 
             # Format: toolName(params) - description
@@ -385,17 +385,17 @@ class Skillkit:
 
         return "\n".join(formatted_tools)
 
-    def _formatToolsDetailed(self, skills: List[SkillFunction]) -> str:
+    def _formatToolsDetailed(self, tools: List[ToolFunction]) -> str:
         """
         Format tools in detailed style: full schema with parameters and types
         """
         formatted_tools = []
-        for skill in skills:
-            name = skill.get_function_name()
-            desc = skill.get_function_description()
+        for tool in tools:
+            name = tool.get_function_name()
+            desc = tool.get_function_description()
 
             # Get parameter details from schema
-            param_details = self._extractParameterDetails(skill)
+            param_details = self._extractParameterDetails(tool)
 
             tool_block = [f"**{name}**"]
             tool_block.append(f"  Description: {desc}")
@@ -411,12 +411,12 @@ class Skillkit:
 
         return "\n\n".join(formatted_tools)
 
-    def _extractKeyParameters(self, skill: SkillFunction) -> str:
+    def _extractKeyParameters(self, tool: ToolFunction) -> str:
         """
-        Extract key parameters from skill schema for medium format
+        Extract key parameters from tool schema for medium format
         """
         try:
-            schema = skill.get_openai_tool_schema()
+            schema = tool.get_openai_tool_schema()
             if "function" in schema and "parameters" in schema["function"]:
                 params = schema["function"]["parameters"]
                 if "properties" in params:
@@ -430,12 +430,12 @@ class Skillkit:
         except Exception:
             return ""
 
-    def _extractParameterDetails(self, skill: SkillFunction) -> List[str]:
+    def _extractParameterDetails(self, tool: ToolFunction) -> List[str]:
         """
         Extract detailed parameter information for detailed format
         """
         try:
-            schema = skill.get_openai_tool_schema()
+            schema = tool.get_openai_tool_schema()
             if "function" in schema and "parameters" in schema["function"]:
                 params = schema["function"]["parameters"]
                 if "properties" in params:
@@ -482,7 +482,7 @@ class Skillkit:
 
         Subclasses can override this to provide fixed metadata content
         that should be injected into the system prompt. This is useful
-        for resource/guidance type skillkits that need to expose
+        for resource/guidance type toolkits that need to expose
         available resources to the LLM upfront.
 
         By default, returns an empty string (no metadata injection).
@@ -494,47 +494,47 @@ class Skillkit:
         return ""
 
     @staticmethod
-    def collect_metadata_from_skills(skillkit: "Skillkit") -> str:
-        """Collect metadata prompts from a skillkit via skill.owner_skillkit.
+    def collect_metadata_from_tools(toolkit: "Toolkit") -> str:
+        """Collect metadata prompts from a toolkit via tool.owner_toolkit.
 
-        This static method traverses all skills in the given skillkit and
-        collects metadata prompts from their owner skillkits. Only skillkits
-        that override get_metadata_prompt() (like ResourceSkillkit) will
+        This static method traverses all tools in the given toolkit and
+        collects metadata prompts from their owner toolkits. Only toolkits
+        that override get_metadata_prompt() (like ResourceToolkit) will
         return non-empty metadata.
 
         This is the central utility for metadata collection, used by
         ExploreStrategy and ExploreBlockV2 to inject metadata into system prompt.
 
         Args:
-            skillkit: The skillkit containing skills to inspect
+            toolkit: The toolkit containing tools to inspect
 
         Returns:
             Combined metadata prompts separated by double newlines,
             or empty string if none
         """
-        if skillkit is None:
+        if toolkit is None:
             return ""
 
-        # Safely get skills list, handling various skillkit implementations
+        # Safely get tools list, handling various toolkit implementations
         try:
-            skills = skillkit.getSkills() if hasattr(skillkit, 'getSkills') else []
-            if not skills:
+            tools = toolkit.getTools() if hasattr(toolkit, 'getTools') else []
+            if not tools:
                 return ""
         except Exception:
             return ""
 
-        seen_skillkit_ids = set()
+        seen_toolkit_ids = set()
         prompts = []
 
-        for skill in skills:
-            owner = getattr(skill, 'owner_skillkit', None)
+        for tool in tools:
+            owner = getattr(tool, 'owner_toolkit', None)
             if owner is None:
                 continue
 
             owner_id = id(owner)
-            if owner_id in seen_skillkit_ids:
+            if owner_id in seen_toolkit_ids:
                 continue
-            seen_skillkit_ids.add(owner_id)
+            seen_toolkit_ids.add(owner_id)
 
             if hasattr(owner, 'get_metadata_prompt'):
                 try:
@@ -547,59 +547,59 @@ class Skillkit:
         return "\n\n".join(prompts)
 
     def isEmpty(self) -> bool:
-        return len(self.getSkills()) == 0
+        return len(self.getTools()) == 0
 
     def isQueryAsArg(self) -> bool:
         return self.queryAsArg
 
     def _logAndCreateRecord(
-        self, skillName: str, kwargs: dict, skill: SkillFunction, result: Any
-    ) -> SkillExecRecord:
-        """Log execution result and create SkillExecRecord"""
+        self, toolName: str, kwargs: dict, tool: ToolFunction, result: Any
+    ) -> ToolExecRecord:
+        """Log execution result and create ToolExecRecord"""
         if result is None:
-            raise ValueError(f"funcCall func[{skillName}] result[{result}]")
+            raise ValueError(f"funcCall func[{toolName}] result[{result}]")
 
-        logger.info(f"funcCall func[{skillName}] result[{str(result)[:MaxLenLog]}]")
-        return SkillExecRecord((skillName, kwargs), skill, result)
+        logger.info(f"funcCall func[{toolName}] result[{str(result)[:MaxLenLog]}]")
+        return ToolExecRecord((toolName, kwargs), tool, result)
 
-    def exec(self, skillName: str, **kwargs) -> SkillExecRecord:
-        skill = self.getSkill(skillName)
-        if skill is None:
-            raise ValueError(f"skill[{skillName}] not found")
+    def exec(self, toolName: str, **kwargs) -> ToolExecRecord:
+        tool = self.getTool(toolName)
+        if tool is None:
+            raise ValueError(f"tool[{toolName}] not found")
 
-        result = self.run(skill, **kwargs)
-        return self._logAndCreateRecord(skillName, kwargs, skill, result)
+        result = self.run(tool, **kwargs)
+        return self._logAndCreateRecord(toolName, kwargs, tool, result)
 
-    async def aexec(self, skillName: str, **kwargs) -> SkillExecRecord:
+    async def aexec(self, toolName: str, **kwargs) -> ToolExecRecord:
         """
-        Execute a skill by name (async version)
+        Execute a tool by name (async version)
 
         Args:
-            skillName: Name of the skill to execute
-            **kwargs: Arguments to pass to the skill
+            toolName: Name of the tool to execute
+            **kwargs: Arguments to pass to the tool
 
         Returns:
-            SkillExecRecord containing execution results
+            ToolExecRecord containing execution results
         """
-        skill = self.getSkill(skillName)
-        if skill is None:
-            raise ValueError(f"skill[{skillName}] not found")
+        tool = self.getTool(toolName)
+        if tool is None:
+            raise ValueError(f"tool[{toolName}] not found")
 
         # Execute the function directly for better performance
-        if not hasattr(skill, "func"):
+        if not hasattr(tool, "func"):
             raise ValueError(
-                f"Expected SkillFunction object with 'func' attribute, got {type(skill)}"
+                f"Expected ToolFunction object with 'func' attribute, got {type(tool)}"
             )
 
-        if inspect.iscoroutinefunction(skill.func):
-            result = await skill.func(**kwargs)
+        if inspect.iscoroutinefunction(tool.func):
+            result = await tool.func(**kwargs)
         else:
-            result = skill.func(**kwargs)
+            result = tool.func(**kwargs)
 
-        return self._logAndCreateRecord(skillName, kwargs, skill, result)
+        return self._logAndCreateRecord(toolName, kwargs, tool, result)
 
     @staticmethod
-    def run(func: SkillFunction, **kwargs):
+    def run(func: ToolFunction, **kwargs):
         # Check if the function is async and handle accordingly
         if inspect.iscoroutinefunction(func.func):
             # Handle async function in sync context
@@ -608,7 +608,7 @@ class Skillkit:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     # If we're already in an event loop, we need to handle this specially
-                    # This is typically for MCP skills that need to run in event loop context
+                    # This is typically for MCP tools that need to run in event loop context
 
                     # Create a task and wait for it using Future
                     future = asyncio.Future()
@@ -638,14 +638,14 @@ class Skillkit:
                         if time.time() - start_time > timeout:
                             task.cancel()
                             raise asyncio.TimeoutError(
-                                f"Async skill function timeout after {timeout}s"
+                                f"Async tool function timeout after {timeout}s"
                             )
                         time.sleep(0.01)  # Small sleep to avoid busy waiting
 
                     # Get the result
                     if future.cancelled():
                         raise asyncio.CancelledError(
-                            "Async skill function was cancelled"
+                            "Async tool function was cancelled"
                         )
                     elif future.exception():
                         raise future.exception()  # type: ignore
@@ -661,20 +661,20 @@ class Skillkit:
             return func.func(**kwargs)
 
     @staticmethod
-    async def arun(skill: SkillFunction, skill_params: Optional[dict] = None, **kwargs):
+    async def arun(tool: ToolFunction, tool_params: Optional[dict] = None, **kwargs):
         """
-        Execute a SkillFunction skill and yield results as an async generator
+        Execute a ToolFunction tool and yield results as an async generator
 
         Args:
-            skill: SkillFunction object to execute
+            tool: ToolFunction object to execute
             **kwargs: Arguments to pass to the function
 
         Yields:
             Execution results from the function
         """
-        if not hasattr(skill, "func"):
+        if not hasattr(tool, "func"):
             raise ValueError(
-                f"Expected SkillFunction object with 'func' attribute, got {type(skill)}"
+                f"Expected ToolFunction object with 'func' attribute, got {type(tool)}"
             )
 
         # Helper to check interrupt from kwargs
@@ -687,24 +687,24 @@ class Skillkit:
 
         check_interrupt()
 
-        merged_params = {**skill_params} if skill_params else {}
+        merged_params = {**tool_params} if tool_params else {}
         merged_params.update(kwargs)
 
-        if inspect.isasyncgenfunction(skill.func):
+        if inspect.isasyncgenfunction(tool.func):
             # For async generator functions, yield each result
-            async for result in skill.func(**merged_params):
+            async for result in tool.func(**merged_params):
                 check_interrupt()
                 yield result
 
-        elif inspect.iscoroutinefunction(skill.func):
+        elif inspect.iscoroutinefunction(tool.func):
             # For regular async functions, await and yield single result
-            result = await skill.func(**merged_params)
+            result = await tool.func(**merged_params)
             check_interrupt()
             yield result
         else:
-            # Sync skill functions typically access the Context object which is
+            # Sync tool functions typically access the Context object which is
             # NOT thread-safe, so we call them directly in the event-loop thread
             # instead of offloading to a thread-pool executor.
-            result = skill.func(**merged_params)
+            result = tool.func(**merged_params)
             check_interrupt()
             yield result

@@ -432,20 +432,20 @@ class OpenAIFunction:
         self.openai_tool_schema["function"]["parameters"]["properties"] = value
 
 
-class SkillFunction(OpenAIFunction):
+class ToolFunction(OpenAIFunction):
     def __init__(
         self,
         func: Callable,
         openai_tool_schema: Optional[Dict[str, Any]] = None,
         block_as_parameter: Optional[Tuple[str, str]] = None,
         result_process_strategies: Optional[List[Dict[str, str]]] = None,
-        owner_skillkit: Optional[
+        owner_toolkit: Optional[
             Any
-        ] = None,  # Skillkit object (set by Skillkit._bindOwnerToSkills)
+        ] = None,  # Toolkit object (set by Toolkit._bindOwnerToTools)
     ):
         super().__init__(func, openai_tool_schema)
 
-        self.owner_skillkit = owner_skillkit
+        self.owner_toolkit = owner_toolkit
 
         self.block_as_parameter = block_as_parameter
         """Strategy for handling tool call results
@@ -468,24 +468,24 @@ class SkillFunction(OpenAIFunction):
 
     @property
     def owner_name(self) -> Optional[str]:
-        """Get the owner skillkit name.
+        """Get the owner toolkit name.
 
-        Returns the skillkit name via getName() method.
+        Returns the toolkit name via getName() method.
         Returns None if no owner is set.
         """
-        if self.owner_skillkit is None:
+        if self.owner_toolkit is None:
             return None
-        if hasattr(self.owner_skillkit, "getName"):
-            return self.owner_skillkit.getName()
+        if hasattr(self.owner_toolkit, "getName"):
+            return self.owner_toolkit.getName()
         return None
 
-    def get_owner_skillkit(self) -> Optional[Any]:
-        """Get the owner skillkit object."""
-        return self.owner_skillkit
+    def get_owner_toolkit(self) -> Optional[Any]:
+        """Get the owner toolkit object."""
+        return self.owner_toolkit
 
-    def set_owner_skillkit(self, owner_skillkit: Optional[Any]) -> None:
-        """Set the owner skillkit object."""
-        self.owner_skillkit = owner_skillkit
+    def set_owner_toolkit(self, owner_toolkit: Optional[Any]) -> None:
+        """Set the owner toolkit object."""
+        self.owner_toolkit = owner_toolkit
 
     def get_block_parameter_info(self):
         return self.block_as_parameter
@@ -509,7 +509,7 @@ class SkillFunction(OpenAIFunction):
         return None
 
 
-class DynamicAPISkillFunction(SkillFunction):
+class DynamicAPIToolFunction(ToolFunction):
     """
     Initialize dynamic API tool
 
@@ -521,8 +521,8 @@ class DynamicAPISkillFunction(SkillFunction):
         original_schema: Original openapi schema information
         fixed_params: Fixed parameters dictionary
         headers: HTTP tool request headers dictionary (e.g., authentication info: x-account-type, x-account-id)
-        result_process_strategies: Result processing strategies (optional), inherited from SkillFunction
-        owner_skillkit: Owner skillkit (optional), inherited from SkillFunction
+        result_process_strategies: Result processing strategies (optional), inherited from ToolFunction
+        owner_toolkit: Owner toolkit (optional), inherited from ToolFunction
     """
 
     def __init__(
@@ -535,7 +535,7 @@ class DynamicAPISkillFunction(SkillFunction):
         fixed_params: Optional[Dict[str, str]] = None,
         headers: Optional[Dict[str, str]] = None,
         result_process_strategies: Optional[List[Dict[str, str]]] = None,
-        owner_skillkit: Optional[Any] = None,
+        owner_toolkit: Optional[Any] = None,
     ):
         # Build OpenAI tool schema
         openai_tool_schema = {
@@ -554,7 +554,7 @@ class DynamicAPISkillFunction(SkillFunction):
         self.headers = headers or {}
 
         # Create wrapper function that calls arun_stream
-        # This ensures Skillkit correctly executes arun_stream when calling self.func
+        # This ensures Toolkit correctly executes arun_stream when calling self.func
         async def wrapper_func(**kwargs):
             """Wrapper function that calls arun_stream"""
             async for result in self.arun_stream(**kwargs):
@@ -565,7 +565,7 @@ class DynamicAPISkillFunction(SkillFunction):
             func=wrapper_func,
             openai_tool_schema=openai_tool_schema,
             result_process_strategies=result_process_strategies,
-            owner_skillkit=owner_skillkit,
+            owner_toolkit=owner_toolkit,
         )
 
     async def arun_stream(self, **kwargs):
