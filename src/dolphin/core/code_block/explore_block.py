@@ -1424,7 +1424,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             True if duplicate limit exceeded, False otherwise
         """
         deduplicator = self.strategy.get_deduplicator()
-        if not hasattr(deduplicator, 'skillcalls') or not deduplicator.toolcalls:
+        if not hasattr(deduplicator, 'toolcalls') or not deduplicator.toolcalls:
             return False
 
         # Ignore polling-style tools
