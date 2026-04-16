@@ -61,8 +61,8 @@ class GlobalToolkits:
         enabled_system_functions = self._get_enabled_system_functions()
         # Decide how to load system functions based on the value of enabled_system_functions
         system_functions = SystemFunctionsToolkit(enabled_system_functions)
-        for skill in system_functions.getSkills():
-            self.installedToolSet.addSkill(skill)
+        for tool in system_functions.getTools():
+            self.installedToolSet.addTool(tool)
 
     def _loadToolkitsFromEntryPoints(self) -> bool:
         """
@@ -129,7 +129,7 @@ class GlobalToolkits:
 
                         # Add toolkit to the installed toolset
                         # This tracks the toolkit for metadata aggregation
-                        self.installedToolSet.addSkillkit(toolkit_instance)
+                        self.installedToolSet.addToolkit(toolkit_instance)
 
                         loaded_count += 1
                         logger.debug(
@@ -203,7 +203,7 @@ class GlobalToolkits:
                     toolkit_instance.setGlobalConfig(self.globalConfig)
 
                 # Add to installed toolset
-                self.installedToolSet.addSkillkit(toolkit_instance)
+                self.installedToolSet.addToolkit(toolkit_instance)
 
                 logger.debug(f"Loaded built-in toolkit: {toolkit_name}")
             except Exception as e:
@@ -251,11 +251,11 @@ class GlobalToolkits:
             toolkit.setGlobalConfig(self.globalConfig)
 
             # Get skills and add to installed tool set
-            skills = toolkit.getSkills()
-            for skill in skills:
-                self.installedToolSet.addSkill(skill)
+            tools = toolkit.getTools()
+            for tool in tools:
+                self.installedToolSet.addTool(tool)
 
-            logger.debug(f"Loaded MCP toolkit: {len(skills)} skills")
+            logger.debug(f"Loaded MCP toolkit: {len(tools)} tools")
 
         except ImportError as e:
             logger.warning(f"Failed to import MCP components: {str(e)}")
@@ -540,7 +540,7 @@ class GlobalToolkits:
 
                     # Add toolkit to the installed toolset
                     # This tracks the toolkit for metadata aggregation
-                    self.installedToolSet.addSkillkit(toolkit_instance)
+                    self.installedToolSet.addToolkit(toolkit_instance)
 
                     logger.debug(
                         f"Loaded {toolkitType} toolkit: {moduleName} from {filePath}"
@@ -583,8 +583,8 @@ class GlobalToolkits:
         agentToolkit = AgentToolkit(agent, agentName)
 
         # Add agent tools to the agent toolset
-        for skill in agentToolkit.getSkills():
-            self.agentToolSet.addSkill(skill)
+        for tool in agentToolkit.getTools():
+            self.agentToolSet.addTool(tool)
 
         self._syncAllTools()
 
@@ -615,8 +615,8 @@ class GlobalToolkits:
         self.agentToolSet = ToolSet()
         for agentName, agent in self.agentTools.items():
             agentToolkit = AgentToolkit(agent, agentName)
-            for skill in agentToolkit.getSkills():
-                self.agentToolSet.addSkill(skill)
+            for tool in agentToolkit.getTools():
+                self.agentToolSet.addTool(tool)
 
     def clearAgentTools(self):
         """
@@ -649,17 +649,17 @@ class GlobalToolkits:
         Sync all tools (installed + agent tools) as a combined toolset.
 
         Note: Metadata prompt is not copied here. It is dynamically collected
-        via skill.owner_skillkit in ExploreStrategy._collect_metadata_prompt().
+        via tool.owner_toolkit in ExploreStrategy._collect_metadata_prompt().
         """
         self.allTools = ToolSet()
 
-        # Add installed tools (owner_skillkit is already bound)
-        for skill in self.installedToolSet.getSkills():
-            self.allTools.addSkill(skill)
+        # Add installed tools (owner_toolkit is already bound)
+        for tool in self.installedToolSet.getTools():
+            self.allTools.addTool(tool)
 
         # Add agent tools
-        for skill in self.agentToolSet.getSkills():
-            self.allTools.addSkill(skill)
+        for tool in self.agentToolSet.getTools():
+            self.allTools.addTool(tool)
 
     def getAllTools(self) -> ToolSet:
         """
@@ -677,7 +677,7 @@ class GlobalToolkits:
         Returns:
             List of all tool names
         """
-        return self.getAllTools().getSkillNames()
+        return self.getAllTools().getToolNames()
 
     def hasTool(self, toolName: str) -> bool:
         """
@@ -689,7 +689,7 @@ class GlobalToolkits:
         Returns:
             True if tool exists, False otherwise
         """
-        return self.getAllTools().hasSkill(toolName)
+        return self.getAllTools().hasTool(toolName)
 
     def getTool(self, toolName: str):
         """
@@ -701,7 +701,7 @@ class GlobalToolkits:
         Returns:
             ToolFunction tool or None if not found
         """
-        return self.getAllTools().getSkill(toolName)
+        return self.getAllTools().getTool(toolName)
 
     def getAgent(self, agentName: str) -> Optional[BaseAgent]:
         """
@@ -743,4 +743,4 @@ class GlobalToolkits:
         Returns:
             Description string
         """
-        return f"GlobalToolkits(installed={len(self.installedToolSet.getSkills())}, agents={len(self.agentTools)})"
+        return f"GlobalToolkits(installed={len(self.installedToolSet.getTools())}, agents={len(self.agentTools)})"

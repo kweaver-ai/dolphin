@@ -1656,7 +1656,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             return
 
         # Resolve skills to a list of ToolFunction objects
-        if hasattr(self.skills, 'getSkills'):
+        if hasattr(self.skills, 'getTools'):
             skill_list = self.skills.getTools()
         elif isinstance(self.skills, list) and self.skills and isinstance(self.skills[0], str):
             current_skillkit = self.context.get_skillkit()
