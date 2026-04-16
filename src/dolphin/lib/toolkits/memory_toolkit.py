@@ -4,8 +4,8 @@ import time
 import re
 from typing import Dict, List, Optional, Tuple, Any
 
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.lib.memory.sandbox import MemorySandbox
 
 
@@ -370,7 +370,7 @@ class MemoryStore:
 _GLOBAL_STORE = MemoryStore()
 
 
-class MemorySkillkit(Skillkit):
+class MemoryToolkit(Toolkit):
     """In-memory key-value store per session with hierarchical paths and intelligent string matching.
 
         Data structure:
@@ -381,7 +381,7 @@ class MemorySkillkit(Skillkit):
     """
 
     def getName(self) -> str:
-        return "memory_skillkit"
+        return "memory_toolkit"
 
     # -----------------------------
     # Private helpers
@@ -635,16 +635,16 @@ class MemorySkillkit(Skillkit):
     # Skill exports
     # -----------------------------
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         return [
-            SkillFunction(self._mem_set),
-            SkillFunction(self._mem_set_dict),
-            SkillFunction(self._mem_get),
-            SkillFunction(self._mem_grep),
-            SkillFunction(self._mem_view),
-            SkillFunction(self._mem_load),
-            SkillFunction(self._mem_save),
-            SkillFunction(self._mem_remove),
-            SkillFunction(self._mem_expire),
-            SkillFunction(self._mem_stats),
+            ToolFunction(self._mem_set),
+            ToolFunction(self._mem_set_dict),
+            ToolFunction(self._mem_get),
+            ToolFunction(self._mem_grep),
+            ToolFunction(self._mem_view),
+            ToolFunction(self._mem_load),
+            ToolFunction(self._mem_save),
+            ToolFunction(self._mem_remove),
+            ToolFunction(self._mem_expire),
+            ToolFunction(self._mem_stats),
         ]

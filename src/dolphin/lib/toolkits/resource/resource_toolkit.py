@@ -1,6 +1,6 @@
-"""ResourceSkillkit - Claude Skill format support for Dolphin.
+"""ResourceToolkit - Claude Skill format support for Dolphin.
 
-This module implements ResourceSkillkit, a Skillkit type that supports
+This module implements ResourceToolkit, a Toolkit type that supports
 resource/guidance skills in Claude Skill format (SKILL.md).
 
 Key features:
@@ -16,15 +16,15 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from dolphin.core.common.constants import PIN_MARKER
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.core.logging.logger import get_logger
 
-from .models.skill_meta import SkillMeta, SkillContent
-from .models.skill_config import ResourceSkillConfig
-from .skill_loader import SkillLoader, truncate_content
-from .skill_cache import SkillMetaCache, SkillContentCache
-from .skill_validator import (
+from .models.tool_meta import SkillMeta, SkillContent
+from .models.tool_config import ResourceSkillConfig
+from .tool_loader import SkillLoader, truncate_content
+from .tool_cache import SkillMetaCache, SkillContentCache
+from .tool_validator import (
     validate_skill_name,
     validate_skill_file_path,
 )
@@ -44,15 +44,15 @@ from dolphin.sdk.skill.skill_contracts import (
     SKILL_EXECUTE_SCRIPT_OPENAI_SCHEMA,
 )
 
-logger = get_logger("resource_skillkit")
+logger = get_logger("resource_toolkit")
 
 
-class ResourceSkillkit(Skillkit):
-    """ResourceSkillkit - Support for Claude Skill format resources.
+class ResourceToolkit(Toolkit):
+    """ResourceToolkit - Support for Claude Skill format resources.
 
-    This Skillkit type provides support for resource/guidance skills
+    This Toolkit type provides support for resource/guidance skills
     that teach LLMs how to solve complex problems. Unlike execution
-    skillkits (SQL, Python, MCP), ResourceSkillkit loads knowledge
+    toolkits (SQL, Python, MCP), ResourceToolkit loads knowledge
     resources in Claude Skill format (SKILL.md).
 
     Progressive Loading:
@@ -70,19 +70,19 @@ class ResourceSkillkit(Skillkit):
         config = ResourceSkillConfig(
             directories=["./skills", "~/.dolphin/skills"]
         )
-        skillkit = ResourceSkillkit(config)
-        skillkit.initialize()
+        toolkit = ResourceToolkit(config)
+        toolkit.initialize()
 
         # Get metadata prompt for system injection
-        metadata_prompt = skillkit.getMetadataPrompt()
+        metadata_prompt = toolkit.getMetadataPrompt()
 
         # Load full skill content (returns tool response)
-        content = skillkit.load_skill("data-pipeline")
+        content = toolkit.load_skill("data-pipeline")
         ```
     """
 
     def __init__(self, config: Optional[ResourceSkillConfig] = None):
-        """Initialize ResourceSkillkit.
+        """Initialize ResourceToolkit.
 
         Args:
             config: Optional configuration, uses defaults if not provided
@@ -137,21 +137,21 @@ class ResourceSkillkit(Skillkit):
             self._base_path = Path(base_dir)
 
     def _ensure_initialized(self) -> None:
-        """Ensure the skillkit has scanned and loaded Level 1 metadata."""
+        """Ensure the toolkit has scanned and loaded Level 1 metadata."""
         if self._initialized:
             return
         self.initialize(self._base_path)
 
     def getName(self) -> str:
-        """Get the name of this skillkit.
+        """Get the name of this toolkit.
 
         Returns:
-            The skillkit name
+            The toolkit name
         """
-        return "resource_skillkit"
+        return "resource_toolkit"
 
     def initialize(self, base_path: Optional[Path] = None) -> None:
-        """Initialize the skillkit by scanning for available skills.
+        """Initialize the toolkit by scanning for available skills.
 
         This scans all configured directories and loads Level 1 metadata
         for each valid skill found.
@@ -164,7 +164,7 @@ class ResourceSkillkit(Skillkit):
         self._meta_cache.clear()
 
         if not self.config.enabled:
-            logger.info("ResourceSkillkit is disabled")
+            logger.info("ResourceToolkit is disabled")
             self._initialized = True
             return
 
@@ -191,11 +191,11 @@ class ResourceSkillkit(Skillkit):
                 self._meta_cache.delete(k)
             logger.info(f"Applied exclude filter: {len(self._skills_meta)} skills remaining")
 
-        logger.info(f"Initialized ResourceSkillkit with {len(self._skills_meta)} skills")
+        logger.info(f"Initialized ResourceToolkit with {len(self._skills_meta)} skills")
         self._initialized = True
 
-    def _createSkills(self) -> List[SkillFunction]:
-        """Create the list of skill functions provided by this skillkit.
+    def _createTools(self) -> List[ToolFunction]:
+        """Create the list of tool functions provided by this toolkit.
 
         Note: _list_resource_skills is NOT exposed as a tool because
         Level 1 metadata is auto-injected into system prompt via
@@ -209,22 +209,22 @@ class ResourceSkillkit(Skillkit):
         - builtin_skill_execute_script
 
         Returns:
-            List of SkillFunction objects for Level 2/3 loading
+            List of ToolFunction objects for Level 2/3 loading
         """
         return [
             # Legacy interface (kept for backwards compatibility)
-            SkillFunction(self._load_resource_skill),
-            SkillFunction(self._read_skill_asset),
+            ToolFunction(self._load_resource_skill),
+            ToolFunction(self._read_skill_asset),
             # Unified contract interface (local testing mode)
-            SkillFunction(
+            ToolFunction(
                 self._builtin_skill_load_handler,
                 openai_tool_schema=SKILL_LOAD_OPENAI_SCHEMA,
             ),
-            SkillFunction(
+            ToolFunction(
                 self._builtin_skill_read_file_handler,
                 openai_tool_schema=SKILL_READ_FILE_OPENAI_SCHEMA,
             ),
-            SkillFunction(
+            ToolFunction(
                 self._builtin_skill_execute_script_handler,
                 openai_tool_schema=SKILL_EXECUTE_SCRIPT_OPENAI_SCHEMA,
             ),
@@ -237,7 +237,7 @@ class ResourceSkillkit(Skillkit):
         injected into the system prompt. The content is stable and
         sorted alphabetically to ensure Prefix Cache compatibility.
 
-        This overrides the base Skillkit.get_metadata_prompt() method.
+        This overrides the base Toolkit.get_metadata_prompt() method.
 
         Returns:
             Markdown-formatted metadata prompt with available resource skills.
@@ -498,7 +498,7 @@ class ResourceSkillkit(Skillkit):
         return len(self._skills_meta)
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get statistics about the skillkit.
+        """Get statistics about the toolkit.
 
         Returns:
             Dictionary with statistics

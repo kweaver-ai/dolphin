@@ -1,18 +1,18 @@
 from typing import List, Optional
 import re
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 
 from dolphin.lib.ontology.ontology_context import OntologyContext
 
 
-class SQLSkillkit(Skillkit):
+class SQLToolkit(Toolkit):
     def __init__(self, ontologyContext: Optional[OntologyContext] = None):
         super().__init__()
         self.ontologyContext = ontologyContext
 
     def getName(self) -> str:
-        return "sql_skillkit"
+        return "sql_toolkit"
 
     def setGlobalConfig(self, globalConfig):
         super().setGlobalConfig(globalConfig)
@@ -265,10 +265,10 @@ class SQLSkillkit(Skillkit):
         else:
             return f"执行SQL语句failed: {error_str}"
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         return [
-            SkillFunction(self.executeSQL, block_as_parameter=("sql", "sql")),
+            ToolFunction(self.executeSQL, block_as_parameter=("sql", "sql")),
         ]
 
-    def getTools(self) -> List[SkillFunction]:
-        return self.getSkills()  # Uses base class getSkills() with caching
+    def getTools(self) -> List[ToolFunction]:
+        return self.getTools()  # Uses base class getTools() with caching

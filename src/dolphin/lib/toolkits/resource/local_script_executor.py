@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from dolphin.core.logging.logger import get_logger
-from .skill_validator import (
+from .tool_validator import (
     validate_entry_shell,
     get_script_path_from_entry_shell,
     resolve_safe_path,

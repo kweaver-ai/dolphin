@@ -1,9 +1,9 @@
 from typing import List
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 
 
-class NoopSkillkit(Skillkit):
+class NoopToolkit(Toolkit):
     """
     just for test
     """
@@ -13,7 +13,7 @@ class NoopSkillkit(Skillkit):
         self.globalContext = None
 
     def getName(self) -> str:
-        return " noop_skillkit"
+        return " noop_toolkit"
 
     def noop_calling(self, **kwargs) -> str:
         """Do nothing, for testing
@@ -27,5 +27,5 @@ class NoopSkillkit(Skillkit):
         print("do nothing")
         return "do nothing"
 
-    def _createSkills(self) -> List[SkillFunction]:
-        return [SkillFunction(self.noop_calling)]
+    def _createTools(self) -> List[ToolFunction]:
+        return [ToolFunction(self.noop_calling)]

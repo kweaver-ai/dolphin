@@ -1,6 +1,6 @@
-"""Configuration models for ResourceSkillkit.
+"""Configuration models for ResourceToolkit.
 
-This module contains configuration dataclasses for ResourceSkillkit settings.
+This module contains configuration dataclasses for ResourceToolkit settings.
 """
 
 from dataclasses import dataclass, field
@@ -23,10 +23,10 @@ _DEFAULT_ALLOWED_EXTENSIONS = [
 
 @dataclass
 class ResourceSkillConfig:
-    """Configuration for ResourceSkillkit.
+    """Configuration for ResourceToolkit.
 
     Attributes:
-        enabled: Whether ResourceSkillkit is enabled
+        enabled: Whether ResourceToolkit is enabled
         directories: List of directories to scan for skills (in priority order)
         max_skill_size_mb: Maximum size of a single skill package in MB
         max_content_tokens: Maximum tokens to return in a single load

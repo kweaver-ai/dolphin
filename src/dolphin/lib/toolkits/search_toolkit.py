@@ -3,8 +3,8 @@ from typing import List
 import uuid
 
 import requests
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.core.utils.cache_kv import GlobalCacheKVCenter
 
 import time
@@ -12,10 +12,10 @@ from requests.exceptions import RequestException
 from dolphin.core.common.constants import SEARCH_TIMEOUT, SEARCH_RETRY_COUNT
 from dolphin.core.logging.logger import get_logger
 
-logger = get_logger("skill")
+logger = get_logger("tool")
 
 
-class SearchSkillkit(Skillkit):
+class SearchToolkit(Toolkit):
     MAX_KEYWORDS = 5
 
     def __init__(self):
@@ -23,7 +23,7 @@ class SearchSkillkit(Skillkit):
         self.cacheMgr = None
 
     def getName(self) -> str:
-        return "search_skillkit"
+        return "search_toolkit"
 
     def setGlobalConfig(self, globalConfig):
         """Set global context"""
@@ -150,9 +150,9 @@ class SearchSkillkit(Skillkit):
                 [{"error": f"zhipu search failed: {str(e)}"}], ensure_ascii=False
             )
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         return [
-            SkillFunction(self._search),
+            ToolFunction(self._search),
         ]
 
     def _query_preprocess(self, query: str) -> str:

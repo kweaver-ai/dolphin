@@ -1,4 +1,4 @@
-"""Validation utilities for ResourceSkillkit.
+"""Validation utilities for ResourceToolkit.
 
 This module provides validation for skill packages, including:
 - SKILL.md format validation
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Set, Union
 from dataclasses import dataclass
 
-from .models.skill_config import ResourceSkillConfig
+from .models.tool_config import ResourceSkillConfig
 
 
 @dataclass

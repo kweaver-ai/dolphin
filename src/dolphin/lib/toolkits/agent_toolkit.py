@@ -1,23 +1,23 @@
 from typing import List, Any
 
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skill_function import SkillFunction
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.tool_function import ToolFunction
 from dolphin.core.agent.base_agent import BaseAgent
 
 
-class AgentSkillKit(Skillkit):
+class AgentToolkit(Toolkit):
     """
-    AgentSkillKit acts as a bridge between Agent and Skill system
-    Converts a single Agent into a callable skill
+    AgentToolkit acts as a bridge between Agent and Tool system
+    Converts a single Agent into a callable tool
     """
 
     def __init__(self, agent: BaseAgent, agentName: str = None):
         """
-        Initialize AgentSkillKit with an agent
+        Initialize AgentToolkit with an agent
 
         Args:
-            agent (BaseAgent): BaseAgent instance to wrap as a skill
-            agentName (str, optional): Name for the agent skill. If None, uses agent.get_name()
+            agent (BaseAgent): BaseAgent instance to wrap as a tool
+            agentName (str, optional): Name for the agent tool. If None, uses agent.get_name()
         """
         super().__init__()
         self.agent = agent
@@ -25,13 +25,13 @@ class AgentSkillKit(Skillkit):
         self._context = None
 
         # Create the agent execution functions
-        self._createAgentSkills()
+        self._createAgentTools()
 
     def set_context(self, context):
         self._context = context
         self.agent.set_context(context)
 
-    def _createAgentSkills(self):
+    def _createAgentTools(self):
         """
         Create OpenAI functions for agent execution
         """
@@ -113,26 +113,26 @@ class AgentSkillKit(Skillkit):
 
     def getName(self) -> str:
         """
-        Get the skillkit name
+        Get the toolkit name
 
         Returns:
-            Skillkit name
+            Toolkit name
         """
-        return f"agent_skillkit_{self.agentName}"
+        return f"agent_toolkit_{self.agentName}"
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         """
-        Create the skills (OpenAI functions) for this agent
+        Create the tools (OpenAI functions) for this agent
 
         Returns:
-            List of SkillFunction objects
+            List of ToolFunction objects
         """
-        skills = []
+        tools = []
 
         # Add async execution function (with arun_ prefix for backward compatibility)
-        skills.append(SkillFunction(self.arunAgentFunc))
+        tools.append(ToolFunction(self.arunAgentFunc))
 
-        return skills
+        return tools
 
     def getAgent(self) -> BaseAgent:
         """
@@ -154,9 +154,9 @@ class AgentSkillKit(Skillkit):
 
     def __str__(self) -> str:
         """
-        String representation of the AgentSkillKit
+        String representation of the AgentToolkit
 
         Returns:
             Description string
         """
-        return f"AgentSkillKit(agent={self.agentName})"
+        return f"AgentToolkit(agent={self.agentName})"

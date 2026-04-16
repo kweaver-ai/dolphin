@@ -1,4 +1,4 @@
-"""Data models for ResourceSkillkit.
+"""Data models for ResourceToolkit.
 
 This module contains the SkillMeta and SkillContent dataclasses for
 representing skill metadata (Level 1) and full content (Level 2).

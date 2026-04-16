@@ -10,7 +10,7 @@ from dolphin.core.logging.logger import get_logger
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-logger = get_logger("skill.mcp_skillkit")
+logger = get_logger("tool.mcp_toolkit")
 
 
 @dataclass

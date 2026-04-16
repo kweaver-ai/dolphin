@@ -1,11 +1,11 @@
 from typing import List, Optional
 
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.lib.ontology.ontology_context import OntologyContext
 
 
-class OntologySkillkit(Skillkit):
+class OntologyToolkit(Toolkit):
     def __init__(self, ontologyContext: Optional[OntologyContext] = None):
         super().__init__()
         self.ontologyContext = ontologyContext
@@ -21,7 +21,7 @@ class OntologySkillkit(Skillkit):
             )
 
     def getName(self) -> str:
-        return "ontology_skillkit"
+        return "ontology_toolkit"
 
     def getDesc(self) -> str:
         return "Ontology"
@@ -76,14 +76,14 @@ class OntologySkillkit(Skillkit):
         )
         return str(result)
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         return [
-            SkillFunction(self.getAllConcepts),
-            SkillFunction(self.getSampleData),
-            SkillFunction(self.getDataSourceSchemas),
-            SkillFunction(self.getDataSourcesFromConcepts),
+            ToolFunction(self.getAllConcepts),
+            ToolFunction(self.getSampleData),
+            ToolFunction(self.getDataSourceSchemas),
+            ToolFunction(self.getDataSourcesFromConcepts),
         ]
 
     # Add alias method to support getTools
-    def getTools(self) -> List[SkillFunction]:
-        return self.getSkills()
+    def getTools(self) -> List[ToolFunction]:
+        return self.getTools()

@@ -1,4 +1,4 @@
-"""SKILL.md loader for ResourceSkillkit.
+"""SKILL.md loader for ResourceToolkit.
 
 This module provides the SkillLoader class for loading and parsing
 SKILL.md files with support for the three-level progressive loading:
@@ -14,12 +14,12 @@ from typing import Optional, List, Tuple, Dict, Any
 
 import yaml
 
-from .models.skill_meta import SkillMeta, SkillContent
-from .models.skill_config import ResourceSkillConfig
-from .skill_validator import SkillValidator, ValidationResult, resolve_safe_path
+from .models.tool_meta import SkillMeta, SkillContent
+from .models.tool_config import ResourceSkillConfig
+from .tool_validator import SkillValidator, ValidationResult, resolve_safe_path
 from dolphin.core.logging.logger import get_logger
 
-logger = get_logger("resource_skillkit")
+logger = get_logger("resource_toolkit")
 
 
 class SkillLoaderError(Exception):
@@ -85,7 +85,7 @@ class SkillLoader:
                     if meta and meta.name not in skills:
                         # First occurrence wins (higher priority directory)
                         skills[meta.name] = meta
-                        logger.debug(f"Found skill: {meta.name} at {item}")
+                        logger.debug(f"Found tool: {meta.name} at {item}")
                 except Exception as e:
                     logger.warning(f"Failed to load skill from {item}: {e}")
 

@@ -1,17 +1,17 @@
 from typing import List, Dict, Optional
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 
 
-class CognitiveSkillkit(Skillkit):
-    # Use Skillkit's generic compressor, override default rules for this kit
+class CognitiveToolkit(Toolkit):
+    # Use Toolkit's generic compressor, override default rules for this kit
     DEFAULT_COMPRESS_RULES: Dict[str, Dict[str, List[str]]] = {
         "_cog_think": {"include": ["action"]},
         "_cog_gen_sql": {"include": ["sql_generation"]},
     }
 
     def getName(self) -> str:
-        return "cognitive_skillkit"
+        return "cognitive_toolkit"
 
     def _cog_think(self, reflection: str, plan: str, action: str, **kwargs) -> str:
         """
@@ -53,15 +53,15 @@ class CognitiveSkillkit(Skillkit):
             sql_generation: {sql_generation}
         """
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         return [
-            SkillFunction(self._cog_think),
-            SkillFunction(self._cog_gen_sql),
+            ToolFunction(self._cog_think),
+            ToolFunction(self._cog_gen_sql),
         ]
 
     @staticmethod
-    def is_cognitive_skill(skillname: str) -> bool:
-        return skillname.startswith("_cog_think") or skillname.startswith(
+    def is_cognitive_tool(toolname: str) -> bool:
+        return toolname.startswith("_cog_think") or toolname.startswith(
             "_cog_gen_sql"
         )
 
@@ -69,14 +69,14 @@ class CognitiveSkillkit(Skillkit):
     def compress_msg(
         message: str, rules: Optional[Dict[str, Dict[str, List[str]]]] = None
     ) -> str:
-        """Delegates to generic compressor in Skillkit, using this kit's default rules unless overridden."""
-        active_rules = rules or CognitiveSkillkit.DEFAULT_COMPRESS_RULES
-        # Reuse generic logic and regex-based scanning in base Skillkit
-        return Skillkit.compress_message_with_rules(
+        """Delegates to generic compressor in Toolkit, using this kit's default rules unless overridden."""
+        active_rules = rules or CognitiveToolkit.DEFAULT_COMPRESS_RULES
+        # Reuse generic logic and regex-based scanning in base Toolkit
+        return Toolkit.compress_message_with_rules(
             message, rules=active_rules, marker_prefix="=>#"
         )
 
     @staticmethod
     def set_compress_rules(rules: Dict[str, Dict[str, List[str]]]):
         """Set default compression rules for cognitive messages at runtime."""
-        CognitiveSkillkit.DEFAULT_COMPRESS_RULES = rules or {}
+        CognitiveToolkit.DEFAULT_COMPRESS_RULES = rules or {}

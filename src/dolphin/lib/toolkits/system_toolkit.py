@@ -8,8 +8,8 @@ import re
 import time
 from typing import Any, List, Union, Optional, Set
 
-from dolphin.core.skill.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
-from dolphin.core.skill.skillkit import SkillFunction, Skillkit
+from dolphin.core.tool.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
+from dolphin.core.tool.toolkit import ToolFunction, Toolkit
 
 """System function configuration mapping:
 
@@ -31,7 +31,7 @@ skill:
     - "system_functions._date"    # Or load specific functions
     - "system_functions._write_file"
     - "system_functions._read_file"
-    - "vm_skillkit"  # Other skills configured normally
+    - "vm_toolkit"  # Other tools configured normally
 
 Notes:
 - Function names include an underscore prefix (e.g., _date)
@@ -83,7 +83,7 @@ def _check_file_size(file_path: str) -> str | None:
     return None
 
 
-class SystemFunctionsSkillKit(Skillkit):
+class SystemFunctionsToolkit(Toolkit):
     _DEFAULT_CACHED_RESULT_LIMIT = 2000
     _MAX_CACHED_RESULT_LIMIT = 20000
     _MAX_REFERENCE_ID_CANDIDATES = 10
@@ -545,7 +545,7 @@ class SystemFunctionsSkillKit(Skillkit):
             limit = max_limit
             clamped = True
 
-        # Get context from props (injected by skill execution flow)
+        # Get context from props (injected by tool execution flow)
         props = kwargs.get("props", {})
         context = props.get("gvp", None)  # Note: context is passed as 'gvp' in skill_run()
         if context is None:
@@ -700,37 +700,37 @@ class SystemFunctionsSkillKit(Skillkit):
 
         return result
 
-    def _createSkills(self) -> List[SkillFunction]:
-        all_skills = [
-            SkillFunction(self._date),
-            SkillFunction(self._write_file),
-            SkillFunction(self._write_jsonl),
-            SkillFunction(self._read_file),
-            SkillFunction(self._read_folder),
-            SkillFunction(self._extract_code),
-            SkillFunction(self._grep),
-            SkillFunction(self._sleep),
-            SkillFunction(self._get_cached_result_detail),
+    def _createTools(self) -> List[ToolFunction]:
+        all_tools = [
+            ToolFunction(self._date),
+            ToolFunction(self._write_file),
+            ToolFunction(self._write_jsonl),
+            ToolFunction(self._read_file),
+            ToolFunction(self._read_folder),
+            ToolFunction(self._extract_code),
+            ToolFunction(self._grep),
+            ToolFunction(self._sleep),
+            ToolFunction(self._get_cached_result_detail),
         ]
 
-        # If no enable function is specified, return all skills (backward compatibility)
+        # If no enable function is specified, return all tools (backward compatibility)
         if self.enabled_functions is None:
-            return all_skills
+            return all_tools
 
-        # If wildcard "*" is in enabled_functions, return all skills
+        # If wildcard "*" is in enabled_functions, return all tools
         if "*" in self.enabled_functions:
-            return all_skills
+            return all_tools
 
-        # Filter enabled skills
-        enabled_skills = []
-        for skill in all_skills:
-            # Get the function name and convert it to a skill name (e.g., _date -> system_date)
-            function_name = skill.get_function_name()
+        # Filter enabled tools
+        enabled_tools = []
+        for tool in all_tools:
+            # Get the function name and convert it to a tool name (e.g., _date -> system_date)
+            function_name = tool.get_function_name()
             if function_name in self.enabled_functions:
-                enabled_skills.append(skill)
+                enabled_tools.append(tool)
 
-        return enabled_skills
+        return enabled_tools
 
 
 
-SystemFunctions = SystemFunctionsSkillKit()
+SystemFunctions = SystemFunctionsToolkit()

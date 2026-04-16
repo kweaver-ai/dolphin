@@ -1,19 +1,19 @@
 from typing import List
 
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.lib.vm.vm import VM
 from dolphin.lib.vm.python_session_manager import PythonSessionManager
 
 
-class VMSkillkit(Skillkit):
+class VMToolkit(Toolkit):
     def __init__(self):
         super().__init__()
         self.vm: VM = None
         self.session_manager = PythonSessionManager()
 
     def getName(self) -> str:
-        return "vm_skillkit"
+        return "vm_toolkit"
 
     def setVM(self, vm: VM):
         self.vm = vm
@@ -58,8 +58,8 @@ class VMSkillkit(Skillkit):
 
         return self.vm.execPython(cmd, **kwargs)
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         return [
-            SkillFunction(self._bash, block_as_parameter=("bash", "cmd")),
-            SkillFunction(self._python, block_as_parameter=("python", "cmd")),
+            ToolFunction(self._bash, block_as_parameter=("bash", "cmd")),
+            ToolFunction(self._python, block_as_parameter=("python", "cmd")),
         ]

@@ -5,9 +5,9 @@ import os
 import atexit
 from typing import List, Dict, Any
 from dolphin.core.logging.logger import console, get_logger
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.lib.skillkits.mcp_adapter import (
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.lib.toolkits.mcp_adapter import (
     MCPAdapter,
     MCPServerConfig,
     _connection_pool,
@@ -17,7 +17,7 @@ from dolphin.lib.skillkits.mcp_adapter import (
 # Thread-local storage for event loop reuse
 _thread_local = threading.local()
 
-logger = get_logger("skill.mcp_skillkit")
+logger = get_logger("tool.mcp_toolkit")
 
 
 def get_or_create_event_loop():
@@ -122,19 +122,19 @@ class GlobalThreadPoolManager:
 _global_thread_pool = GlobalThreadPoolManager()
 
 
-class MCPSkillkit(Skillkit):
-    """MCP Skill Suite - Connection Pool Fix Version"""
+class MCPToolkit(Toolkit):
+    """MCP Tool Suite - Connection Pool Fix Version"""
 
     # Class-level adapter cache to avoid repeated creation
     _adapter_cache: Dict[str, MCPAdapter] = {}
     _cache_lock = threading.RLock()  # Add thread lock to protect cache
-    _instances: List["MCPSkillkit"] = []  # Track all instances
+    _instances: List["MCPToolkit"] = []  # Track all instances
     _cleanup_registered = False
 
     def __init__(self):
-        """Initialize MCP skill suite"""
+        """Initialize MCP tool suite"""
         super().__init__()
-        self.skills_cache: List[SkillFunction] = []
+        self.tools_cache: List[ToolFunction] = []
         self.server_configs: Dict[str, MCPServerConfig] = {}
         self.initialized = False
 
@@ -183,7 +183,7 @@ class MCPSkillkit(Skillkit):
             logger.error(f"Error during cleanup: {e}")
 
     def getName(self) -> str:
-        return "mcp_skillkit"
+        return "mcp_toolkit"
 
     def setGlobalConfig(self, globalConfig):
         """Set global context"""
@@ -194,14 +194,14 @@ class MCPSkillkit(Skillkit):
             and globalConfig.mcp_config
             and globalConfig.mcp_config.enabled
         ):
-            self._initialize_mcp_skills()
+            self._initialize_mcp_tools()
 
-    def _initialize_mcp_skills(self):
-        """Initialize MCP skill"""
-        logger.debug("开始初始化MCP技能...")
+    def _initialize_mcp_tools(self):
+        """Initialize MCP tool"""
+        logger.debug("开始初始化MCP工具...")
         try:
             mcp_config = self.globalConfig.mcp_config
-            skill_config = self.globalConfig.skill_config
+            tool_config = self.globalConfig.tool_config
 
             logger.debug(f"发现 {len(mcp_config.servers)} 个服务器配置")
 
@@ -215,7 +215,7 @@ class MCPSkillkit(Skillkit):
                     continue
 
                 # Check whether this MCP server should be loaded
-                should_load = skill_config.should_load_mcp_server(server_config.name)
+                should_load = tool_config.should_load_mcp_server(server_config.name)
                 logger.debug(f"服务器 {server_config.name} 是否应该加载: {should_load}")
                 if not should_load:
                     logger.debug(
@@ -258,13 +258,13 @@ class MCPSkillkit(Skillkit):
 
             self.initialized = True
             logger.debug(
-                f"MCP skillkit initialized with {len(self.server_configs)} servers, {len(self.skills_cache)} skills"
+                f"MCP toolkit initialized with {len(self.server_configs)} servers, {len(self.tools_cache)} tools"
             )
 
         except Exception as e:
             import traceback
 
-            logger.error(f"Failed to initialize MCP skillkit: {e}")
+            logger.error(f"Failed to initialize MCP toolkit: {e}")
             logger.error(f"初始化failed完整错误: {traceback.format_exc()}")
 
     def _load_tools_for_server(self, server_config: MCPServerConfig):
@@ -289,24 +289,24 @@ class MCPSkillkit(Skillkit):
                 logger.warning(f"服务器 {server_config.name} 没有返回任何工具")
                 return
 
-            console(f"📝 MCP Skill registered: {server_config.name}")
+            console(f"📝 MCP Tool registered: {server_config.name}")
 
-            # Create skills for each tool
-            created_skills = 0
+            # Create tools for each tool
+            created_tools = 0
             for tool in tools:
                 try:
-                    skill_func, custom_schema = self._create_skill_function(
+                    tool_func, custom_schema = self._create_tool_function(
                         server_config.name, tool
                     )
-                    # Create SkillFunction with custom schema
-                    self.skills_cache.append(SkillFunction(skill_func, custom_schema))
+                    # Create ToolFunction with custom schema
+                    self.tools_cache.append(ToolFunction(tool_func, custom_schema))
                     logger.debug(f"Loaded tool: {tool['name']}")
-                    created_skills += 1
+                    created_tools += 1
                 except Exception as e:
-                    logger.error(f"创建技能failed {tool.get('name', 'unknown')}: {e}")
+                    logger.error(f"创建工具failed {tool.get('name', 'unknown')}: {e}")
 
             logger.debug(
-                f"successful加载 {created_skills}/{len(tools)} 个工具从服务器 {server_config.name}"
+                f"successful加载 {created_tools}/{len(tools)} 个工具从服务器 {server_config.name}"
             )
 
         except Exception as e:
@@ -375,14 +375,14 @@ class MCPSkillkit(Skillkit):
             logger.error(f"Error calling tool: {e}")
             raise
 
-    def _create_skill_function(self, server_name: str, tool: Dict[str, Any]):
-        """Create skill function - using cached adapter"""
+    def _create_tool_function(self, server_name: str, tool: Dict[str, Any]):
+        """Create tool function - using cached adapter"""
         tool_name = tool["name"]
         tool_description = tool["description"]
         tool_parameters = tool.get("parameters", {})
 
-        def skill_func(**kwargs) -> str:
-            """MCP Skill Function - Simplified Asynchronous Call Strategy
+        def tool_func(**kwargs) -> str:
+            """MCP Tool Function - Simplified Asynchronous Call Strategy
 
                         This function adopts a more robust approach to handling asynchronous calls, avoiding complex event loop management
             """
@@ -435,31 +435,31 @@ class MCPSkillkit(Skillkit):
                 return f"Error executing {server_name}.{tool_name}: {str(e)}"
 
         # Set function metadata
-        skill_func.__name__ = f"{server_name}_{tool_name}"
+        tool_func.__name__ = f"{server_name}_{tool_name}"
 
         # Generate detailed docstrings
         docstring = self._generate_detailed_docstring(tool_description, tool_parameters)
-        skill_func.__doc__ = docstring
+        tool_func.__doc__ = docstring
 
         # Create a custom OpenAI tool schema
         custom_schema = self._create_openai_tool_schema(
             server_name, tool_name, tool_description, tool_parameters
         )
 
-        return skill_func, custom_schema
+        return tool_func, custom_schema
 
-    def _createSkills(self) -> List[SkillFunction]:
-        """Create skill list from the cached MCP skills.
+    def _createTools(self) -> List[ToolFunction]:
+        """Create tool list from the cached MCP tools.
 
-        Note: This returns the skills_cache which is populated during initialization.
-        The base class will bind owner_skillkit to these skills.
+        Note: This returns the tools_cache which is populated during initialization.
+        The base class will bind owner_toolkit to these tools.
         """
-        return self.skills_cache
+        return self.tools_cache
 
     def shutdown(self):
         """Close and clean up resources - simplified version, avoiding complex asynchronous operations"""
         try:
-            logger.debug("Starting simplified MCP skillkit shutdown")
+            logger.debug("Starting simplified MCP toolkit shutdown")
 
             # Simplify cleanup logic to avoid deadlocks and complex asynchronous operations
             try:
@@ -486,7 +486,7 @@ class MCPSkillkit(Skillkit):
 
                 # Clean up other resources
                 self.server_configs.clear()
-                self.skills_cache.clear()
+                self.tools_cache.clear()
                 self.initialized = False
 
             except Exception as e:
@@ -507,7 +507,7 @@ class MCPSkillkit(Skillkit):
             except Exception as e:
                 logger.warning(f"Thread pool shutdown failed: {e}")
 
-            logger.debug("MCP skillkit shut down successfully")
+            logger.debug("MCP toolkit shut down successfully")
 
         except Exception as e:
             # Do not raise exceptions in shutdown, especially when called by atexit
@@ -554,7 +554,7 @@ class MCPSkillkit(Skillkit):
                     [c for c in self.server_configs.values() if c.enabled]
                 ),
                 "initialized": self.initialized,
-                "total_skills": len(self.skills_cache),
+                "total_tools": len(self.tools_cache),
                 "connection_pool_stats": {},
             }
 

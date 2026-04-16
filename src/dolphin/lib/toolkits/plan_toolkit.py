@@ -1,4 +1,4 @@
-"""Plan Skillkit for Unified Plan Architecture.
+"""Plan Toolkit for Unified Plan Architecture.
 
 This module provides task orchestration tools for plan mode.
 """
@@ -9,17 +9,17 @@ import time
 from typing import Any, Dict, List, Optional
 
 from dolphin.core.context.context import Context
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.core.task_registry import Task, TaskRegistry, TaskStatus, PlanExecMode
 from dolphin.core.logging.logger import get_logger
 
-logger = get_logger("plan_skillkit")
+logger = get_logger("plan_toolkit")
 
 _VAR_PLAN_OUTPUTS_AUTO_INJECTED_PREFIX = "_plan.outputs_auto_injected"
 
 
-class PlanSkillkit(Skillkit):
+class PlanToolkit(Toolkit):
     """Task orchestration tools (Plan).
 
     Principles:
@@ -34,7 +34,7 @@ class PlanSkillkit(Skillkit):
     EXCLUDED_SUBTASK_TOOLS = PLAN_ORCHESTRATION_TOOLS
 
     def __init__(self, context: Optional[Context] = None):
-        """Initialize PlanSkillkit.
+        """Initialize PlanToolkit.
 
         Args:
             context: Execution context (can be None, will be set via setContext)
@@ -44,7 +44,7 @@ class PlanSkillkit(Skillkit):
         # Note: running_tasks dict has been removed - all asyncio task handles
         # are now managed centrally in TaskRegistry.running_asyncio_tasks
         self.max_concurrency: int = 5
-        self._parent_skills: Optional[List[str]] = None  # Cache parent Agent's skills config
+        self._parent_tools: Optional[List[str]] = None  # Cache parent Agent's tools config
         self._last_poll_status: Optional[str] = None
         self._last_poll_time: float = 0
 
@@ -62,7 +62,7 @@ class PlanSkillkit(Skillkit):
         return self._context
 
     def getName(self) -> str:
-        return "plan_skillkit"
+        return "plan_toolkit"
     
     def _get_runtime_context(self) -> Optional[Context]:
         """Get the runtime context from various sources.
@@ -74,7 +74,7 @@ class PlanSkillkit(Skillkit):
         if self._context:
             return self._context
         
-        # Context should be injected by ExploreBlock when skillkit is used
+        # Context should be injected by ExploreBlock when toolkit is used
         return None
 
     async def _plan_tasks(
@@ -107,10 +107,10 @@ class PlanSkillkit(Skillkit):
         5. Emit a `plan_created` event (UI can subscribe).
         """
         # Ensure context is available
-        # Note: context should be injected by ExploreBlock when skillkit is used
+        # Note: context should be injected by ExploreBlock when toolkit is used
         context = self._get_runtime_context()
         if not context:
-            raise RuntimeError("PlanSkillkit requires context. Please ensure it's properly initialized.")
+            raise RuntimeError("PlanToolkit requires context. Please ensure it's properly initialized.")
 
         # Disallow nested planning inside subtask contexts.
         # Subtasks should not orchestrate further plans; they should focus on executing their own prompts.
@@ -137,11 +137,11 @@ class PlanSkillkit(Skillkit):
             await self._context.enable_plan()  # Replan: resets registry
             logger.debug("Replan detected")
 
-        # Capture parent Agent's skills configuration for subtasks
+        # Capture parent Agent's tools configuration for subtasks
         # This allows subtasks to inherit the same tool set (minus excluded tools)
-        self._parent_skills = self._context.get_last_skills()
+        self._parent_tools = self._context.get_last_skills()
         logger.debug(
-            f"[PlanSkillkit] Captured parent skills for subtasks: {self._parent_skills}"
+            f"[PlanToolkit] Captured parent tools for subtasks: {self._parent_tools}"
         )
 
         # Validate task list
@@ -168,7 +168,7 @@ class PlanSkillkit(Skillkit):
                     # ExploreBlock already validated/converted this to PlanExecMode enum
                     current_exec_mode = block_exec_mode if isinstance(block_exec_mode, PlanExecMode) else PlanExecMode.from_str(str(block_exec_mode))
 
-        logger.debug(f"[PlanSkillkit] Final exec_mode: {current_exec_mode}")
+        logger.debug(f"[PlanToolkit] Final exec_mode: {current_exec_mode}")
 
         # Register tasks
         registry = self._context.task_registry
@@ -277,7 +277,7 @@ class PlanSkillkit(Skillkit):
                         continue
                     if t.id not in registry.running_asyncio_tasks:
                         logger.warning(
-                            f"[PlanSkillkit] Reconciliation: Task {t.id} is RUNNING in registry but has no asyncio task. "
+                            f"[PlanToolkit] Reconciliation: Task {t.id} is RUNNING in registry but has no asyncio task. "
                             "Restarting task."
                         )
                         # Note: _spawn_task creates the task entry in running_asyncio_tasks
@@ -483,42 +483,42 @@ class PlanSkillkit(Skillkit):
 
         return f"Task '{task_id}' restarted"
 
-    def _createSkills(self) -> List[SkillFunction]:
-        """Create skill functions for plan orchestration."""
+    def _createTools(self) -> List[ToolFunction]:
+        """Create tool functions for plan orchestration."""
         return [
-            SkillFunction(self._plan_tasks),
-            SkillFunction(self._check_progress),
-            SkillFunction(self._get_task_output),
-            SkillFunction(self._wait),
-            SkillFunction(self._kill_task),
-            SkillFunction(self._retry_task),
+            ToolFunction(self._plan_tasks),
+            ToolFunction(self._check_progress),
+            ToolFunction(self._get_task_output),
+            ToolFunction(self._wait),
+            ToolFunction(self._kill_task),
+            ToolFunction(self._retry_task),
         ]
 
     # ===== Internal helpers =====
 
     def _get_filtered_subtask_tools(self) -> Optional[List[str]]:
-        """Get filtered tool list for subtasks by removing PlanSkillkit tools.
+        """Get filtered tool list for subtasks by removing PlanToolkit tools.
 
         Returns:
             List of tool names (strings) or None if parent didn't specify tools
         """
-        if self._parent_skills is None:
+        if self._parent_tools is None:
             # Parent didn't specify tools - let subtask inherit from COWContext
-            logger.debug("No parent skills configured, subtasks will inherit from COWContext")
+            logger.debug("No parent tools configured, subtasks will inherit from COWContext")
             return None
 
-        # Filter out PlanSkillkit tools AND the skillkit name itself
-        # (since PlanSkillkit is excluded from subtask contexts)
-        excluded_patterns = self.EXCLUDED_SUBTASK_TOOLS | {"plan_skillkit"}
+        # Filter out PlanToolkit tools AND the toolkit name itself
+        # (since PlanToolkit is excluded from subtask contexts)
+        excluded_patterns = self.EXCLUDED_SUBTASK_TOOLS | {"plan_toolkit"}
 
         filtered = [
-            tool for tool in self._parent_skills
+            tool for tool in self._parent_tools
             if tool not in excluded_patterns
         ]
 
-        excluded_found = excluded_patterns & set(self._parent_skills)
+        excluded_found = excluded_patterns & set(self._parent_tools)
         logger.debug(
-            f"[PlanSkillkit] Filtered subtask tools: {filtered} (excluded: {excluded_found})"
+            f"[PlanToolkit] Filtered subtask tools: {filtered} (excluded: {excluded_found})"
         )
         return filtered if filtered else None
 
@@ -536,7 +536,7 @@ class PlanSkillkit(Skillkit):
         # Capture plan_id at spawn time to prevent cleanup race conditions
         spawn_plan_id = self._context.get_plan_id()
 
-        # Filter parent skills to exclude PlanSkillkit tools
+        # Filter parent tools to exclude PlanToolkit tools
         subtask_tools = self._get_filtered_subtask_tools()
         
         explore_block_content = self._build_subtask_explore_block_content(
@@ -692,12 +692,12 @@ class PlanSkillkit(Skillkit):
         
         Args:
             prompt: Task description/instructions
-            tools: List of tool names to include (if None, subtask inherits all parent skills)
+            tools: List of tool names to include (if None, subtask inherits all parent tools)
         
         Subtask tool inheritance strategy:
         - Subtasks inherit parent Agent's tools configuration
-        - PlanSkillkit tools are automatically excluded to prevent infinite recursion
-        - If parent didn't specify tools, subtask inherits from COWContext (all skills)
+        - PlanToolkit tools are automatically excluded to prevent infinite recursion
+        - If parent didn't specify tools, subtask inherits from COWContext (all tools)
         
         Excluded tools (defined in EXCLUDED_SUBTASK_TOOLS):
         - _plan_tasks, _check_progress, _get_task_output, _wait, _kill_task, _retry_task
@@ -800,7 +800,7 @@ class PlanSkillkit(Skillkit):
 
     @staticmethod
     def should_exclude_from_subtask() -> bool:
-        """Mark this skillkit for exclusion from subtask contexts.
+        """Mark this toolkit for exclusion from subtask contexts.
 
         Returns:
             True to exclude from subtasks

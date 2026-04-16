@@ -1,30 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-Environment Skillkit - Unified execution environment for Python and Bash
+Environment Toolkit - Unified execution environment for Python and Bash
 
-This skillkit provides _python and _bash tools that execute in the
+This toolkit provides _python and _bash tools that execute in the
 configured environment (local, VM, Docker, etc.). The execution
 environment is determined by configuration, not by the tool name.
 
-This replaces both vm_skillkit and local_skillkit with a unified interface.
+This replaces both vm_toolkit and local_toolkit with a unified interface.
 """
 
 from typing import List, Optional
 
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.lib.vm.env_executor import EnvExecutor, LocalExecutor, create_executor
 from dolphin.core.logging.logger import get_logger
-from dolphin.core.skill.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
+from dolphin.core.tool.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
 
 
-logger = get_logger("env_skillkit")
+logger = get_logger("env_toolkit")
 
 
-class EnvSkillkit(Skillkit):
+class EnvToolkit(Toolkit):
     """
-    Unified skillkit for executing Python and Bash commands.
+    Unified toolkit for executing Python and Bash commands.
     
     The execution environment (local, VM, Docker, etc.) is determined
     by configuration. This provides a consistent API regardless of
@@ -51,7 +51,7 @@ class EnvSkillkit(Skillkit):
     
     def __init__(self, executor: Optional[EnvExecutor] = None):
         """
-        Initialize the environment skillkit.
+        Initialize the environment toolkit.
         
         Args:
             executor: Optional executor to use. If not provided,
@@ -62,7 +62,7 @@ class EnvSkillkit(Skillkit):
         self._global_config: Optional[GlobalConfig] = None
     
     def getName(self) -> str:
-        return "env_skillkit"
+        return "env_toolkit"
     
     def setGlobalConfig(self, config: GlobalConfig):
         """
@@ -258,9 +258,9 @@ class EnvSkillkit(Skillkit):
             
         return json.dumps(info, indent=2)
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createTools(self) -> List[ToolFunction]:
         return [
-            SkillFunction(self._bash, block_as_parameter=("bash", "cmd")),
-            SkillFunction(self._python, block_as_parameter=("python", "cmd")),
-            SkillFunction(self._get_env_info),
+            ToolFunction(self._bash, block_as_parameter=("bash", "cmd")),
+            ToolFunction(self._python, block_as_parameter=("python", "cmd")),
+            ToolFunction(self._get_env_info),
         ]

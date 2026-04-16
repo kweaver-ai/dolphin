@@ -1,4 +1,4 @@
-"""TTL/LRU cache implementation for ResourceSkillkit.
+"""TTL/LRU cache implementation for ResourceToolkit.
 
 This module provides caching mechanisms for skill metadata (Level 1)
 to optimize performance and reduce disk I/O.
