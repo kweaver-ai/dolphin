@@ -1,7 +1,8 @@
 """Unit tests for dolphin.lib.skillkits.resource.local_script_executor.
 
 Covers:
-- _validate_entry_shell: empty, absolute, traversal, bad prefix, valid
+- entry_shell validation (via skill_validator.validate_entry_shell):
+  empty, absolute, traversal, bad prefix, valid
 - execute_skill_script: success (real temp script), path-validation rejection,
   file-not-found, script outside scripts/, non-zero exit code,
   timeout (subprocess mocked), interpreter not found (subprocess mocked)
@@ -23,11 +24,11 @@ def _write_file(path: Path, content: str) -> None:
 
 
 class TestValidateScriptPath(unittest.TestCase):
-    """_validate_entry_shell validates format only — no filesystem access."""
+    """validate_entry_shell (in skill_validator) validates format only — no filesystem access."""
 
     def setUp(self):
-        from dolphin.lib.skillkits.resource.local_script_executor import _validate_entry_shell
-        self._validate = _validate_entry_shell
+        from dolphin.lib.skillkits.resource.skill_validator import validate_entry_shell
+        self._validate = validate_entry_shell
 
     def _ok(self, entry_shell):
         ok, err = self._validate(entry_shell)

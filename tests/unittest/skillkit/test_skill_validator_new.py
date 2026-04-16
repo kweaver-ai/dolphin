@@ -5,6 +5,8 @@ Covers the functions added to support the unified skill contract:
 - _matches_allowed_prefix
 - validate_skill_file_path
 - validate_skill_script_path
+- validate_entry_shell
+- get_script_path_from_entry_shell
 """
 
 import unittest
@@ -14,6 +16,8 @@ from dolphin.lib.skillkits.resource.skill_validator import (
     _matches_allowed_prefix,
     validate_skill_file_path,
     validate_skill_script_path,
+    validate_entry_shell,
+    get_script_path_from_entry_shell,
 )
 
 
@@ -258,6 +262,105 @@ class TestValidateSkillScriptPath(unittest.TestCase):
 
     def test_dotdot_at_start_is_rejected(self):
         self._bad("../scripts/run.py")
+
+
+class TestValidateEntryShell(unittest.TestCase):
+    """validate_entry_shell must accept safe commands and reject injection patterns."""
+
+    def _ok(self, cmd):
+        ok, err = validate_entry_shell(cmd)
+        self.assertTrue(ok, f"Expected valid but got error for {cmd!r}: {err}")
+        self.assertIsNone(err)
+
+    def _bad(self, cmd, keyword=None):
+        ok, err = validate_entry_shell(cmd)
+        self.assertFalse(ok, f"Expected invalid but got valid for {cmd!r}")
+        self.assertIsNotNone(err)
+        if keyword:
+            self.assertIn(keyword, err.lower())
+
+    # ---- Valid commands --------------------------------------------------------
+
+    def test_python_script(self):
+        self._ok("python scripts/analyze.py")
+
+    def test_python3_script(self):
+        self._ok("python3 scripts/run.py")
+
+    def test_bash_script(self):
+        self._ok("bash scripts/run.sh")
+
+    def test_node_script(self):
+        self._ok("node scripts/process.js")
+
+    def test_script_with_args(self):
+        self._ok("python scripts/analyze.py --input data.csv")
+
+    def test_script_nested_path(self):
+        self._ok("python scripts/sub/helper.py")
+
+    def test_backslash_normalised(self):
+        self._ok("python scripts\\analyze.py")
+
+    # ---- Forbidden: -c flag (shell injection) ----------------------------------
+
+    def test_python_c_is_rejected(self):
+        self._bad("python -c 'import os; os.system(\"rm -rf /\")'", "-c")
+
+    def test_bash_c_is_rejected(self):
+        self._bad("bash -c 'cat /etc/passwd'", "-c")
+
+    def test_sh_c_is_rejected(self):
+        self._bad("sh -c 'id'", "-c")
+
+    def test_python_c_before_scripts_is_rejected(self):
+        """Even if scripts/ appears later, -c at position 1 must be blocked."""
+        self._bad("python -c 'print(1)' scripts/x.py", "-c")
+
+    # ---- Forbidden: -m flag (module execution) ---------------------------------
+
+    def test_python_m_is_rejected(self):
+        self._bad("python -m http.server", "-m")
+
+    def test_python_m_before_scripts_is_rejected(self):
+        self._bad("python -m scripts.analyze", "-m")
+
+    # ---- Missing or wrong script path structure --------------------------------
+
+    def test_empty_is_rejected(self):
+        self._bad("", "empty")
+
+    def test_single_token_is_rejected(self):
+        self._bad("python")
+
+    def test_bare_script_path_is_rejected(self):
+        """A bare 'scripts/x.py' without interpreter must be rejected."""
+        self._bad("scripts/analyze.py")
+
+    def test_references_path_is_rejected(self):
+        self._bad("python references/guide.md")
+
+    def test_absolute_script_path_is_rejected(self):
+        self._bad("python /usr/local/scripts/run.py")
+
+    def test_dotdot_traversal_in_script_is_rejected(self):
+        self._bad("python scripts/../etc/passwd")
+
+
+class TestGetScriptPathFromEntryShell(unittest.TestCase):
+    """get_script_path_from_entry_shell must extract tokens[1] after validation."""
+
+    def test_extracts_python_script(self):
+        assert get_script_path_from_entry_shell("python scripts/analyze.py") == "scripts/analyze.py"
+
+    def test_extracts_with_args(self):
+        assert get_script_path_from_entry_shell("python scripts/run.py --flag") == "scripts/run.py"
+
+    def test_normalises_backslash(self):
+        assert get_script_path_from_entry_shell("python scripts\\run.py") == "scripts/run.py"
+
+    def test_nested_path(self):
+        assert get_script_path_from_entry_shell("bash scripts/sub/run.sh") == "scripts/sub/run.sh"
 
 
 if __name__ == "__main__":

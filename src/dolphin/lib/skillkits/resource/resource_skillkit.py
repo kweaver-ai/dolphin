@@ -429,6 +429,10 @@ class ResourceSkillkit(Skillkit):
     def _load_resource_skill(self, skill_name: str, mode: str = "short", **kwargs) -> str:
         """Load a resource skill in short or full mode.
 
+        Legacy interface kept for backwards compatibility.  Delegates to the
+        same underlying SkillLoader.load_content() path used by
+        _builtin_skill_load_handler — no independent logic.
+
         Default is short mode to reduce context overhead — when many skills
         are registered, preloading full content for each would consume
         significant context budget.  The LLM can request mode="full" for
@@ -457,6 +461,10 @@ class ResourceSkillkit(Skillkit):
         **kwargs,
     ) -> str:
         """Read a specific asset file from a skill package.
+
+        Legacy interface kept for backwards compatibility.  Delegates to the
+        same underlying SkillLoader.load_resource() path used by
+        _builtin_skill_read_file_handler — no independent logic.
 
         Loads content from scripts/ or references/ directories within
         a skill package. The asset path should be relative to the
@@ -546,7 +554,9 @@ class ResourceSkillkit(Skillkit):
 
         result = {
             "skill_id": skill_id,
-            "skill_md_content": content.body.strip(),
+            # Return the authoritative full SKILL.md text (frontmatter + body)
+            # so the LLM sees exactly what is on disk, including metadata fields.
+            "skill_md_content": content.raw_skill_md,
             "available_scripts": content.available_scripts,
             "available_references": content.available_references,
             "source": "local",

@@ -1238,6 +1238,21 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
         self.assertTrue(payload["skill_md_content"].strip())
 
+    def test_load_handler_skill_md_content_includes_frontmatter(self):
+        """skill_md_content must be the full raw SKILL.md (frontmatter + body), not just body."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        content = payload["skill_md_content"]
+        # The raw SKILL.md starts with the YAML frontmatter delimiter
+        self.assertTrue(
+            content.strip().startswith("---"),
+            f"skill_md_content must start with frontmatter '---', got: {content[:80]!r}",
+        )
+        # Frontmatter fields must be present in the returned text
+        self.assertIn("name: demo-skill", content)
+        self.assertIn("description:", content)
+
     def test_load_handler_available_scripts_lists_script(self):
         self._skip_if_unavailable()
         sk = self._make_skillkit()

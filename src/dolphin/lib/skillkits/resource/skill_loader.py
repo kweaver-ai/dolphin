@@ -238,6 +238,7 @@ class SkillLoader:
                 body=body.strip(),
                 available_scripts=scripts,
                 available_references=references,
+                raw_skill_md=content,
             )
 
         except Exception as e:
