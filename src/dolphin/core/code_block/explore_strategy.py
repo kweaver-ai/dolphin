@@ -19,10 +19,10 @@ from dolphin.core.common.constants import TOOL_CALL_ID_PREFIX
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.tool.toolkit import Toolkit
-from dolphin.core.code_block.skill_call_deduplicator import (
-    SkillCallDeduplicator,
-    DefaultSkillCallDeduplicator,
-    NoOpSkillCallDeduplicator,
+from dolphin.core.code_block.tool_call_deduplicator import (
+    ToolCallDeduplicator,
+    DefaultToolCallDeduplicator,
+    NoOpToolCallDeduplicator,
 )
 
 
@@ -45,8 +45,8 @@ class ExploreStrategy(ABC):
     """
 
     def __init__(self):
-        self._deduplicator = DefaultSkillCallDeduplicator()
-        self._noop_deduplicator = NoOpSkillCallDeduplicator()
+        self._deduplicator = DefaultToolCallDeduplicator()
+        self._noop_deduplicator = NoOpToolCallDeduplicator()
         self._deduplicator_enabled: bool = True
 
     # ============ Abstract Methods (must be implemented by subclasses) ============
@@ -236,7 +236,7 @@ class ExploreStrategy(ABC):
         """
         self._deduplicator_enabled = bool(enabled)
 
-    def get_deduplicator(self) -> SkillCallDeduplicator:
+    def get_deduplicator(self) -> ToolCallDeduplicator:
         """Get duplicate call detector"""
         if self._deduplicator_enabled:
             return self._deduplicator
@@ -416,7 +416,7 @@ class PromptStrategy(ExploreStrategy):
         if not skill_name:
             return None
 
-        skillkit = context.get_skillkit()
+        skillkit = context.get_toolkit()
         if skillkit is None or skill_name not in skillkit.getToolNames():
             return None
 
@@ -448,7 +448,7 @@ class PromptStrategy(ExploreStrategy):
         if not skill_name:
             return False
 
-        skillkit = context.get_skillkit()
+        skillkit = context.get_toolkit()
         return skillkit is not None and skill_name in skillkit.getToolNames()
 
     def get_tool_call_content(

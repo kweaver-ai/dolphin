@@ -34,7 +34,7 @@ class GlobalToolkits:
         self.agentToolSet = ToolSet()
         self.agentTools: Dict[str, BaseAgent] = {}
 
-        # Load installed tools from skill/installed directory
+        # Load installed tools from tool/installed directory
         self._loadInstalledSkills()
 
         # Load MCP skills if enabled
@@ -155,15 +155,15 @@ class GlobalToolkits:
 
     def _loadToolkitsFromFiles(self):
         """
-        Load all toolkits from skill/installed directory (fallback method)
+        Load all toolkits from tool/installed directory (fallback method)
         Reuses existing code from DolphinExecutor::set_installed_skills
         """
         # Load built-in toolkits (fallback for development mode when entry points are not available)
         self._loadBuiltinToolkits()
 
-        # Get the path to skill/installed directory
+        # Get the path to tool/installed directory
         current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        installed_skills_dir = os.path.join(current_dir, "skill", "installed")
+        installed_skills_dir = os.path.join(current_dir, "tool", "installed")
 
         if not os.path.exists(installed_skills_dir):
             logger.warning(

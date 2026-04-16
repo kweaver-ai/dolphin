@@ -48,7 +48,7 @@ class JudgeBlock(BasicCodeBlock):
 
             # Get tool list and skillkit information
             available_skill_names = [
-                str(name) for name in self.get_skillkit().getToolNames()
+                str(name) for name in self.get_toolkit().getToolNames()
             ]
 
             # To ensure the LLM prioritizes using tools, add an explicit system prompt
@@ -153,7 +153,7 @@ class JudgeBlock(BasicCodeBlock):
                 raw_tool_args = input_dict["tool_args"]
                 new_tool_args = {arg["key"]: arg["value"] for arg in raw_tool_args}
 
-                # *** FIX: Pass saved_stage_id to skill_run ***
+                # *** FIX: Pass saved_stage_id to tool_run ***
                 props = {"intervention": False, "saved_stage_id": saved_stage_id, "gvp": self.context}
                 
                 # *** Handle skip action ***
@@ -194,7 +194,7 @@ class JudgeBlock(BasicCodeBlock):
                     yield {"answer": skip_response, "status": "skipped"}
                 else:
                     # Normal execution (not skipped)
-                    async for resp_item in self.skill_run(
+                    async for resp_item in self.tool_run(
                         source_type=SourceType.SKILL,
                         skill_name=tool_name,
                         skill_params_json=new_tool_args,
@@ -222,7 +222,7 @@ class JudgeBlock(BasicCodeBlock):
                     if self.recorder and hasattr(self.recorder, "set_output_var"):
                         self.recorder.set_output_var(self.assign_type, self.output_var)
 
-                    # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
+                    # Save intervention vars (stage_id will be filled by tool_run after creating the stage)
                     intervention_vars = {
                         "tool_name": tool_name,
                         "judge_call_info": {
@@ -231,7 +231,7 @@ class JudgeBlock(BasicCodeBlock):
                             "output_var": self.output_var,
                             "params": self.params,
                         },
-                        "stage_id": None,  # Will be updated by skill_run() after stage creation
+                        "stage_id": None,  # Will be updated by tool_run() after stage creation
                     }
 
                     try:
@@ -241,7 +241,7 @@ class JudgeBlock(BasicCodeBlock):
 
                         props = {"gvp": self.context}
 
-                        async for resp_item in self.skill_run(
+                        async for resp_item in self.tool_run(
                             source_type=SourceType.SKILL,
                             skill_name=tool_name,
                             skill_params_json=tool_args or {},

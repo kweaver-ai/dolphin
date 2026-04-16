@@ -119,7 +119,7 @@ class COWContext(Context):
         # Filter out orchestration-only tools (e.g., PlanToolkit) from subtask toolset.
         # Create a new isolated ToolSet instead of referencing parent's skillkit directly
         # to prevent permission escalation via context.skillkit.getTools()
-        self._calc_all_skills()
+        self._calc_all_tools()
         self.all_skills = self._filter_subtask_skills(self.all_skills)
         # Create a new ToolSet that contains only filtered skills
         # This ensures context.get_skill() and context.skillkit.getTools() both respect filtering

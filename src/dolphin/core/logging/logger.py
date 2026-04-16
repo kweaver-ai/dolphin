@@ -295,7 +295,7 @@ def _stdout(value: str, info: bool = False, **kwargs):
             _write_to_extra_log(value, ensure_newline=False)
 
 
-def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=None, duration_ms=0, is_cli=None):
+def console_tool_call(skill_name, params, max_length=200, verbose=None, skill=None, duration_ms=0, is_cli=None):
     """Display skill/tool call with modern styling.
     
     This function uses the new console_ui module for enhanced visual display
@@ -350,7 +350,7 @@ def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=N
         return
 
 
-def console_skill_response(skill_name, response, max_length=200, verbose=None, skill=None, params=None, duration_ms=0, is_cli=None):
+def console_tool_response(skill_name, response, max_length=200, verbose=None, skill=None, params=None, duration_ms=0, is_cli=None):
     """Display skill/tool response with modern styling.
     
     This function uses the new console_ui module for enhanced visual display
@@ -370,7 +370,7 @@ def console_skill_response(skill_name, response, max_length=200, verbose=None, s
     """
     from dolphin.lib.toolkits.cognitive_toolkit import CognitiveToolkit
 
-    if CognitiveToolkit.is_cognitive_skill(skill_name):
+    if CognitiveToolkit.is_cognitive_tool(skill_name):
         return
 
     if verbose is False:
@@ -431,7 +431,7 @@ def console_skill_response(skill_name, response, max_length=200, verbose=None, s
         return
 
 
-def console_agent_skill_exit(skill_name: str, message: str = None, verbose=None, is_cli=None):
+def console_agent_tool_exit(skill_name: str, message: str = None, verbose=None, is_cli=None):
     """Display a delimiter indicating an agent-as-skill has exited.
 
     This keeps terminal formatting concerns in the UI layer.
@@ -459,7 +459,7 @@ def console_agent_skill_exit(skill_name: str, message: str = None, verbose=None,
         return
 
 
-def console_agent_skill_enter(skill_name: str, message: str = None, verbose=None, is_cli=None):
+def console_agent_tool_enter(skill_name: str, message: str = None, verbose=None, is_cli=None):
     """Display a delimiter indicating an agent-as-skill has started.
     
     This keeps terminal formatting concerns in the UI layer.

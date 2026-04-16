@@ -158,19 +158,19 @@ def _build_tool_call_chunk(
     return chunk
 
 
-def create_skill_run_mock(responses: List[Any]):
+def create_tool_run_mock(responses: List[Any]):
     """
-    创建 skill_run mock 工厂函数，使用闭包隔离状态。
+    创建 tool_run mock 工厂函数，使用闭包隔离状态。
 
     Args:
         responses: 按调用顺序返回的结果列表
 
     Returns:
-        可作为 BasicCodeBlock.skill_run 替代的异步生成器函数
+        可作为 BasicCodeBlock.tool_run 替代的异步生成器函数
     """
     call_count = [0]
 
-    async def fake_skill_run(self, *args, **kwargs):
+    async def fake_tool_run(self, *args, **kwargs):
         idx = call_count[0]
         call_count[0] += 1
         if idx < len(responses):
@@ -178,7 +178,7 @@ def create_skill_run_mock(responses: List[Any]):
         else:
             resp = responses[-1] if responses else {"result": "default"}
 
-        # Mimic BasicCodeBlock.skill_run side-effects minimally:
+        # Mimic BasicCodeBlock.tool_run side-effects minimally:
         # record the tool output into recorder so ExploreBlock can build tool_response messages correctly.
         try:
             if getattr(self, "recorder", None) is not None:
@@ -195,7 +195,7 @@ def create_skill_run_mock(responses: List[Any]):
 
         yield resp
 
-    return fake_skill_run
+    return fake_tool_run
 
 
 # =============================================================================
@@ -268,7 +268,7 @@ async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_toolki
         response = explore_responses[min(idx, len(explore_responses) - 1)]
         yield _build_prompt_block_chunk(response)
 
-    fake_skill_run = create_skill_run_mock([
+    fake_tool_run = create_tool_run_mock([
         {"result": "搜索结果: test value 的相关内容"}
     ])
 
@@ -276,16 +276,16 @@ async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_toolki
         "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
         new=mock_mf_chat_stream,
     ), patch(
-        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
-        new=fake_skill_run,
+        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
+        new=fake_tool_run,
     ), patch(
-        "dolphin.core.context.context.Context.get_skillkit"
-    ) as mock_get_skillkit:
-        mock_get_skillkit.return_value = mock_toolkit
+        "dolphin.core.context.context.Context.get_toolkit"
+    ) as mock_get_toolkit:
+        mock_get_toolkit.return_value = mock_toolkit
 
         executor = DolphinExecutor(global_config=global_config)
         executor.context.init_trajectory(str(trajectory_path))
-        executor.context.set_skills(mock_toolkit)
+        executor.context.set_tools(mock_toolkit)
 
         async for _ in executor.run(dph_content):
             pass
@@ -386,7 +386,7 @@ async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_too
 
         yield _build_prompt_block_chunk("默认回答")
 
-    fake_skill_run = create_skill_run_mock([
+    fake_tool_run = create_tool_run_mock([
         {"result": "搜索结果: important topic 的相关内容"},
         {"result": "计算结果: 2"},
     ])
@@ -395,16 +395,16 @@ async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_too
         "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
         new=mock_mf_chat_stream,
     ), patch(
-        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
-        new=fake_skill_run,
+        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
+        new=fake_tool_run,
     ), patch(
-        "dolphin.core.context.context.Context.get_skillkit"
-    ) as mock_get_skillkit:
-        mock_get_skillkit.return_value = mock_toolkit
+        "dolphin.core.context.context.Context.get_toolkit"
+    ) as mock_get_toolkit:
+        mock_get_toolkit.return_value = mock_toolkit
 
         executor = DolphinExecutor(global_config=global_config)
         executor.context.init_trajectory(str(trajectory_path))
-        executor.context.set_skills(mock_toolkit)
+        executor.context.set_tools(mock_toolkit)
 
         async for _ in executor.run(dph_content):
             pass
@@ -532,7 +532,7 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
                 # prompt 模式：返回 =># 格式
                 yield _build_prompt_block_chunk('=>#mock_search: {"query": "test"}')
 
-        fake_skill_run = create_skill_run_mock([
+        fake_tool_run = create_tool_run_mock([
             {"result": "搜索结果: test query 的相关内容"}
         ])
 
@@ -540,16 +540,16 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
             "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
             new=mock_mf_chat_stream,
         ), patch(
-            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
-            new=fake_skill_run,
+            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
+            new=fake_tool_run,
         ), patch(
-            "dolphin.core.context.context.Context.get_skillkit"
-        ) as mock_get_skillkit:
-            mock_get_skillkit.return_value = mock_toolkit
+            "dolphin.core.context.context.Context.get_toolkit"
+        ) as mock_get_toolkit:
+            mock_get_toolkit.return_value = mock_toolkit
 
             executor = DolphinExecutor(global_config=global_config)
             executor.context.init_trajectory(str(trajectory_path))
-            executor.context.set_skills(mock_toolkit)
+            executor.context.set_tools(mock_toolkit)
 
             async for _ in executor.run(dph_content):
                 pass
@@ -635,7 +635,7 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
         yield _build_prompt_block_chunk("继续对话的回答。")
 
     # 工具返回：包含 PIN_MARKER，要求进入 history（被去标记后持久化）
-    fake_skill_run = create_skill_run_mock(
+    fake_tool_run = create_tool_run_mock(
         [f"{PIN_MARKER}\n这是需要被持久化到 history 的资源结论"]
     )
 
@@ -646,16 +646,16 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
             "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
             new=mock_mf_chat_stream,
         ), patch(
-            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
-            new=fake_skill_run,
+            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
+            new=fake_tool_run,
         ), patch(
-            "dolphin.core.context.context.Context.get_skillkit"
-        ) as mock_get_skillkit:
-            mock_get_skillkit.return_value = mock_toolkit
+            "dolphin.core.context.context.Context.get_toolkit"
+        ) as mock_get_toolkit:
+            mock_get_toolkit.return_value = mock_toolkit
 
             executor = DolphinExecutor(global_config=global_config)
             executor.context.init_trajectory(str(trajectory_path))
-            executor.context.set_skills(mock_toolkit)
+            executor.context.set_tools(mock_toolkit)
 
             async for _ in executor.run(dph_content):
                 pass

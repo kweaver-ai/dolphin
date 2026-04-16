@@ -42,13 +42,13 @@ from dolphin.core.common.enums import (
     StreamItem,
 )
 from dolphin.core.common.constants import (
-    MAX_SKILL_CALL_TIMES,
+    MAX_TOOL_CALL_TIMES,
     MAX_PLAN_SILENT_ROUNDS,
     MAX_PLAN_POLLING_ROUNDS,
     get_msg_duplicate_skill_call,
 )
 from dolphin.core.context.context import Context
-from dolphin.core.logging.logger import console, console_skill_response
+from dolphin.core.logging.logger import console, console_tool_response
 from dolphin.core.common.exceptions import UserInterrupt
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.llm.llm_client import LLMClient
@@ -61,8 +61,8 @@ from dolphin.core.code_block.explore_strategy import (
     ToolCallStrategy,
     ToolCall,
 )
-from dolphin.core.code_block.skill_call_deduplicator import (
-    DefaultSkillCallDeduplicator,
+from dolphin.core.code_block.tool_call_deduplicator import (
+    DefaultToolCallDeduplicator,
 )
 from dolphin.core.tool.tool_matcher import ToolMatcher
 from dolphin.core import flags
@@ -112,7 +112,7 @@ class ExploreBlock(BasicCodeBlock):
         
         # Safety guard: track exploration iterations to prevent infinite loops
         self._iteration_count = 0
-        self._max_iterations = MAX_SKILL_CALL_TIMES
+        self._max_iterations = MAX_TOOL_CALL_TIMES
         
         # Session-level tool call batch counter for stable ID generation
         # Incremented each time LLM returns tool calls (per batch, not per tool)
@@ -202,9 +202,9 @@ class ExploreBlock(BasicCodeBlock):
 
         self.block_start_log("explore")
 
-        # Enable or disable the skill invocation deduplicator based on parameter configuration (enabled by default, can be disabled via enable_skill_deduplicator)
-        if hasattr(self, "enable_skill_deduplicator"):
-            self.strategy.set_deduplicator_enabled(self.enable_skill_deduplicator)
+        # Enable or disable the skill invocation deduplicator based on parameter configuration (enabled by default, can be disabled via enable_tool_deduplicator)
+        if hasattr(self, "enable_tool_deduplicator"):
+            self.strategy.set_deduplicator_enabled(self.enable_tool_deduplicator)
 
         # Save the current system prompt configuration to context for inheritance in multi-turn conversations.
         if getattr(self, "system_prompt", None):
@@ -548,7 +548,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
     def _make_init_messages(self):
         """Build initialization message"""
-        skillkit = self.get_skillkit()
+        skillkit = self.get_toolkit()
         system_message = self.strategy.make_system_message(
             skillkit=skillkit,
             system_prompt=self.system_prompt,
@@ -751,7 +751,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             props = {"intervention": False, "saved_stage_id": saved_stage_id}
             have_answer = False
 
-            async for resp in self.skill_run(
+            async for resp in self.tool_run(
                 skill_name=function_name,
                 source_type=SourceType.EXPLORE,
                 skill_params_json=function_params_json,
@@ -804,7 +804,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         yield [return_answer]
 
         # Add tool response message
-        tool_response, metadata = self._process_skill_result_with_hook(function_name)
+        tool_response, metadata = self._process_tool_result_with_hook(function_name)
 
         # Extract tool_call_id
         tool_call_id = self._extract_tool_call_id()
@@ -825,7 +825,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         current_counter = self.session_tool_call_counter
 
         # Regenerate system message to include dynamically loaded tools
-        current_skillkit = self.get_skillkit()
+        current_skillkit = self.get_toolkit()
         updated_system_message = self.strategy.make_system_message(
             skillkit=current_skillkit,
             system_prompt=self.system_prompt,
@@ -899,9 +899,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
         if not self.context.is_cli_mode():
             console("\n", verbose=self.context.is_verbose())
 
-        if self.times >= MAX_SKILL_CALL_TIMES:
+        if self.times >= MAX_TOOL_CALL_TIMES:
             self.context.warn(
-                f"max skill call times reached {MAX_SKILL_CALL_TIMES} times, answer[{stream_item.to_dict()}]"
+                f"max skill call times reached {MAX_TOOL_CALL_TIMES} times, answer[{stream_item.to_dict()}]"
             )
         else:
             self.times += 1
@@ -1031,18 +1031,18 @@ Please reconsider your approach and improve your answer based on the feedback ab
             # (inside try so finally can add tool response if interrupted)
             self.context.check_user_interrupt()
 
-            # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
+            # Save intervention vars (stage_id will be filled by tool_run after creating the stage)
             intervention_vars = {
                 "prompt": self.context.get_messages().get_messages_as_dict(),
                 "tool_name": tool_call.name,
                 "cur_llm_stream_answer": stream_item.answer,
                 "all_answer": stream_item.answer,
-                "stage_id": None,  # Will be updated by skill_run() after stage creation
+                "stage_id": None,  # Will be updated by tool_run() after stage creation
             }
 
             self.context.set_variable(intervention_tmp_key, intervention_vars)
 
-            async for resp in self.skill_run(
+            async for resp in self.tool_run(
                 source_type=SourceType.EXPLORE,
                 skill_name=tool_call.name,
                 skill_params_json=tool_call.arguments or {},
@@ -1057,12 +1057,12 @@ Please reconsider your approach and improve your answer based on the feedback ab
             )
 
             # Add tool response message
-            tool_response, metadata = self._process_skill_result_with_hook(tool_call.name)
+            tool_response, metadata = self._process_tool_result_with_hook(tool_call.name)
 
             answer_content = (
                 tool_response
                 if tool_response is not None
-                and not CognitiveToolkit.is_cognitive_skill(tool_call.name)
+                and not CognitiveToolkit.is_cognitive_tool(tool_call.name)
                 else ""
             )
 
@@ -1256,7 +1256,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         4. No tool call occurred once
         """
         # 1. Early return: max skill calls reached
-        if self.times >= MAX_SKILL_CALL_TIMES:
+        if self.times >= MAX_TOOL_CALL_TIMES:
             return False
 
         # 2. Plan mode has special logic - delegate to separate method
@@ -1424,24 +1424,24 @@ Please reconsider your approach and improve your answer based on the feedback ab
             True if duplicate limit exceeded, False otherwise
         """
         deduplicator = self.strategy.get_deduplicator()
-        if not hasattr(deduplicator, 'skillcalls') or not deduplicator.skillcalls:
+        if not hasattr(deduplicator, 'skillcalls') or not deduplicator.toolcalls:
             return False
 
         # Ignore polling-style tools
         ignored_tools = getattr(
-            deduplicator, "_always_allow_duplicate_skills", set()
+            deduplicator, "_always_allow_duplicate_tools", set()
         ) or set()
 
         counts = []
-        for call_key, count in deduplicator.skillcalls.items():
+        for call_key, count in deduplicator.toolcalls.items():
             tool_name = str(call_key).split(":", 1)[0]
             if tool_name in ignored_tools:
                 continue
             counts.append(count)
 
-        return counts and max(counts) >= DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT
+        return counts and max(counts) >= DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT
 
-    def _process_skill_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
+    def _process_tool_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
         """Handle skill results using toolkit_hook"""
         # Get skill object
         skill = self.context.get_skill(skill_name)
@@ -1659,7 +1659,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         if hasattr(self.skills, 'getTools'):
             skill_list = self.skills.getTools()
         elif isinstance(self.skills, list) and self.skills and isinstance(self.skills[0], str):
-            current_skillkit = self.context.get_skillkit()
+            current_skillkit = self.context.get_toolkit()
             if not current_skillkit:
                 return
             available_skills = current_skillkit.getTools()
@@ -1714,7 +1714,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
     def _setup_system_bucket(self):
         """Rebuild system bucket for multi-turn exploration (reset_for_block may have cleared it)."""
-        skillkit = self.get_skillkit()
+        skillkit = self.get_toolkit()
         system_message = self.strategy.make_system_message(
             skillkit=skillkit,
             system_prompt=getattr(self, "system_prompt", "") or "",
@@ -1769,7 +1769,7 @@ Important: Your response is INCOMPLETE if you stop after tasks finish. You MUST 
 
     def _apply_deduplicator_config(self, kwargs: dict):
         """Apply skill deduplicator configuration."""
-        if "enable_skill_deduplicator" in kwargs:
-            self.enable_skill_deduplicator = kwargs["enable_skill_deduplicator"]
-        if hasattr(self, "enable_skill_deduplicator"):
-            self.strategy.set_deduplicator_enabled(self.enable_skill_deduplicator)
+        if "enable_tool_deduplicator" in kwargs:
+            self.enable_tool_deduplicator = kwargs["enable_tool_deduplicator"]
+        if hasattr(self, "enable_tool_deduplicator"):
+            self.strategy.set_deduplicator_enabled(self.enable_tool_deduplicator)

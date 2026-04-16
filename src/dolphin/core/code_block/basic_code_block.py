@@ -32,10 +32,10 @@ from dolphin.core.context.context import Context
 from dolphin.core.logging.logger import (
     console,
     console_block_start,
-    console_agent_skill_enter,
-    console_agent_skill_exit,
-    console_skill_call,
-    console_skill_response,
+    console_agent_tool_enter,
+    console_agent_tool_exit,
+    console_tool_call,
+    console_tool_response,
     get_logger,
 )
 from dolphin.core.trajectory.recorder import Recorder
@@ -307,8 +307,8 @@ class BasicCodeBlock:
         # Default is False to avoid incorrectly blocking legitimate repeated detection/polling tool calls.
         # Recent observations show that deduplication can prematurely stop valid polling scenarios
         # (e.g., repeatedly checking task status until completion).
-        # Set to True explicitly via /explore/(enable_skill_deduplicator=true) when needed.
-        self.enable_skill_deduplicator: bool = False
+        # Set to True explicitly via /explore/(enable_tool_deduplicator=true) when needed.
+        self.enable_tool_deduplicator: bool = False
         self.skills = None
         self.system_prompt = ""
 
@@ -924,14 +924,14 @@ class BasicCodeBlock:
         if self.skills is None:
             self.skills = params_dict.get("tools", None)
 
-        self._validate_skills()
+        self._validate_tools()
 
         self.ttc_mode = params_dict.get("ttc_mode", None)
         self.no_cache = self._normalize_bool_param(params_dict.get("no_cache", False), False)
         self.flags = params_dict.get("flags", "")
         # 是否启用技能调用去重（仅 explore 块会实际使用该参数）
-        self.enable_skill_deduplicator = self._normalize_bool_param(
-            params_dict.get("enable_skill_deduplicator", False), False
+        self.enable_tool_deduplicator = self._normalize_bool_param(
+            params_dict.get("enable_tool_deduplicator", False), False
         )
 
         # 处理输出格式参数
@@ -974,10 +974,10 @@ class BasicCodeBlock:
             output_var=self.output_var,
         )
 
-    def _validate_skills(self):
-        """Validate that all requested skills/patterns match at least one available skill."""
+    def _validate_tools(self):
+        """Validate that all requested tools/patterns match at least one available tool."""
         if self.skills is not None and self.context:
-            current_skillkit = self.context.get_skillkit()
+            current_skillkit = self.context.get_toolkit()
             if current_skillkit:
                 available_skills = current_skillkit.getTools()
                 owner_names = ToolMatcher.get_owner_toolkits(available_skills)
@@ -1085,7 +1085,7 @@ class BasicCodeBlock:
         tool_schema = None
         if tool_name and hasattr(self, 'context') and self.context:
             try:
-                skillkit = self.get_skillkit()
+                skillkit = self.get_toolkit()
                 if skillkit:
                     # 获取工具的 schema
                     skill = skillkit.getTool(tool_name)
@@ -1180,7 +1180,7 @@ class BasicCodeBlock:
         }
 
         if with_skill:
-            llm_params["tools"] = self.get_skillkit().getToolsSchema()
+            llm_params["tools"] = self.get_toolkit().getToolsSchema()
             if self.tool_choice:
                 llm_params["tool_choice"] = self.tool_choice
         elif self.output_format and isinstance(
@@ -1289,11 +1289,11 @@ class BasicCodeBlock:
                 answer_text = str(answer_content)
             self.context.add_assistant_message(answer_text)
 
-    def get_skillkit(self):
-        """获取当前代码块可用的技能集（仅依赖 Context.get_skillkit 主流程逻辑）"""
-        return self.context.get_skillkit(self.skills)
+    def get_toolkit(self):
+        """获取当前代码块可用的技能集（仅依赖 Context.get_toolkit 主流程逻辑）"""
+        return self.context.get_toolkit(self.skills)
 
-    async def skill_run(
+    async def tool_run(
         self,
         source_type: SourceType,
         skill_name: str,
@@ -1301,7 +1301,7 @@ class BasicCodeBlock:
         props=None,
     ):
         from dolphin.core.utils.tools import ToolInterrupt
-        if self.context.is_skillkit_empty():
+        if self.context.is_toolkit_empty():
             self.context.warn(f"skillkit is None, skill_name[{skill_name}]")
             return
 
@@ -1453,11 +1453,11 @@ class BasicCodeBlock:
                         tool_config=interrupt_config
                     )
             
-            console_skill_call(
+            console_tool_call(
                 skill_name, skill_params_json, verbose=self.context.verbose, skill=skill, is_cli=self.context.is_cli_mode()
             )
             if agent_as_skill is not None:
-                console_agent_skill_enter(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
+                console_agent_tool_enter(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
             
             # Trace: Tool call start hook
             import time
@@ -1488,12 +1488,12 @@ class BasicCodeBlock:
                 ):
                     # Debug: log result type and keys
                     self.context.debug(
-                        f"[BasicCodeBlock.skill_run] Tool {skill_name} returned result type: {type(result)}"
+                        f"[BasicCodeBlock.tool_run] Tool {skill_name} returned result type: {type(result)}"
                     )
                     if isinstance(result, dict):
                         if "answer" in result:
                             self.context.debug(
-                                f"[BasicCodeBlock.skill_run] answer : {result['answer']}"
+                                f"[BasicCodeBlock.tool_run] answer : {result['answer']}"
                             )
                     
                     # Check if this is a dynamic tool response and load tools immediately
@@ -1513,7 +1513,7 @@ class BasicCodeBlock:
                         )
                     else:
                         self.context.debug(
-                            f"[BasicCodeBlock.skill_run] Not a dynamic tool response (result={'dict' if isinstance(result, dict) else type(result)}, has_answer={'answer' in result if isinstance(result, dict) else False})"
+                            f"[BasicCodeBlock.tool_run] Not a dynamic tool response (result={'dict' if isinstance(result, dict) else type(result)}, has_answer={'answer' in result if isinstance(result, dict) else False})"
                         )
 
                     # After tool execution, store the result in cache
@@ -1596,7 +1596,7 @@ class BasicCodeBlock:
                 yield result
             
             if agent_as_skill is not None:
-                console_agent_skill_exit(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
+                console_agent_tool_exit(skill_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
         except ToolInterrupt as e:
             # Restore original agent even in case of interruption
             if agent_as_skill is not None:
@@ -1609,7 +1609,7 @@ class BasicCodeBlock:
                 self.context.set_cur_agent(cur_agent)
 
             self.context.error(
-                f"error in skill_run[{skill_name}], error type: {type(e)}, error info: {str(e)}"
+                f"error in tool_run[{skill_name}], error type: {type(e)}, error info: {str(e)}"
             )
             error_message = f"调用{skill_name}工具时发生错误。错误信息: {str(e)}"
             self.recorder.update(
@@ -1630,7 +1630,7 @@ class BasicCodeBlock:
         if agent_as_skill is None:
             # Ensure we pass the full answer to the UI so JSON parsing succeeds.
             # The UI module handles visual truncation of large structures intelligently.
-            console_skill_response(
+            console_tool_response(
                 skill_name=skill_name,
                 response=answer,
                 max_length=1024,
@@ -2031,7 +2031,7 @@ class BasicCodeBlock:
             # - SYSTEM bucket (system prompt)
             # - QUERY bucket (user question)
             # - SCRATCHPAD bucket (tool calls + tool results + assistant messages)
-            skillkit = self.get_skillkit()
+            skillkit = self.get_toolkit()
             tools_schema = None
 
             # Get tools schema based on skillkit type
@@ -2416,7 +2416,7 @@ class BasicCodeBlock:
             for skill in current_skillkit.getTools():
                 new_skillset.addTool(skill)
             current_skillkit = new_skillset
-            self.context.set_skills(current_skillkit)
+            self.context.set_tools(current_skillkit)
 
         # Add new tools
         loaded_count = 0
@@ -2535,9 +2535,9 @@ class BasicCodeBlock:
         )
 
         # CRITICAL: Recalculate all_skills to include newly loaded tools
-        # Context.get_skillkit() matches tools from all_skills, must recalculate
-        if hasattr(self.context, "_calc_all_skills"):
-            self.context._calc_all_skills()
+        # Context.get_toolkit() matches tools from all_skills, must recalculate
+        if hasattr(self.context, "_calc_all_tools"):
+            self.context._calc_all_tools()
             self.context.debug(
                 f"[_load_dynamic_tools] all_skills updated, now has {len(list(self.context.all_skills.getToolNames()))} tools"
             )

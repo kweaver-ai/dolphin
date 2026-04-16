@@ -1033,11 +1033,11 @@ class DolphinAgent(BaseAgent):
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
         return self.executor.context.get_messages()
 
-    def get_skillkit(self, skillNames: Optional[list] = None):
-        """Get Skill Package"""
+    def get_toolkit(self, skillNames: Optional[list] = None):
+        """Get Toolkit"""
         if self.executor is None:
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
-        return self.executor.context.get_skillkit(skillNames)
+        return self.executor.context.get_toolkit(skillNames)
 
     def get_config(self):
         """Get configuration"""
@@ -1103,14 +1103,14 @@ class DolphinAgent(BaseAgent):
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
         self.executor.context.set_cur_agent(agent)
 
-    def set_skills(self, skillkit):
-        """Set Skill Pack"""
+    def set_tools(self, skillkit):
+        """Set Tools"""
         if self.executor is None:
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
-        self.executor.context.set_skills(skillkit)
+        self.executor.context.set_tools(skillkit)
 
-    def get_skillkit_raw(self):
-        """Get the original skillkit object (for scenarios where direct access to skillkit is required)"""
+    def get_toolkit_raw(self):
+        """Get the original toolkit object (for scenarios where direct access to toolkit is required)"""
         if self.executor is None:
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
         return self.executor.context.skillkit

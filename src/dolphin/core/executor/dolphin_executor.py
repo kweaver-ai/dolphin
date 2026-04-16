@@ -241,9 +241,9 @@ class DolphinExecutor:
         if tool_dict is not None:
             from dolphin.sdk.tool.traditional_toolkit import TriditionalToolkit
             triditional_toolkit = TriditionalToolkit.buildFromTooldict(tool_dict)
-            self.context.set_skills(triditional_toolkit)
+            self.context.set_tools(triditional_toolkit)
         elif skillkit is not None:
-            self.context.set_skills(skillkit)
+            self.context.set_tools(skillkit)
         elif toolkit_hook is not None:
             self.context.set_toolkit_hook(toolkit_hook)
 
@@ -390,17 +390,17 @@ class DolphinExecutor:
 
     def _prepare_for_run(self, **kwargs):
         # Only set skills if not already set (to preserve agent skills set by Environment)
-        if self.context.is_skillkit_empty():
-            # Try to get all skills including custom skills from global skills
-            # If global_skills has getAllTools method, use it; otherwise fall back to installed skills
+        if self.context.is_toolkit_empty():
+            # Try to get all tools including custom tools from global skills
+            # If global_skills has getAllTools method, use it; otherwise fall back to installed tools
             if hasattr(self.global_skills, "getAllTools") and callable(
                 getattr(self.global_skills, "getAllTools")
             ):
                 all_skills = self.global_skills.getAllTools()
-                self.context.set_skills(all_skills)
+                self.context.set_tools(all_skills)
             else:
                 installed_skills = self.global_skills.getInstalledTools()
-                self.context.set_skills(installed_skills)
+                self.context.set_tools(installed_skills)
 
         if KEY_USER_ID in kwargs:
             self.context.set_variable(name=KEY_USER_ID, value=kwargs.get(KEY_USER_ID))

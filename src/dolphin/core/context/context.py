@@ -146,8 +146,8 @@ class Context:
         # Trace listener for observability (injected by host application)
         self.trace_listener: Optional["ITraceListener"] = None
 
-        # Calculate all skills initially
-        self._calc_all_skills()
+        # Calculate all tools initially
+        self._calc_all_tools()
 
     def set_toolkit_hook(self, toolkit_hook: "ToolkitHook"):
         """Set toolkit_hook"""
@@ -349,7 +349,7 @@ class Context:
         self.variable_pool.init_variables(variables)
 
     def init_skillkit(self, skillkit: Toolkit):
-        self.set_skills(skillkit)
+        self.set_tools(skillkit)
 
     def init_agents(self, agents):
         self.agents = agents
@@ -510,7 +510,7 @@ class Context:
                 )
         return result
 
-    def get_skillkit(self, skillNames: Optional[List[str]] = None):
+    def get_toolkit(self, skillNames: Optional[List[str]] = None):
         """Get the skill set, supporting wildcard (glob), exact matching, and optional toolkit namespace.
 
         Args:
@@ -625,7 +625,7 @@ class Context:
             # Default returns TOOL type
             return ToolType.TOOL
 
-    def is_skillkit_empty(self):
+    def is_toolkit_empty(self):
         return self.skillkit is None or self.skillkit.isEmpty()
 
     def exec_skill(self, name, **kwargs):
@@ -658,9 +658,9 @@ class Context:
         """
         return self.variable_pool.keys()
 
-    def set_skills(self, skillkit):
+    def set_tools(self, skillkit):
         self.skillkit = skillkit
-        self._calc_all_skills()
+        self._calc_all_tools()
 
     def append_var_output(
         self, name, value, source_type=SourceType.OTHER, skill_info=None
@@ -1382,17 +1382,17 @@ class Context:
     def error(self, log_str):
         logger.error(self._make_log(log_str))
 
-    def _calc_all_skills(self):
+    def _calc_all_tools(self):
         """
-        Calculate all skills
+        Calculate all tools
         """
         self.all_skills = ToolSet()
 
-        # Add skills from self.skillkit
+        # Add tools from self.skillkit
         if self.skillkit and not self.skillkit.isEmpty():
             self.all_skills.addToolkit(self.skillkit)
 
-        # Add skills from global_skills
+        # Add tools from global_skills
         if self.global_skills is not None:
             self.all_skills.addToolkit(self.global_skills.getAllTools())
 

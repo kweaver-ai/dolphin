@@ -113,8 +113,8 @@ def mock_context():
     }
     skillkit = TestToolkit(skills_dict)
     
-    # Use set_skills to properly initialize all_skills
-    context.set_skills(skillkit)
+    # Use set_tools to properly initialize all_skills
+    context.set_tools(skillkit)
     
     return context
 
@@ -195,12 +195,12 @@ class TestJudgeBlockInterrupt:
     @pytest.mark.asyncio
     async def test_judge_block_triggers_interrupt(self, mock_context):
         """Test that judge block triggers interrupt when selecting tool with interrupt_config"""
-        # Note: Judge block validation happens during parse, so we need to patch _validate_skills
+        # Note: Judge block validation happens during parse, so we need to patch _validate_tools
         # or provide tools parameter without validation
         block = JudgeBlock(context=mock_context)
         
-        # Skip validation by patching _validate_skills
-        with patch.object(block, '_validate_skills'):
+        # Skip validation by patching _validate_tools
+        with patch.object(block, '_validate_tools'):
             # Mock LLM response to select high_risk_tool
             with patch.object(block, 'judge_tool_call', new_callable=AsyncMock) as mock_judge:
                 mock_judge.return_value = ("high_risk_tool", {"param": "test_value"})
@@ -221,8 +221,8 @@ class TestJudgeBlockInterrupt:
         """Test that judge block doesn't interrupt when selecting safe tool"""
         block = JudgeBlock(context=mock_context)
         
-        # Skip validation by patching _validate_skills
-        with patch.object(block, '_validate_skills'):
+        # Skip validation by patching _validate_tools
+        with patch.object(block, '_validate_tools'):
             # Mock LLM response to select safe_tool
             with patch.object(block, 'judge_tool_call', new_callable=AsyncMock) as mock_judge:
                 mock_judge.return_value = ("safe_tool", {"param": "test_value"})
@@ -282,8 +282,8 @@ class TestExploreBlockV2Interrupt:
         try:
             block = ExploreBlockV2(context=mock_context)
             
-            # Skip validation by patching _validate_skills
-            with patch.object(block, '_validate_skills'):
+            # Skip validation by patching _validate_tools
+            with patch.object(block, '_validate_tools'):
                 # Mock LLM to return tool call
                 with patch.object(block, 'llm_chat_stream') as mock_llm:
                     from dolphin.core.common.enums import StreamItem
@@ -362,8 +362,8 @@ class TestExploreBlockV1Interrupt:
         try:
             block = ExploreBlock(context=mock_context)
             
-            # Skip validation by patching _validate_skills
-            with patch.object(block, '_validate_skills'):
+            # Skip validation by patching _validate_tools
+            with patch.object(block, '_validate_tools'):
                 # Mock llm_chat_stream (not llm_chat) - explore v1 uses llm_chat_stream
                 with patch.object(block, 'llm_chat_stream') as mock_llm:
                     from dolphin.core.common.enums import StreamItem
@@ -402,8 +402,8 @@ class TestExploreBlockV1Interrupt:
         try:
             block = ExploreBlock(context=mock_context)
             
-            # Skip validation by patching _validate_skills
-            with patch.object(block, '_validate_skills'):
+            # Skip validation by patching _validate_tools
+            with patch.object(block, '_validate_tools'):
                 # Mock llm_chat_stream (explore v1 uses llm_chat_stream)
                 with patch.object(block, 'llm_chat_stream') as mock_llm:
                     from dolphin.core.common.enums import StreamItem

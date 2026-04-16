@@ -155,7 +155,7 @@ SEARCH_RETRY_COUNT = 2  # number of retries for failed search API calls
 # Upper bound for tool calls in a single exploration turn.
 # Production sessions rarely exceed 50; 300 provides ample headroom
 # while catching runaway loops before they exhaust context or tokens.
-MAX_SKILL_CALL_TIMES = 300
+MAX_TOOL_CALL_TIMES = 300
 
 # Plan orchestration tools (used for task management in plan mode)
 # These tools should be excluded from subtask contexts to prevent infinite recursion.

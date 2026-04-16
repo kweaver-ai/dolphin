@@ -678,7 +678,7 @@ class IntegrationTestRunner:
             # If agent skills are available, add them to executor context
             if isAgentTest and self.env is not None:
                 allSkills = self.env.getGlobalToolkits().getAllTools()
-                executor.context.set_skills(allSkills)
+                executor.context.set_tools(allSkills)
 
             # Apply feature flag overrides for this test using ContextVar-based
             # override (coroutine-safe, no global state mutation)

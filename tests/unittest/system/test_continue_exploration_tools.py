@@ -73,14 +73,14 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.all_skills.addTool(other_skill)
 
         # 设置 context 的技能
-        self.context.set_skills(self.all_skills)
-        self.context._calc_all_skills()
+        self.context.set_tools(self.all_skills)
+        self.context._calc_all_tools()
 
     def test_continue_exploration_without_skills_uses_all_skills(self):
         """
         测试 continue_exploration 在没有传入 skills 参数时使用 all_skills
         
-        这是当前行为：self.skills = None 时，get_skillkit() 返回 all_skills
+        这是当前行为：self.skills = None 时，get_toolkit() 返回 all_skills
         """
         block = ExploreBlock(context=self.context)
 
@@ -88,8 +88,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         # 此时 self.skills 应该仍然是 None（因为没有 parse）
         self.assertIsNone(block.skills)
 
-        # get_skillkit() 应该返回所有技能
-        skillkit = block.get_skillkit()
+        # get_toolkit() 应该返回所有技能
+        skillkit = block.get_toolkit()
         skill_names = skillkit.getToolNames()
 
         # 应该包含所有三个技能
@@ -119,7 +119,7 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertEqual(set(block.skills), {"mock_search", "mock_calculator"})
 
         # 获取第一轮的 skillkit
-        first_round_toolkit = block.get_skillkit()
+        first_round_toolkit = block.get_toolkit()
         first_round_skill_names = first_round_toolkit.getToolNames()
 
         # 第一轮应该只有配置的两个技能
@@ -135,8 +135,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         # 验证 self.skills 仍然是第一轮设置的值
         self.assertEqual(set(block.skills), {"mock_search", "mock_calculator"})
 
-        # get_skillkit() 应该返回第一轮配置的技能子集
-        second_round_toolkit = block.get_skillkit()
+        # get_toolkit() 应该返回第一轮配置的技能子集
+        second_round_toolkit = block.get_toolkit()
         second_round_skill_names = second_round_toolkit.getToolNames()
 
         self.assertEqual(len(second_round_skill_names), 2)
@@ -160,7 +160,7 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
 
         self.assertEqual(block.skills, ["mock_*tool"])
 
-        filtered_toolkit = block.get_skillkit()
+        filtered_toolkit = block.get_toolkit()
         filtered_names = set(filtered_toolkit.getToolNames())
 
         self.assertEqual(filtered_names, {"mock_other_tool"})
@@ -178,7 +178,7 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
             content, category=CategoryBlock.EXPLORE, replace_variables=False
         )
 
-        filtered_toolkit = block.get_skillkit()
+        filtered_toolkit = block.get_toolkit()
         filtered_names = set(filtered_toolkit.getToolNames())
         self.assertEqual(filtered_names, {"mock_other_tool"})
 
@@ -186,7 +186,7 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         block.parse_block_content(
             content, category=CategoryBlock.EXPLORE, replace_variables=False
         )
-        filtered_toolkit = block.get_skillkit()
+        filtered_toolkit = block.get_toolkit()
         filtered_names = set(filtered_toolkit.getToolNames())
         self.assertEqual(filtered_names, {"mock_search", "mock_calculator"})
 
@@ -203,8 +203,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         # 新 block 的 skills 应该是 None
         self.assertIsNone(new_block.skills)
 
-        # 新 block 的 get_skillkit() 会返回 all_skills（因为 skills=None）
-        new_toolkit = new_block.get_skillkit()
+        # 新 block 的 get_toolkit() 会返回 all_skills（因为 skills=None）
+        new_toolkit = new_block.get_toolkit()
         new_skill_names = new_toolkit.getToolNames()
         
         # 应该包含所有三个技能
@@ -221,8 +221,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         # 验证 skills 被正确设置
         self.assertEqual(set(new_block.skills), {"mock_search", "mock_calculator"})
         
-        # 验证 get_skillkit() 返回正确的技能子集
-        filtered_toolkit = new_block.get_skillkit()
+        # 验证 get_toolkit() 返回正确的技能子集
+        filtered_toolkit = new_block.get_toolkit()
         filtered_skill_names = filtered_toolkit.getToolNames()
         
         self.assertEqual(len(filtered_skill_names), 2)
@@ -248,10 +248,10 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         # 模拟 continue_exploration 应该支持的行为（修复后）
         # block.skills = kwargs.get("skills") or kwargs.get("tools")
         
-        # 目前我们测试：如果手动设置 skills，get_skillkit 应该正确过滤
+        # 目前我们测试：如果手动设置 skills，get_toolkit 应该正确过滤
         block.skills = ["mock_search"]
         
-        skillkit = block.get_skillkit()
+        skillkit = block.get_toolkit()
         skill_names = skillkit.getToolNames()
         
         self.assertEqual(len(skill_names), 1)
@@ -291,8 +291,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertIsNotNone(new_block.skills)
         self.assertEqual(set(new_block.skills), {"mock_search", "mock_calculator"})
         
-        # 验证 get_skillkit() 返回正确的技能子集
-        filtered_toolkit = new_block.get_skillkit()
+        # 验证 get_toolkit() 返回正确的技能子集
+        filtered_toolkit = new_block.get_toolkit()
         filtered_skill_names = filtered_toolkit.getToolNames()
         
         self.assertEqual(len(filtered_skill_names), 2)
@@ -324,8 +324,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         # 验证 kwargs 中的 skills 优先
         self.assertEqual(new_block.skills, ["mock_other_tool"])
         
-        # 验证 get_skillkit() 返回 kwargs 配置的技能
-        filtered_toolkit = new_block.get_skillkit()
+        # 验证 get_toolkit() 返回 kwargs 配置的技能
+        filtered_toolkit = new_block.get_toolkit()
         filtered_skill_names = filtered_toolkit.getToolNames()
         
         self.assertEqual(len(filtered_skill_names), 1)
@@ -357,8 +357,8 @@ class TestContinueExplorationSkillsWithKwargsParam(unittest.TestCase):
         self.all_skills.addTool(ToolFunction(mock_other_tool))
 
         # 设置 context 的技能
-        self.context.set_skills(self.all_skills)
-        self.context._calc_all_skills()
+        self.context.set_tools(self.all_skills)
+        self.context._calc_all_tools()
 
     def test_skills_parameter_priority_from_kwargs(self):
         """
@@ -386,8 +386,8 @@ class TestContinueExplorationSkillsWithKwargsParam(unittest.TestCase):
         # 验证 skills 被正确设置
         self.assertEqual(block.skills, ["mock_search"])
         
-        # 验证 get_skillkit 返回正确的技能集
-        skillkit = block.get_skillkit()
+        # 验证 get_toolkit 返回正确的技能集
+        skillkit = block.get_toolkit()
         skill_names = skillkit.getToolNames()
         
         self.assertEqual(len(skill_names), 1)
@@ -408,7 +408,7 @@ class TestContinueExplorationSkillsWithKwargsParam(unittest.TestCase):
         
         self.assertEqual(block.skills, ["mock_calculator"])
         
-        skillkit = block.get_skillkit()
+        skillkit = block.get_toolkit()
         skill_names = skillkit.getToolNames()
         
         self.assertEqual(len(skill_names), 1)
@@ -434,8 +434,8 @@ class TestContinueExplorationModeInheritance(unittest.TestCase):
         self.all_skills.addTool(ToolFunction(mock_search))
 
         # 设置 context 的技能
-        self.context.set_skills(self.all_skills)
-        self.context._calc_all_skills()
+        self.context.set_tools(self.all_skills)
+        self.context._calc_all_tools()
 
     def test_default_mode_is_tool_call(self):
         """测试默认 mode 是 tool_call"""
@@ -559,7 +559,7 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
         )
 
         # 验证初始状态：context.all_skills 应该已经从 global_skills 自动填充
-        # 因为 Context.__init__ 会调用 _calc_all_skills()
+        # 因为 Context.__init__ 会调用 _calc_all_tools()
         self.assertFalse(
             executor.context.all_skills.isEmpty(),
             "初始状态下 context.all_skills 应该已经从 global_skills 自动填充"
@@ -581,9 +581,9 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
             debug_infos=None,
         )
 
-        # 验证 explore_block.get_skillkit() 可以正常获取技能
-        # 因为 Context 初始化时已经调用了 _calc_all_skills()
-        skillkit = explore_block.get_skillkit()
+        # 验证 explore_block.get_toolkit() 可以正常获取技能
+        # 因为 Context 初始化时已经调用了 _calc_all_tools()
+        skillkit = explore_block.get_toolkit()
         skills_count = len(skillkit.getTools())
 
         # 验证技能已经可用（无需调用 _prepare_for_run）
@@ -633,7 +633,7 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
             )
 
             # 验证初始状态：context.all_skills 应该已经从 global_skills 自动填充
-            # 因为 Context.__init__ 会调用 _calc_all_skills()
+            # 因为 Context.__init__ 会调用 _calc_all_tools()
             self.assertFalse(
                 executor.context.all_skills.isEmpty(),
                 "初始状态下 context.all_skills 应该已经从 global_skills 自动填充"

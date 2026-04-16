@@ -24,7 +24,7 @@ class TestContextRetention(unittest.TestCase):
         self.global_config = GlobalConfig()
         self.context = Context(config=self.global_config)
         
-        # Initialize skillkit_hook - this is the key!
+        # Initialize toolkit_hook - this is the key!
         self.toolkit_hook = ToolkitHook()
         self.context.set_toolkit_hook(self.toolkit_hook)
 
@@ -51,7 +51,7 @@ class TestContextRetention(unittest.TestCase):
             owner_toolkit=mock_toolkit
         )
         
-        # Process the result through skillkit_hook
+        # Process the result through toolkit_hook
         result_ref = self.toolkit_hook.process_result(
             tool_name="_bash",
             result="x" * 5000  # 5000 char output
@@ -83,12 +83,12 @@ class TestContextRetention(unittest.TestCase):
 
     def test_context_retention_without_toolkit_hook_returns_full_result(self):
         """
-        Test that without skillkit_hook, the full result is returned.
+        Test that without toolkit_hook, the full result is returned.
         
-        This reproduces the actual bug - when skillkit_hook is None,
+        This reproduces the actual bug - when toolkit_hook is None,
         the context retention is bypassed.
         """
-        # Create context WITHOUT skillkit_hook
+        # Create context WITHOUT toolkit_hook
         context_no_hook = Context(config=self.global_config)
         # Explicitly verify it's not set
         self.assertFalse(context_no_hook.has_toolkit_hook())
@@ -100,7 +100,7 @@ class TestContextRetention(unittest.TestCase):
     def test_prompt_strategy_uses_toolkit_hook(self):
         """
         Test that PromptStrategy.append_tool_response_message uses
-        the skillkit_hook to process results.
+        the toolkit_hook to process results.
         """
         strategy = PromptStrategy()
         
@@ -146,7 +146,7 @@ class TestContextRetention(unittest.TestCase):
     def test_tool_call_strategy_uses_toolkit_hook(self):
         """
         Test that ToolCallStrategy.append_tool_response_message uses
-        the skillkit_hook to process results.
+        the toolkit_hook to process results.
         """
         strategy = ToolCallStrategy()
         

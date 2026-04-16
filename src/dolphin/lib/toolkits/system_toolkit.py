@@ -547,7 +547,7 @@ class SystemFunctionsToolkit(Toolkit):
 
         # Get context from props (injected by tool execution flow)
         props = kwargs.get("props", {})
-        context = props.get("gvp", None)  # Note: context is passed as 'gvp' in skill_run()
+        context = props.get("gvp", None)  # Note: context is passed as 'gvp' in tool_run()
         if context is None:
             return "Error: context not available. This tool must be called within a running session."
 
@@ -638,9 +638,9 @@ class SystemFunctionsToolkit(Toolkit):
             )
 
         def _try_skill() -> tuple[str | None, str | None]:
-            hook = getattr(context, "skillkit_hook", None)
+            hook = getattr(context, "toolkit_hook", None)
             if hook is None:
-                return None, "Error: skillkit_hook not available in context."
+                return None, "Error: toolkit_hook not available in context."
 
             validation_error = _validate_skill_reference_id()
             if validation_error:

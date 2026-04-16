@@ -1,6 +1,6 @@
-"""Unified skill invocation deduplication interface and implementation
+"""Unified tool invocation deduplication interface and implementation
 
-This module provides an abstract base class and default implementation for skill invocation deduplication,
+This module provides an abstract base class and default implementation for tool invocation deduplication,
 used to detect and handle duplicate tool calls, preventing infinite loops.
 """
 
@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional, Dict, Tuple
 
 
-class SkillCallDeduplicator(ABC):
+class ToolCallDeduplicator(ABC):
     """Base class for skill call deduplicator
 
         Provides a unified interface for detecting duplicate tool calls.
@@ -66,7 +66,7 @@ class SkillCallDeduplicator(ABC):
         pass
 
 
-class NoOpSkillCallDeduplicator(SkillCallDeduplicator):
+class NoOpToolCallDeduplicator(ToolCallDeduplicator):
     """Empty implementation of skill call deduplicator
 
         Use when deduplication logic needs to be disabled. This implementation:
@@ -95,7 +95,7 @@ class NoOpSkillCallDeduplicator(SkillCallDeduplicator):
         return []
 
 
-class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
+class DefaultToolCallDeduplicator(ToolCallDeduplicator):
     """Default skill call deduplication implementation
 
         Supports two skill_call formats:
@@ -109,17 +109,17 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
     """
 
     def __init__(self):
-        self.skillcalls: Dict[str, int] = {}
+        self.toolcalls: Dict[str, int] = {}
         self.call_results: Dict[str, str] = {}
         # Import polling tools from constants to avoid hardcoding.
         # These tools are expected to be called repeatedly (polling-style).
         # Do NOT count these towards duplicate-call termination.
         from dolphin.core.common.constants import POLLING_TOOLS
-        self._always_allow_duplicate_skills = POLLING_TOOLS
+        self._always_allow_duplicate_tools = POLLING_TOOLS
 
     def clear(self):
         """Clear all records"""
-        self.skillcalls.clear()
+        self.toolcalls.clear()
         self.call_results.clear()
 
     def get_history(self) -> list:
@@ -129,7 +129,7 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
             List of skill call dictionaries with name and arguments
         """
         history = []
-        for call_key in self.skillcalls.keys():
+        for call_key in self.toolcalls.keys():
             try:
                 # Parse the call_key format: "skill_name:json_args"
                 if ':' in call_key:
@@ -228,7 +228,7 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
             result: optional call result
         """
         key = self.get_call_key(skill_call)
-        self.skillcalls[key] = self.skillcalls.get(key, 0) + 1
+        self.toolcalls[key] = self.toolcalls.get(key, 0) + 1
         if result is not None:
             self.call_results[key] = result
 
@@ -250,7 +250,7 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
         if self._should_allow_retry(skill_call, key):
             return False
 
-        return self.skillcalls.get(key, 0) >= self.MAX_DUPLICATE_COUNT
+        return self.toolcalls.get(key, 0) >= self.MAX_DUPLICATE_COUNT
 
     def _should_allow_retry(self, skill_call: Any, call_key: str) -> bool:
         """Determine whether retrying a skill call should be allowed.
@@ -267,7 +267,7 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
         skill_name, arguments = self._extract_skill_info(skill_call)
 
         # Polling tools are expected to be invoked repeatedly.
-        if skill_name in self._always_allow_duplicate_skills:
+        if skill_name in self._always_allow_duplicate_tools:
             return True
 
         # Calls without arguments are not specially handled
@@ -299,7 +299,7 @@ class DefaultSkillCallDeduplicator(SkillCallDeduplicator):
             int: Number of repetitions
         """
         key = self.get_call_key(skill_call)
-        return self.skillcalls.get(key, 0)
+        return self.toolcalls.get(key, 0)
 
     def repr_skill_call(self, skill_call: Any) -> str:
         """Get the string representation of a skill call (for logging)

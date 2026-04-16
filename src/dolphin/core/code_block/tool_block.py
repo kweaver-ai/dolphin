@@ -75,7 +75,7 @@ class ToolBlock(BasicCodeBlock):
                 raw_tool_args = input_dict["tool_args"]
                 new_tool_args = {arg["key"]: arg["value"] for arg in raw_tool_args}
 
-                # *** FIX: Pass saved_stage_id to skill_run ***
+                # *** FIX: Pass saved_stage_id to tool_run ***
                 props = {"intervention": False, "saved_stage_id": saved_stage_id, "gvp": self.context}
                 
                 # *** Handle skip action ***
@@ -118,7 +118,7 @@ class ToolBlock(BasicCodeBlock):
                 else:
                     # Normal execution (not skipped)
                     resp_item = None
-                    async for resp_item in self.skill_run(
+                    async for resp_item in self.tool_run(
                         source_type=SourceType.SKILL,
                         skill_name=tool_name,
                         skill_params_json=new_tool_args,
@@ -148,11 +148,11 @@ class ToolBlock(BasicCodeBlock):
                 # step2: Obtain the tool object and execute the tool call
                 tool_name = tool_call_info["tool_name"]
 
-                # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
+                # Save intervention vars (stage_id will be filled by tool_run after creating the stage)
                 intervention_vars = {
                     "tool_name": tool_call_info["tool_name"],
                     "tool_call_info": tool_call_info,
-                    "stage_id": None,  # Will be updated by skill_run() after stage creation
+                    "stage_id": None,  # Will be updated by tool_run() after stage creation
                 }
 
                 self.context.set_variable(
@@ -162,7 +162,7 @@ class ToolBlock(BasicCodeBlock):
                 interventions += [intervention_vars]
                 self.context.set_variable("interventions", interventions)
 
-                async for resp_item in self.skill_run(
+                async for resp_item in self.tool_run(
                     source_type=SourceType.SKILL,
                     skill_name=tool_name,
                     skill_params_json=tool_call_info["args"],

@@ -265,7 +265,7 @@ class Env:
         # Set global skills (including agent skills) into the agent's executor context.
         if hasattr(agent, "executor") and hasattr(agent.executor, "context"):
             allSkills = self.globalSkills.getAllTools()
-            agent.set_skills(allSkills)
+            agent.set_tools(allSkills)
 
     async def arun(self, agentName: str, **kwargs) -> AsyncGenerator[Any, None]:
         """
