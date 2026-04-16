@@ -1,5 +1,5 @@
-"""SkillKit Hook Module
-Provides hook functions and utility methods for processing skill results.
+"""Toolkit Hook Module
+Provides hook functions and utility methods for processing tool results.
 
 Main Features:
 - Before returning to LLM: get_for_llm -> generates understandable data based on strategy
@@ -16,15 +16,15 @@ from dolphin.lib.skill_results.cache_backend import (
     CacheBackend,
     MemoryCacheBackend,
 )
-from dolphin.core.skill.skill_function import SkillFunction, DynamicAPISkillFunction
+from dolphin.core.tool.tool_function import ToolFunction, DynamicAPIToolFunction
 
 from dolphin.core.logging.logger import get_logger
 
 logger = get_logger("skill_results")
 
 
-class SkillkitHook:
-    """Skillkit Result Processing Hooks.
+class ToolkitHook:
+    """Toolkit Result Processing Hooks.
 
     - Provides a unified interface for result retrieval and processing
     - Supports data transformation with different strategies
@@ -69,7 +69,7 @@ class SkillkitHook:
         self,
         reference_id: str,
         strategy_name: str = None,
-        skill: SkillFunction = None,
+        tool: ToolFunction = None,
         **kwargs,
     ) -> Optional[str]:
         """Alias: equivalent to get_for_llm. Uses the default strategy by default.
@@ -124,8 +124,8 @@ class SkillkitHook:
                     return message
 
         # Normal processing
-        if strategy_name is None and skill is not None:
-            strategy_name = skill.get_first_valid_llm_strategy()
+        if strategy_name is None and tool is not None:
+            strategy_name = tool.get_first_valid_llm_strategy()
 
         strategy_name = strategy_name if strategy_name else "default"
 
@@ -137,7 +137,7 @@ class SkillkitHook:
         self,
         reference_id: str,
         strategy_name: str = "default",
-        skill: SkillFunction = None,
+        tool: ToolFunction = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Alias: equivalent to get_for_app. Uses the default strategy by default.
@@ -149,13 +149,13 @@ class SkillkitHook:
         # Check if this is a dynamic API tool response
         ref = self._get_result_reference(reference_id)
 
-        if ref and skill and isinstance(skill, DynamicAPISkillFunction):
+        if ref and tool and isinstance(tool, DynamicAPIToolFunction):
             full_result = ref.get_full_result()
             return {"answer": full_result}
         
         # Normal processing
         try:
-            strategy_name = skill.get_first_valid_app_strategy()
+            strategy_name = tool.get_first_valid_app_strategy()
             if not strategy_name:
                 return {"error": "未找到有效的APP策略"}
 
@@ -167,9 +167,9 @@ class SkillkitHook:
     def on_before_send_to_context(
         self,
         reference_id: str,
-        skill: SkillFunction,
-        skillkit_name: str,
-        resource_skill_path: Optional[str] = None,
+        tool: ToolFunction,
+        toolkit_name: str,
+        resource_tool_path: Optional[str] = None,
     ) -> tuple[str, Dict[str, Any]]:
         """Hook called before sending result to context (SCRATCHPAD message).
 
@@ -178,15 +178,15 @@ class SkillkitHook:
 
         Args:
             reference_id: The result reference ID
-            skill: The executed skill function
-            skillkit_name: Name of the skillkit
-            resource_skill_path: Optional path to resource skill
+            tool: The executed tool function
+            toolkit_name: Name of the toolkit
+            resource_tool_path: Optional path to resource tool
 
         Returns:
             tuple[str, dict]: (processed_content, metadata)
         """
-        from dolphin.core.skill.context_retention import (
-            SkillContextRetention,
+        from dolphin.core.tool.context_retention import (
+            ToolContextRetention,
             get_context_retention_strategy,
             ContextRetentionMode,
         )
@@ -200,9 +200,9 @@ class SkillkitHook:
             full_result = str(full_result)
 
         # Get decorator config or default
-        config = getattr(skill.func, '_context_retention', None)
+        config = getattr(tool.func, '_context_retention', None)
         if not config:
-            config = SkillContextRetention()  # Default FULL mode
+            config = ToolContextRetention()  # Default FULL mode
 
         # Apply strategy
         strategy = get_context_retention_strategy(config.mode)
