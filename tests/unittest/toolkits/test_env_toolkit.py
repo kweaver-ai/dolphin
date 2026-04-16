@@ -1,6 +1,6 @@
 import json
 
-from dolphin.lib.skillkits.env_skillkit import EnvSkillkit
+from dolphin.lib.toolkits.env_toolkit import EnvToolkit
 
 
 class _DummyExecutor:
@@ -12,7 +12,7 @@ class _DummyExecutor:
 
 
 def test_get_env_info_accepts_props_and_returns_json():
-    skillkit = EnvSkillkit(executor=_DummyExecutor())
+    skillkit = EnvToolkit(executor=_DummyExecutor())
 
     result = skillkit._get_env_info(props={"gvp": object()})
     payload = json.loads(result)

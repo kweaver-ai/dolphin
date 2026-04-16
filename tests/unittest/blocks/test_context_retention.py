@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, patch
 from dolphin.core.common.enums import MessageRole, Messages
 from dolphin.core.context.context import Context
 from dolphin.core.config.global_config import GlobalConfig
-from dolphin.lib.skill_results.skillkit_hook import SkillkitHook
-from dolphin.core.skill.context_retention import context_retention
+from dolphin.lib.skill_results.toolkit_hook import ToolkitHook
+from dolphin.core.tool.context_retention import context_retention
 from dolphin.core.code_block.explore_strategy import PromptStrategy, ToolCallStrategy
 
 
@@ -25,8 +25,8 @@ class TestContextRetention(unittest.TestCase):
         self.context = Context(config=self.global_config)
         
         # Initialize skillkit_hook - this is the key!
-        self.skillkit_hook = SkillkitHook()
-        self.context.set_skillkit_hook(self.skillkit_hook)
+        self.toolkit_hook = ToolkitHook()
+        self.context.set_toolkit_hook(self.toolkit_hook)
 
     def test_context_retention_summary_mode_limits_output(self):
         """
@@ -43,26 +43,26 @@ class TestContextRetention(unittest.TestCase):
             return "x" * 5000  # 5000 characters
         
         # Create a mock skill function object
-        from dolphin.core.skill.skill_function import SkillFunction
+        from dolphin.core.tool.tool_function import ToolFunction
         
-        mock_skillkit = MagicMock()
-        skill = SkillFunction(
+        mock_toolkit = MagicMock()
+        skill = ToolFunction(
             func=mock_bash_skill,
-            owner_skillkit=mock_skillkit
+            owner_toolkit=mock_toolkit
         )
         
         # Process the result through skillkit_hook
-        result_ref = self.skillkit_hook.process_result(
+        result_ref = self.toolkit_hook.process_result(
             tool_name="_bash",
             result="x" * 5000  # 5000 char output
         )
         
         # Get the content that would be sent to context
-        processed_content, metadata = self.skillkit_hook.on_before_send_to_context(
+        processed_content, metadata = self.toolkit_hook.on_before_send_to_context(
             reference_id=result_ref.reference_id,
-            skill=skill,
-            skillkit_name="EnvSkillkit",
-            resource_skill_path=None
+            tool=skill,
+            toolkit_name="EnvToolkit",
+            resource_tool_path=None
         )
         
         # Assert: The processed content should be much shorter than 5000 chars
@@ -81,7 +81,7 @@ class TestContextRetention(unittest.TestCase):
         self.assertEqual(metadata.get("retention_mode"), "summary")
         self.assertEqual(metadata.get("original_length"), 5000)
 
-    def test_context_retention_without_skillkit_hook_returns_full_result(self):
+    def test_context_retention_without_toolkit_hook_returns_full_result(self):
         """
         Test that without skillkit_hook, the full result is returned.
         
@@ -91,13 +91,13 @@ class TestContextRetention(unittest.TestCase):
         # Create context WITHOUT skillkit_hook
         context_no_hook = Context(config=self.global_config)
         # Explicitly verify it's not set
-        self.assertFalse(context_no_hook.has_skillkit_hook())
+        self.assertFalse(context_no_hook.has_toolkit_hook())
         
         # In this case, the explore_block would fall back to returning
         # the full result from recorder.getProgress().get_step_answers()
         # which would be the full 5000 characters
 
-    def test_prompt_strategy_uses_skillkit_hook(self):
+    def test_prompt_strategy_uses_toolkit_hook(self):
         """
         Test that PromptStrategy.append_tool_response_message uses
         the skillkit_hook to process results.
@@ -109,21 +109,21 @@ class TestContextRetention(unittest.TestCase):
         def mock_bash(cmd: str) -> str:
             return "y" * 3000
         
-        from dolphin.core.skill.skill_function import SkillFunction
-        mock_skillkit = MagicMock()
-        skill = SkillFunction(func=mock_bash, owner_skillkit=mock_skillkit)
+        from dolphin.core.tool.tool_function import ToolFunction
+        mock_toolkit = MagicMock()
+        skill = ToolFunction(func=mock_bash, owner_toolkit=mock_toolkit)
         
         # Simulate tool execution and result processing
-        result_ref = self.skillkit_hook.process_result(
+        result_ref = self.toolkit_hook.process_result(
             tool_name="_bash",
             result="y" * 3000
         )
         
         # Get processed content
-        content, metadata = self.skillkit_hook.on_before_send_to_context(
+        content, metadata = self.toolkit_hook.on_before_send_to_context(
             reference_id=result_ref.reference_id,
-            skill=skill,
-            skillkit_name="EnvSkillkit"
+            tool=skill,
+            toolkit_name="EnvToolkit"
         )
         
         # Add to context using strategy
@@ -143,7 +143,7 @@ class TestContextRetention(unittest.TestCase):
             # The content should be the summarized version
             self.assertLess(len(last_msg.content), 500)
 
-    def test_tool_call_strategy_uses_skillkit_hook(self):
+    def test_tool_call_strategy_uses_toolkit_hook(self):
         """
         Test that ToolCallStrategy.append_tool_response_message uses
         the skillkit_hook to process results.
@@ -155,21 +155,21 @@ class TestContextRetention(unittest.TestCase):
         def mock_python(code: str) -> str:
             return "z" * 4000
         
-        from dolphin.core.skill.skill_function import SkillFunction
-        mock_skillkit = MagicMock()
-        skill = SkillFunction(func=mock_python, owner_skillkit=mock_skillkit)
+        from dolphin.core.tool.tool_function import ToolFunction
+        mock_toolkit = MagicMock()
+        skill = ToolFunction(func=mock_python, owner_toolkit=mock_toolkit)
         
         # Process result
-        result_ref = self.skillkit_hook.process_result(
+        result_ref = self.toolkit_hook.process_result(
             tool_name="_python",
             result="z" * 4000
         )
         
         # Get processed content
-        content, metadata = self.skillkit_hook.on_before_send_to_context(
+        content, metadata = self.toolkit_hook.on_before_send_to_context(
             reference_id=result_ref.reference_id,
-            skill=skill,
-            skillkit_name="EnvSkillkit"
+            tool=skill,
+            toolkit_name="EnvToolkit"
         )
         
         # Add to context

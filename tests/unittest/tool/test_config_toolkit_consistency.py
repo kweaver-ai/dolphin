@@ -13,8 +13,8 @@ EXAMPLES_DIR = Path(__file__).resolve().parents[3] / "examples"
 
 
 def _get_registered_entry_point_names() -> set[str]:
-    """Return the set of registered dolphin.skillkits entry point names."""
-    eps = importlib.metadata.entry_points(group="dolphin.skillkits")
+    """Return the set of registered dolphin.toolkits entry point names."""
+    eps = importlib.metadata.entry_points(group="dolphin.toolkits")
     return {ep.name for ep in eps}
 
 

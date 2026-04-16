@@ -1,7 +1,7 @@
 import pytest
 
 from dolphin.core.context.context import Context
-from dolphin.lib.skillkits.agent_skillkit import AgentSkillKit
+from dolphin.lib.toolkits.agent_toolkit import AgentToolkit
 
 
 class _FakeExecutor:
@@ -38,10 +38,10 @@ class _FakeAgent:
 
 
 @pytest.mark.asyncio
-async def test_agent_skillkit_re_attaches_parent_context_after_initialize():
+async def test_agent_toolkit_re_attaches_parent_context_after_initialize():
     parent_context = Context(verbose=True, is_cli=True)
     fake_agent = _FakeAgent()
-    kit = AgentSkillKit(fake_agent, "fake_agent")
+    kit = AgentToolkit(fake_agent, "fake_agent")
 
     kit.set_context(parent_context)
     await kit.arunAgentFunc(query_str="hello")

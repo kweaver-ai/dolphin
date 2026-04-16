@@ -1,14 +1,14 @@
 from typing import List, Any
 
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolkit import Toolkit
 
 
-class MockedSkillkit(Skillkit):
+class MockedToolkit(Toolkit):
     def __init__(self):
         super().__init__()
-        self.name = "mocked_skillkit"
-        self.description = "mocked_skillkit"
+        self.name = "mocked_toolkit"
+        self.description = "mocked_toolkit"
         self.inputs = {}
         self.outputs = {}
         self.props = {}
@@ -109,25 +109,25 @@ class MockedSkillkit(Skillkit):
         """
         yield f"Safe operation completed with param: {param}"
 
-    def getSkills(self) -> List[SkillFunction]:
+    def getTools(self) -> List[ToolFunction]:
         """
         get tools skill.
         """
-        high_risk_skill = SkillFunction(self.high_risk_tool)
+        high_risk_skill = ToolFunction(self.high_risk_tool)
         high_risk_skill.interrupt_config = {
             "requires_confirmation": True,
             "confirmation_message": "⚠️  Confirm high risk operation with param='{param}'? This operation cannot be undone!"
         }
         
-        safe_skill = SkillFunction(self.safe_tool)
+        safe_skill = ToolFunction(self.safe_tool)
         
         return [
-            SkillFunction(self.poemWriterStream),
-            SkillFunction(self.webSearch),
-            SkillFunction(self.financeExpert),
-            SkillFunction(self.computerExpert),
-            SkillFunction(self.emailSender),
-            SkillFunction(self.saveToLocal),
+            ToolFunction(self.poemWriterStream),
+            ToolFunction(self.webSearch),
+            ToolFunction(self.financeExpert),
+            ToolFunction(self.computerExpert),
+            ToolFunction(self.emailSender),
+            ToolFunction(self.saveToLocal),
             high_risk_skill,
             safe_skill,
         ]

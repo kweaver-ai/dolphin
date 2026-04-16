@@ -3,12 +3,12 @@ import tempfile
 
 import pytest
 
-from dolphin.lib.skillkits.system_skillkit import SystemFunctionsSkillKit
+from dolphin.lib.toolkits.system_toolkit import SystemFunctionsToolkit
 
 
 @pytest.fixture
 def skillkit():
-    return SystemFunctionsSkillKit()
+    return SystemFunctionsToolkit()
 
 
 def test_extract_code_with_language(skillkit):

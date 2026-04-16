@@ -23,9 +23,9 @@ from typing import Optional, Dict, Any
 
 from dolphin.core.executor.dolphin_executor import DolphinExecutor
 from dolphin.sdk.agent.dolphin_agent import DolphinAgent
-from dolphin.sdk.skill.global_skills import GlobalSkills
+from dolphin.sdk.tool.global_toolkits import GlobalToolkits
 from dolphin.core.config.global_config import GlobalConfig
-from dolphin.lib.skillkits.agent_skillkit import AgentSkillKit
+from dolphin.lib.toolkits.agent_toolkit import AgentToolkit
 
 
 # ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ def _make_llm_config():
 @pytest.mark.asyncio
 async def test_sub_agent_registered_as_skill_in_api_mode():
     """
-    验证 API 模式下，通过 GlobalSkills.registerAgentSkill 注册的 sub-agent
+    验证 API 模式下，通过 GlobalToolkits.registerAgentTool 注册的 sub-agent
     能够在 DolphinExecutor 中通过 @agent_name() 被调用。
 
     这是最基础的验证：手动注册 agent skill 后，executor 能否找到它。
@@ -63,12 +63,12 @@ async def test_sub_agent_registered_as_skill_in_api_mode():
     # 1. 创建 sub-agent
     sub_agent = _make_sub_agent()
 
-    # 2. 创建 GlobalSkills 并注册 sub-agent
-    global_skills = GlobalSkills(GlobalConfig())
-    global_skills.registerAgentSkill("helper_agent", sub_agent)
+    # 2. 创建 GlobalToolkits 并注册 sub-agent
+    global_skills = GlobalToolkits(GlobalConfig())
+    global_skills.registerAgentTool("helper_agent", sub_agent)
 
     # 3. 验证 skill 已注册
-    skill_names = global_skills.getSkillNames()
+    skill_names = global_skills.getToolNames()
     assert "helper_agent" in skill_names, (
         f"helper_agent should be registered as a skill, "
         f"but found: {skill_names}"
@@ -86,9 +86,9 @@ async def test_executor_can_call_sub_agent_via_at_syntax():
     # 1. 创建 sub-agent
     sub_agent = _make_sub_agent()
 
-    # 2. 创建 GlobalSkills 并注册 sub-agent
-    global_skills = GlobalSkills(GlobalConfig())
-    global_skills.registerAgentSkill("helper_agent", sub_agent)
+    # 2. 创建 GlobalToolkits 并注册 sub-agent
+    global_skills = GlobalToolkits(GlobalConfig())
+    global_skills.registerAgentTool("helper_agent", sub_agent)
 
     # 3. 创建 orchestrator 的 DPH 脚本
     orchestrator_dph = """
@@ -131,9 +131,9 @@ async def test_dolphin_agent_api_mode_sub_agent_call():
     # 1. 创建 sub-agent
     sub_agent = _make_sub_agent()
 
-    # 2. 创建 GlobalSkills 并注册 sub-agent
-    global_skills = GlobalSkills(GlobalConfig())
-    global_skills.registerAgentSkill("helper_agent", sub_agent)
+    # 2. 创建 GlobalToolkits 并注册 sub-agent
+    global_skills = GlobalToolkits(GlobalConfig())
+    global_skills.registerAgentTool("helper_agent", sub_agent)
 
     # 3. 创建 orchestrator agent（API 模式：直接传 content）
     orchestrator = DolphinAgent(
@@ -193,7 +193,7 @@ async def test_cli_mode_agent_call_works_via_env():
         )
 
         # 4. 验证 helper_agent 作为 skill 被注册
-        skill_names = env.globalSkills.getSkillNames()
+        skill_names = env.globalSkills.getToolNames()
         assert "helper_agent" in skill_names, (
             f"helper_agent should be registered as skill in CLI mode, "
             f"found: {skill_names}"

@@ -383,7 +383,7 @@ test_tool -> result
                 "dolphin.sdk.agent.dolphin_agent.DolphinAgent._validate_syntax"
             ),
             patch("dolphin.lib.memory.manager.MemoryManager"),
-            patch("dolphin.sdk.skill.global_skills.GlobalSkills"),
+            patch("dolphin.sdk.tool.global_toolkits.GlobalToolkits"),
         ):
             # 创建Mock executor实例
             mock_executor_instance = MagicMock()

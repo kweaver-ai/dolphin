@@ -19,8 +19,8 @@ from dolphin.core.code_block.judge_block import JudgeBlock
 from dolphin.core.code_block.explore_block import ExploreBlock
 from dolphin.core.code_block.explore_block_v2 import ExploreBlockV2
 from dolphin.core.utils.tools import ToolInterrupt
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skill_function import SkillFunction
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.tool_function import ToolFunction
 from dolphin.core import flags
 
 
@@ -60,14 +60,14 @@ class MockTool:
         }
 
 
-class TestSkillkit(Skillkit):
+class TestToolkit(Toolkit):
     """Test skillkit that provides mock tools"""
     
-    def __init__(self, skills_dict: Dict[str, SkillFunction]):
+    def __init__(self, skills_dict: Dict[str, ToolFunction]):
         super().__init__()
         self._skills_dict = skills_dict
     
-    def _createSkills(self):
+    def _createTools(self):
         """Return list of test skills"""
         return list(self._skills_dict.values())
 
@@ -78,7 +78,7 @@ def mock_context():
     config = GlobalConfig()
     context = Context(config=config)
     
-    # Convert MockTools to async functions for SkillFunction
+    # Convert MockTools to async functions for ToolFunction
     async def high_risk_tool(param: str = "", **kwargs):
         """High risk tool that requires confirmation
         
@@ -95,15 +95,15 @@ def mock_context():
         """
         return {"result": f"Safe operation completed with param: {param}"}
     
-    # Create SkillFunction instances
-    high_risk_skill = SkillFunction(high_risk_tool)
-    # Add interrupt_config to the SkillFunction
+    # Create ToolFunction instances
+    high_risk_skill = ToolFunction(high_risk_tool)
+    # Add interrupt_config to the ToolFunction
     high_risk_skill.interrupt_config = {
         "requires_confirmation": True,
         "confirmation_message": "Confirm high_risk_tool with param={param}?"
     }
     
-    safe_skill = SkillFunction(safe_tool)
+    safe_skill = ToolFunction(safe_tool)
     # No interrupt_config for safe tool
     
     # Create test skillkit with these skills
@@ -111,7 +111,7 @@ def mock_context():
         "high_risk_tool": high_risk_skill,
         "safe_tool": safe_skill
     }
-    skillkit = TestSkillkit(skills_dict)
+    skillkit = TestToolkit(skills_dict)
     
     # Use set_skills to properly initialize all_skills
     context.set_skills(skillkit)

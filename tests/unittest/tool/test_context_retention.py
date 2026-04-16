@@ -1,10 +1,10 @@
 """Tests for Skill Context Retention strategies."""
 
 import pytest
-from dolphin.core.skill.context_retention import (
+from dolphin.core.tool.context_retention import (
     ContextRetentionMode,
     DEFAULT_SUMMARY_MAX_LENGTH,
-    SkillContextRetention,
+    ToolContextRetention,
     SummaryContextStrategy,
     FullContextStrategy,
     PinContextStrategy,
@@ -32,12 +32,12 @@ class TestContextRetentionMode:
         assert ContextRetentionMode("reference") == ContextRetentionMode.REFERENCE
 
 
-class TestSkillContextRetention:
-    """Tests for SkillContextRetention dataclass."""
+class TestToolContextRetention:
+    """Tests for ToolContextRetention dataclass."""
 
     def test_default_values(self):
         """Test default configuration values."""
-        config = SkillContextRetention()
+        config = ToolContextRetention()
         assert config.mode == ContextRetentionMode.FULL
         assert config.max_length == DEFAULT_SUMMARY_MAX_LENGTH
         assert config.detail_hint_min_omitted == 0
@@ -47,7 +47,7 @@ class TestSkillContextRetention:
 
     def test_custom_values(self):
         """Test custom configuration values."""
-        config = SkillContextRetention(
+        config = ToolContextRetention(
             mode=ContextRetentionMode.SUMMARY,
             max_length=500,
             detail_hint_min_omitted=1000,
@@ -68,7 +68,7 @@ class TestSummaryContextStrategy:
 
     def setup_method(self):
         self.strategy = SummaryContextStrategy()
-        self.config = SkillContextRetention(
+        self.config = ToolContextRetention(
             mode=ContextRetentionMode.SUMMARY,
             max_length=100,
         )
@@ -95,7 +95,7 @@ class TestSummaryContextStrategy:
 
     def test_reference_hint_omitted_when_under_threshold(self):
         """Reference hint should be skipped when omission is below threshold."""
-        config = SkillContextRetention(
+        config = ToolContextRetention(
             mode=ContextRetentionMode.SUMMARY,
             max_length=100,
             detail_hint_min_omitted=500,
@@ -118,7 +118,7 @@ class TestFullContextStrategy:
 
     def setup_method(self):
         self.strategy = FullContextStrategy()
-        self.config = SkillContextRetention(mode=ContextRetentionMode.FULL)
+        self.config = ToolContextRetention(mode=ContextRetentionMode.FULL)
 
     def test_content_unchanged(self):
         """Content should be returned unchanged."""
@@ -132,7 +132,7 @@ class TestPinContextStrategy:
 
     def setup_method(self):
         self.strategy = PinContextStrategy()
-        self.config = SkillContextRetention(mode=ContextRetentionMode.PIN)
+        self.config = ToolContextRetention(mode=ContextRetentionMode.PIN)
 
     def test_pin_marker_added(self):
         """PIN_MARKER should be added to content."""
@@ -156,7 +156,7 @@ class TestReferenceContextStrategy:
 
     def setup_method(self):
         self.strategy = ReferenceContextStrategy()
-        self.config = SkillContextRetention(
+        self.config = ToolContextRetention(
             mode=ContextRetentionMode.REFERENCE,
             reference_hint="Custom hint",
         )
@@ -173,7 +173,7 @@ class TestReferenceContextStrategy:
     def test_fallback_to_summary_without_reference(self):
         """Should fallback to summary strategy when no reference_id."""
         result = "A" * 200
-        config = SkillContextRetention(
+        config = ToolContextRetention(
             mode=ContextRetentionMode.REFERENCE,
             max_length=100,
         )

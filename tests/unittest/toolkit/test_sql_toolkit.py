@@ -1,10 +1,10 @@
 import unittest
-from dolphin.lib.skillkits.sql_skillkit import SQLSkillkit
+from dolphin.lib.toolkits.sql_toolkit import SQLToolkit
 
 
-class TestSQLSkillkit(unittest.TestCase):
+class TestSQLToolkit(unittest.TestCase):
     def setUp(self):
-        self.skillkit = SQLSkillkit()
+        self.skillkit = SQLToolkit()
 
     def test_extract_sql_empty_input(self):
         """测试空输入"""

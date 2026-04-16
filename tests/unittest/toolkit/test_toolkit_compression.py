@@ -2,14 +2,14 @@ import json
 import unittest
 
 
-from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.tool.toolkit import Toolkit
 
 
-class TestSkillkitCompression(unittest.TestCase):
+class TestToolkitCompression(unittest.TestCase):
     def test_include_rule_keeps_only_specified_fields(self):
         message = 'prefix =>#my_skill:{"a":1, "b":2, "c":3} suffix'
         rules = {"my_skill": {"include": ["b"]}}
-        compressed = Skillkit.compress_message_with_rules(message, rules)
+        compressed = Toolkit.compress_message_with_rules(message, rules)
 
         # 提取压缩后的 JSON 以验证内容
         start = compressed.find("=>#my_skill:")
@@ -24,7 +24,7 @@ class TestSkillkitCompression(unittest.TestCase):
     def test_exclude_rule_drops_specified_fields(self):
         message = '=>#my_skill:{"keep": "yes", "drop": "no", "also": 1}'
         rules = {"my_skill": {"exclude": ["drop"]}}
-        compressed = Skillkit.compress_message_with_rules(message, rules)
+        compressed = Toolkit.compress_message_with_rules(message, rules)
 
         start = compressed.find("=>#my_skill:")
         payload_start = compressed.find("{", start)
@@ -41,7 +41,7 @@ class TestSkillkitCompression(unittest.TestCase):
             "skillA": {"include": ["y"]},
             "skillB": {"exclude": ["v"]},
         }
-        compressed = Skillkit.compress_message_with_rules(message, rules)
+        compressed = Toolkit.compress_message_with_rules(message, rules)
 
         # 校验 skillA
         start_a = compressed.find("=>#skillA:")
@@ -63,7 +63,7 @@ class TestSkillkitCompression(unittest.TestCase):
 
     def test_no_matching_rules_keeps_original(self):
         message = '=>#unknown:{"a":1, "b":2}'
-        compressed = Skillkit.compress_message_with_rules(message, rules={})
+        compressed = Toolkit.compress_message_with_rules(message, rules={})
         self.assertEqual(message, compressed)
 
 

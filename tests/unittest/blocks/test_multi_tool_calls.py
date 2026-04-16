@@ -322,10 +322,10 @@ class TestPromptStrategyMultiToolCalls:
         stream_item.answer = "=>#{test_skill}: {}"
         context = MagicMock()
         # Mock skillkit and skill validation
-        mock_skillkit = MagicMock()
-        mock_skillkit.isEmpty.return_value = False
-        mock_skillkit.getSkill.return_value = MagicMock()  # Skill exists
-        context.skillkit = mock_skillkit
+        mock_toolkit = MagicMock()
+        mock_toolkit.isEmpty.return_value = False
+        mock_toolkit.getTool.return_value = MagicMock()  # Skill exists
+        context.skillkit = mock_toolkit
 
         result = strategy.detect_tool_calls(stream_item, context)
 

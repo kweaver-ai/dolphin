@@ -5,8 +5,8 @@ import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 
-from dolphin.lib.skillkits.memory_skillkit import (
-    MemorySkillkit,
+from dolphin.lib.toolkits.memory_toolkit import (
+    MemoryToolkit,
     MemoryStore,
     MemoryBucket,
     RWLock,
@@ -254,11 +254,11 @@ class TestMemoryStore(unittest.TestCase):
             self.assertIs(bucket, buckets[0])
 
 
-class TestMemorySkillkit(unittest.TestCase):
-    """Test the main MemorySkillkit interface"""
+class TestMemoryToolkit(unittest.TestCase):
+    """Test the main MemoryToolkit interface"""
 
     def setUp(self):
-        self.skillkit = MemorySkillkit()
+        self.skillkit = MemoryToolkit()
         self.session_id = f"test_session_{int(time.time())}"
 
     def test_mem_set_get(self):
@@ -455,7 +455,7 @@ class TestConcurrency(unittest.TestCase):
     """Test concurrent operations"""
 
     def setUp(self):
-        self.skillkit = MemorySkillkit()
+        self.skillkit = MemoryToolkit()
         self.session_id = f"concurrent_test_{int(time.time())}"
 
     def test_concurrent_read_write(self):
@@ -544,7 +544,7 @@ class TestMemorySandboxSecurity(unittest.TestCase):
     """Test security features of memory sandbox"""
 
     def setUp(self):
-        self.skillkit = MemorySkillkit()
+        self.skillkit = MemoryToolkit()
         self.session_id = f"security_test_{int(time.time())}"
 
     def test_path_traversal_attack(self):
@@ -644,18 +644,18 @@ class TestMemorySandboxSecurity(unittest.TestCase):
         self.assertIn("json", result.get("error", "").lower())
 
 
-class TestSkillkitInterface(unittest.TestCase):
-    """Test Skillkit interface compliance"""
+class TestToolkitInterface(unittest.TestCase):
+    """Test Toolkit interface compliance"""
 
     def setUp(self):
-        self.skillkit = MemorySkillkit()
+        self.skillkit = MemoryToolkit()
         self.session_id = f"iface_session_{int(time.time())}"
 
     def test_get_name(self):
-        self.assertEqual(self.skillkit.getName(), "memory_skillkit")
+        self.assertEqual(self.skillkit.getName(), "memory_toolkit")
 
     def test_get_skills(self):
-        skills = self.skillkit.getSkills()
+        skills = self.skillkit.getTools()
         self.assertEqual(len(skills), 10)
 
         skill_names = [skill.func.__name__ for skill in skills]

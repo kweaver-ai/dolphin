@@ -1,4 +1,4 @@
-"""Unit tests for PlanSkillkit."""
+"""Unit tests for PlanToolkit."""
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -8,16 +8,16 @@ from dolphin.core.context.cow_context import COWContext
 from dolphin.core.common.enums import CategoryBlock
 from dolphin.core.code_block.basic_code_block import BasicCodeBlock
 from dolphin.core.task_registry import TaskStatus
-from dolphin.lib.skillkits.plan_skillkit import PlanSkillkit
+from dolphin.lib.toolkits.plan_toolkit import PlanToolkit
 
 
-class TestPlanSkillkit:
-    """Test PlanSkillkit tool methods."""
+class TestPlanToolkit:
+    """Test PlanToolkit tool methods."""
 
-    def test_plan_skillkit_initialization(self):
-        """Test PlanSkillkit initialization."""
+    def test_plan_toolkit_initialization(self):
+        """Test PlanToolkit initialization."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         assert skillkit.context is context
         # Note: running_tasks has been removed - tasks are managed in TaskRegistry.running_asyncio_tasks
@@ -25,7 +25,7 @@ class TestPlanSkillkit:
 
     def test_subtask_explore_block_content_is_valid_dph(self):
         """Test subtask ExploreBlock content is parsable by BasicCodeBlock."""
-        block_content = PlanSkillkit._build_subtask_explore_block_content("Do something")
+        block_content = PlanToolkit._build_subtask_explore_block_content("Do something")
 
         context = Context()
         block = BasicCodeBlock(context=context)
@@ -34,7 +34,7 @@ class TestPlanSkillkit:
 
     def test_subtask_explore_block_content_prompt_starts_with_paren(self):
         """Test prompt starting with '(' is parsed as content, not params."""
-        block_content = PlanSkillkit._build_subtask_explore_block_content("(Do something)")
+        block_content = PlanToolkit._build_subtask_explore_block_content("(Do something)")
 
         context = Context()
         block = BasicCodeBlock(context=context)
@@ -46,7 +46,7 @@ class TestPlanSkillkit:
         """Test _plan_tasks raises RuntimeError in COWContext."""
         parent = Context()
         child = COWContext(parent, "task_1")
-        skillkit = PlanSkillkit(child)
+        skillkit = PlanToolkit(child)
 
         tasks = [{"id": "task_1", "name": "Task 1", "prompt": "Do task 1"}]
 
@@ -57,7 +57,7 @@ class TestPlanSkillkit:
     async def test_plan_tasks_enables_plan_mode(self):
         """Test _plan_tasks enables plan mode if not enabled."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         tasks = [
             {"id": "task_1", "name": "Task 1", "prompt": "Do task 1"},
@@ -82,7 +82,7 @@ class TestPlanSkillkit:
         """Test _plan_tasks validation."""
         context = Context()
         context.write_output = MagicMock()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         # Empty task list
         result = await skillkit._plan_tasks([])
@@ -118,7 +118,7 @@ class TestPlanSkillkit:
         """Test _plan_tasks in parallel mode."""
         context = Context()
         context.write_output = MagicMock()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         tasks = [
             {"id": "task_1", "name": "Task 1", "prompt": "Prompt 1"},
@@ -137,7 +137,7 @@ class TestPlanSkillkit:
         """Test _plan_tasks in sequential mode."""
         context = Context()
         context.write_output = MagicMock()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         tasks = [
             {"id": "task_1", "name": "Task 1", "prompt": "Prompt 1"},
@@ -155,7 +155,7 @@ class TestPlanSkillkit:
     async def test_check_progress_not_enabled(self):
         """Test _check_progress raises RuntimeError when plan is not enabled."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         with pytest.raises(RuntimeError, match="Plan is not enabled"):
             await skillkit._check_progress()
@@ -165,7 +165,7 @@ class TestPlanSkillkit:
         """Test _check_progress with tasks."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         # Add tasks with different statuses
         from dolphin.core.task_registry import Task
@@ -194,7 +194,7 @@ class TestPlanSkillkit:
         """Test _check_progress auto-injects task outputs once when plan is done."""
         context = Context()
         await context.enable_plan(plan_id="plan_1")
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         from dolphin.core.task_registry import Task
 
@@ -232,7 +232,7 @@ class TestPlanSkillkit:
     async def test_get_output_not_enabled(self):
         """Test _get_task_output raises RuntimeError when plan is not enabled."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         with pytest.raises(RuntimeError, match="Plan is not enabled"):
             await skillkit._get_task_output(task_id="task_1")
@@ -242,7 +242,7 @@ class TestPlanSkillkit:
         """Test _get_task_output raises RuntimeError with non-existent task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         with pytest.raises(RuntimeError, match="not found"):
             await skillkit._get_task_output(task_id="nonexistent")
@@ -252,7 +252,7 @@ class TestPlanSkillkit:
         """Test _get_task_output raises RuntimeError with non-completed task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         from dolphin.core.task_registry import Task
         task = Task(id="task_1", name="Task 1", prompt="Prompt 1", status=TaskStatus.RUNNING)
@@ -266,7 +266,7 @@ class TestPlanSkillkit:
         """Test _get_task_output with completed task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         from dolphin.core.task_registry import Task
         task = Task(
@@ -286,7 +286,7 @@ class TestPlanSkillkit:
     async def test_wait(self):
         """Test _wait method."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         # Mock check_user_interrupt
         context.check_user_interrupt = MagicMock()
@@ -303,7 +303,7 @@ class TestPlanSkillkit:
         from dolphin.core.common.exceptions import UserInterrupt
         
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         # Simulate user interrupt after 2 checks (i.e., ~2 seconds)
         call_count = 0
@@ -327,7 +327,7 @@ class TestPlanSkillkit:
     async def test_kill_task_not_enabled(self):
         """Test _kill_task raises RuntimeError when plan is not enabled."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         with pytest.raises(RuntimeError, match="Plan is not enabled"):
             await skillkit._kill_task("task_1")
@@ -337,7 +337,7 @@ class TestPlanSkillkit:
         """Test _kill_task raises RuntimeError with non-running task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         with pytest.raises(RuntimeError, match="is not running"):
             await skillkit._kill_task("task_1")
@@ -350,7 +350,7 @@ class TestPlanSkillkit:
         context = Context()
         await context.enable_plan()
         context.write_output = MagicMock()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         # Create a dummy asyncio task
         async def dummy():
@@ -385,7 +385,7 @@ class TestPlanSkillkit:
     async def test_retry_task_not_enabled(self):
         """Test _retry_task raises RuntimeError when plan is not enabled."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         with pytest.raises(RuntimeError, match="Plan is not enabled"):
             await skillkit._retry_task("task_1")
@@ -395,7 +395,7 @@ class TestPlanSkillkit:
         """Test _retry_task raises RuntimeError with non-existent task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         with pytest.raises(RuntimeError, match="not found"):
             await skillkit._retry_task("nonexistent")
@@ -405,7 +405,7 @@ class TestPlanSkillkit:
         """Test _retry_task raises RuntimeError with non-failed task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         from dolphin.core.task_registry import Task
         task = Task(id="task_1", name="Task 1", prompt="Prompt 1", status=TaskStatus.COMPLETED)
@@ -419,7 +419,7 @@ class TestPlanSkillkit:
         """Test _retry_task raises RuntimeError with cancelled task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         from dolphin.core.task_registry import Task
         task = Task(id="task_1", name="Task 1", prompt="Prompt 1", status=TaskStatus.CANCELLED)
@@ -433,7 +433,7 @@ class TestPlanSkillkit:
         """Test _retry_task successfully restarts task."""
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         from dolphin.core.task_registry import Task
         task = Task(id="task_1", name="Task 1", prompt="Prompt 1", status=TaskStatus.FAILED)
@@ -454,7 +454,7 @@ class TestPlanSkillkit:
         
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         # Mocking 3 tasks running simultaneously with different start times
         now = time.time()
@@ -485,7 +485,7 @@ class TestPlanSkillkit:
         
         context = Context()
         await context.enable_plan()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
         
         task1 = Task(id="t1", name="Task 1", prompt="P1", status=TaskStatus.RUNNING, started_at=time.time())
         await context.task_registry.add_task(task1)
@@ -508,7 +508,7 @@ class TestPlanSkillkit:
 
         context = Context()
         context.write_output = MagicMock()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         # First plan: create a long-running task
         tasks = [
@@ -571,7 +571,7 @@ class TestPlanSkillkit:
 
         context = Context()
         context.write_output = MagicMock()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         # First plan
         tasks = [{"id": "task_1", "name": "Task with cleanup", "prompt": "test"}]
@@ -614,7 +614,7 @@ class TestPlanSkillkit:
     async def test_wait_with_decimal_seconds(self):
         """Test _wait method supports decimal seconds."""
         context = Context()
-        skillkit = PlanSkillkit(context)
+        skillkit = PlanToolkit(context)
 
         # Mock check_user_interrupt
         context.check_user_interrupt = MagicMock()

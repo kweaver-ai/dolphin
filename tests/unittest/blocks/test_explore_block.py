@@ -29,8 +29,8 @@ from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.context_engineer.core.context_manager import ContextManager
 from dolphin.core.config.global_config import GlobalConfig
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillset import Skillset
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolset import ToolSet
 
 
 def _async_gen(fn):
@@ -64,8 +64,8 @@ def mock_execute_sql(sql: str, datasource: str):
     return f"Executing: {sql} on {datasource}"
 
 
-class MockSkillkit:
-    """模拟的 Skillkit 类"""
+class MockToolkit:
+    """模拟的 Toolkit 类"""
 
     def __init__(self, skills=None):
         self._skills = skills or {}
@@ -74,7 +74,7 @@ class MockSkillkit:
     def isEmpty(self):
         return len(self._skills) == 0
 
-    def getSkillNames(self):
+    def getToolNames(self):
         return self._skill_names
 
     def getSchemas(self):
@@ -83,7 +83,7 @@ class MockSkillkit:
     def getFormattedToolsDescription(self, format_type="medium"):
         return f"[{format_type}] mock_search: 搜索工具\nmock_execute_sql: SQL执行工具"
 
-    def getSkillsSchema(self):
+    def getToolsSchema(self):
         return [
             {
                 "type": "function",
@@ -235,7 +235,7 @@ class TestPromptStrategy(unittest.TestCase):
 
     def setUp(self):
         self.strategy = PromptStrategy()
-        self.skillkit = MockSkillkit({"mock_search": True, "mock_execute_sql": True})
+        self.skillkit = MockToolkit({"mock_search": True, "mock_execute_sql": True})
 
     def test_make_system_message_with_skills(self):
         """测试有技能时的系统消息生成"""
@@ -250,9 +250,9 @@ class TestPromptStrategy(unittest.TestCase):
 
     def test_make_system_message_without_skills(self):
         """测试无技能时的系统消息生成"""
-        empty_skillkit = MockSkillkit()
+        empty_toolkit = MockToolkit()
         system_msg = self.strategy.make_system_message(
-            skillkit=empty_skillkit, system_prompt="用户提示", tools_format="medium"
+            skillkit=empty_toolkit, system_prompt="用户提示", tools_format="medium"
         )
         self.assertIn("用户提示", system_msg)
 
@@ -353,7 +353,7 @@ class TestToolCallStrategy(unittest.TestCase):
 
     def setUp(self):
         self.strategy = ToolCallStrategy(tools_format="medium")
-        self.skillkit = MockSkillkit({"mock_search": True})
+        self.skillkit = MockToolkit({"mock_search": True})
 
     def test_make_system_message_with_skills(self):
         """测试有技能时的系统消息生成"""
@@ -408,14 +408,14 @@ class TestToolCallStrategy(unittest.TestCase):
         self.assertIn("tool_choice", params)
         self.assertEqual(params["tool_choice"], "auto")
 
-    def test_get_llm_params_empty_skillkit(self):
+    def test_get_llm_params_empty_toolkit(self):
         """测试空 skillkit 时 tools 为空列表"""
-        empty_skillkit = MockSkillkit()
+        empty_toolkit = MockToolkit()
         messages = Messages()
         params = self.strategy.get_llm_params(
             messages=messages,
             model="gpt-4",
-            skillkit=empty_skillkit,
+            skillkit=empty_toolkit,
         )
         self.assertEqual(params["tools"], [])
 
@@ -613,7 +613,7 @@ class TestPromptModeToolResponseFormat(unittest.TestCase):
             config=self.global_config, context_manager=self.context_manager
         )
         self.context._calc_all_skills()
-        self.skillkit = MockSkillkit({"_date": True, "_write_file": True})
+        self.skillkit = MockToolkit({"_date": True, "_write_file": True})
 
     def test_prompt_mode_appends_tool_call_message_as_plain_text(self):
         """

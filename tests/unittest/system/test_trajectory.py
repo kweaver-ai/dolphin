@@ -25,10 +25,10 @@ from dolphin.core.trajectory.trajectory import Trajectory
 # =============================================================================
 
 
-class MockSkillkit:
-    """测试用的 Mock Skillkit，满足 Explore/Judge 所需接口，避免依赖真实 SkillFunction"""
+class MockToolkit:
+    """测试用的 Mock Toolkit，满足 Explore/Judge 所需接口，避免依赖真实 ToolFunction"""
 
-    # 存储 skill schemas 以便 _DummySkillFunction 可以引用
+    # 存储 skill schemas 以便 _DummyToolFunction 可以引用
     _SKILL_SCHEMAS = {
         "mock_search": {
             "type": "function",
@@ -75,27 +75,27 @@ class MockSkillkit:
     def isEmpty(self) -> bool:
         return len(self._skills) == 0
 
-    def getSkills(self) -> List[Any]:
-        """提供给技能校验/Skillset 的技能列表（需完整实现 SkillFunction 接口）"""
+    def getTools(self) -> List[Any]:
+        """提供给技能校验/ToolSet 的技能列表（需完整实现 ToolFunction 接口）"""
         # 将 schemas 引用传递给内部类
-        skill_schemas = MockSkillkit._SKILL_SCHEMAS
+        skill_schemas = MockToolkit._SKILL_SCHEMAS
 
-        class _DummySkillFunction:
+        class _DummyToolFunction:
             def __init__(self, name: str):
                 self._name = name
-                self.owner_skillkit = None
+                self.owner_toolkit = None
 
             def get_function_name(self) -> str:
                 return self._name
 
-            def get_owner_skillkit(self) -> Optional[str]:
-                return self.owner_skillkit
+            def get_owner_toolkit(self) -> Optional[str]:
+                return self.owner_toolkit
 
-            def set_owner_skillkit(self, owner) -> None:
-                self.owner_skillkit = owner
+            def set_owner_toolkit(self, owner) -> None:
+                self.owner_toolkit = owner
 
             def get_openai_tool_schema(self) -> Dict[str, Any]:
-                """返回 OpenAI 格式的工具 schema，供 Skillset.getSkillsSchema() 使用"""
+                """返回 OpenAI 格式的工具 schema，供 ToolSet.getToolsSchema() 使用"""
                 return skill_schemas.get(self._name, {
                     "type": "function",
                     "function": {
@@ -105,12 +105,12 @@ class MockSkillkit:
                     },
                 })
 
-        return [_DummySkillFunction(name) for name in self._skills.keys()]
+        return [_DummyToolFunction(name) for name in self._skills.keys()]
 
-    def getSkillNames(self) -> List[str]:
+    def getToolNames(self) -> List[str]:
         return list(self._skills.keys())
 
-    def getSkill(self, name: str) -> Any:
+    def getTool(self, name: str) -> Any:
         """在本测试中不直接通过 skillkit 调用工具，返回 None"""
         return None
 
@@ -122,9 +122,9 @@ class MockSkillkit:
         """用于 tool_call 模式 system 提示中的工具说明"""
         return f"[{format_type}] mock_search: 搜索工具\nmock_calculator: 计算器工具"
 
-    def getSkillsSchema(self) -> List[Dict[str, Any]]:
+    def getToolsSchema(self) -> List[Dict[str, Any]]:
         """用于 ToolCallStrategy 生成 tools 参数"""
-        return list(MockSkillkit._SKILL_SCHEMAS.values())
+        return list(MockToolkit._SKILL_SCHEMAS.values())
 
 
 # =============================================================================
@@ -210,9 +210,9 @@ def global_config():
 
 
 @pytest.fixture
-def mock_skillkit():
-    """提供 MockSkillkit 实例"""
-    return MockSkillkit()
+def mock_toolkit():
+    """提供 MockToolkit 实例"""
+    return MockToolkit()
 
 
 # =============================================================================
@@ -221,7 +221,7 @@ def mock_skillkit():
 
 
 @pytest.mark.asyncio
-async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_skillkit):
+async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_toolkit):
     """
     Case 1: assign -> prompt -> explore(mode=prompt)
 
@@ -281,11 +281,11 @@ async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_skillk
     ), patch(
         "dolphin.core.context.context.Context.get_skillkit"
     ) as mock_get_skillkit:
-        mock_get_skillkit.return_value = mock_skillkit
+        mock_get_skillkit.return_value = mock_toolkit
 
         executor = DolphinExecutor(global_config=global_config)
         executor.context.init_trajectory(str(trajectory_path))
-        executor.context.set_skills(mock_skillkit)
+        executor.context.set_skills(mock_toolkit)
 
         async for _ in executor.run(dph_content):
             pass
@@ -329,7 +329,7 @@ async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_skillk
 
 
 @pytest.mark.asyncio
-async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_skillkit):
+async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_toolkit):
     """
     Case 2: assign -> judge -> explore(mode=tool_call)
 
@@ -400,11 +400,11 @@ async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_ski
     ), patch(
         "dolphin.core.context.context.Context.get_skillkit"
     ) as mock_get_skillkit:
-        mock_get_skillkit.return_value = mock_skillkit
+        mock_get_skillkit.return_value = mock_toolkit
 
         executor = DolphinExecutor(global_config=global_config)
         executor.context.init_trajectory(str(trajectory_path))
-        executor.context.set_skills(mock_skillkit)
+        executor.context.set_skills(mock_toolkit)
 
         async for _ in executor.run(dph_content):
             pass
@@ -478,7 +478,7 @@ async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_ski
 
 
 @pytest.mark.asyncio
-async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_config, mock_skillkit):
+async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_config, mock_toolkit):
     """
     测试禁用 EXPLORE_BLOCK_V2 时，ExploreBlock 能正确解析 mode=tool_call 参数
 
@@ -545,11 +545,11 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
         ), patch(
             "dolphin.core.context.context.Context.get_skillkit"
         ) as mock_get_skillkit:
-            mock_get_skillkit.return_value = mock_skillkit
+            mock_get_skillkit.return_value = mock_toolkit
 
             executor = DolphinExecutor(global_config=global_config)
             executor.context.init_trajectory(str(trajectory_path))
-            executor.context.set_skills(mock_skillkit)
+            executor.context.set_skills(mock_toolkit)
 
             async for _ in executor.run(dph_content):
                 pass
@@ -584,7 +584,7 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
 
 @pytest.mark.asyncio
 async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins(
-    tmp_path, global_config, mock_skillkit
+    tmp_path, global_config, mock_toolkit
 ):
     """
     验证交互式 continue_exploration 行为与本次改动一致：
@@ -651,11 +651,11 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
         ), patch(
             "dolphin.core.context.context.Context.get_skillkit"
         ) as mock_get_skillkit:
-            mock_get_skillkit.return_value = mock_skillkit
+            mock_get_skillkit.return_value = mock_toolkit
 
             executor = DolphinExecutor(global_config=global_config)
             executor.context.init_trajectory(str(trajectory_path))
-            executor.context.set_skills(mock_skillkit)
+            executor.context.set_skills(mock_toolkit)
 
             async for _ in executor.run(dph_content):
                 pass

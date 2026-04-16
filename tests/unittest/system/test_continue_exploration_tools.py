@@ -18,8 +18,8 @@ from dolphin.core.code_block.explore_block import ExploreBlock
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.core.context_manager import ContextManager
 from dolphin.core.config.global_config import GlobalConfig
-from dolphin.core.skill.skillset import Skillset
-from dolphin.core.skill.skill_function import SkillFunction
+from dolphin.core.tool.toolset import ToolSet
+from dolphin.core.tool.tool_function import ToolFunction
 
 
 def mock_search(query: str):
@@ -51,26 +51,26 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
             context_manager=self.context_manager,
         )
 
-        # Create mock skillkit objects (owner_skillkit must have getName() method)
-        vm_skillkit_mock = MagicMock()
-        vm_skillkit_mock.getName.return_value = "vm_skillkit"
+        # Create mock skillkit objects (owner_toolkit must have getName() method)
+        vm_toolkit_mock = MagicMock()
+        vm_toolkit_mock.getName.return_value = "vm_toolkit"
         
-        resource_skillkit_mock = MagicMock()
-        resource_skillkit_mock.getName.return_value = "resource_skillkit"
+        resource_toolkit_mock = MagicMock()
+        resource_toolkit_mock.getName.return_value = "resource_toolkit"
 
-        # 创建包含多个技能的 Skillset
-        self.all_skills = Skillset()
-        search_skill = SkillFunction(mock_search)
-        search_skill.set_owner_skillkit(vm_skillkit_mock)
-        self.all_skills.addSkill(search_skill)
+        # 创建包含多个技能的 ToolSet
+        self.all_skills = ToolSet()
+        search_skill = ToolFunction(mock_search)
+        search_skill.set_owner_toolkit(vm_toolkit_mock)
+        self.all_skills.addTool(search_skill)
 
-        calculator_skill = SkillFunction(mock_calculator)
-        calculator_skill.set_owner_skillkit(vm_skillkit_mock)
-        self.all_skills.addSkill(calculator_skill)
+        calculator_skill = ToolFunction(mock_calculator)
+        calculator_skill.set_owner_toolkit(vm_toolkit_mock)
+        self.all_skills.addTool(calculator_skill)
 
-        other_skill = SkillFunction(mock_other_tool)
-        other_skill.set_owner_skillkit(resource_skillkit_mock)
-        self.all_skills.addSkill(other_skill)
+        other_skill = ToolFunction(mock_other_tool)
+        other_skill.set_owner_toolkit(resource_toolkit_mock)
+        self.all_skills.addTool(other_skill)
 
         # 设置 context 的技能
         self.context.set_skills(self.all_skills)
@@ -90,7 +90,7 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
 
         # get_skillkit() 应该返回所有技能
         skillkit = block.get_skillkit()
-        skill_names = skillkit.getSkillNames()
+        skill_names = skillkit.getToolNames()
 
         # 应该包含所有三个技能
         self.assertIn("mock_search", skill_names)
@@ -119,8 +119,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertEqual(set(block.skills), {"mock_search", "mock_calculator"})
 
         # 获取第一轮的 skillkit
-        first_round_skillkit = block.get_skillkit()
-        first_round_skill_names = first_round_skillkit.getSkillNames()
+        first_round_toolkit = block.get_skillkit()
+        first_round_skill_names = first_round_toolkit.getToolNames()
 
         # 第一轮应该只有配置的两个技能
         self.assertEqual(len(first_round_skill_names), 2)
@@ -136,8 +136,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertEqual(set(block.skills), {"mock_search", "mock_calculator"})
 
         # get_skillkit() 应该返回第一轮配置的技能子集
-        second_round_skillkit = block.get_skillkit()
-        second_round_skill_names = second_round_skillkit.getSkillNames()
+        second_round_toolkit = block.get_skillkit()
+        second_round_skill_names = second_round_toolkit.getToolNames()
 
         self.assertEqual(len(second_round_skill_names), 2)
         self.assertIn("mock_search", second_round_skill_names)
@@ -160,12 +160,12 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
 
         self.assertEqual(block.skills, ["mock_*tool"])
 
-        filtered_skillkit = block.get_skillkit()
-        filtered_names = set(filtered_skillkit.getSkillNames())
+        filtered_toolkit = block.get_skillkit()
+        filtered_names = set(filtered_toolkit.getToolNames())
 
         self.assertEqual(filtered_names, {"mock_other_tool"})
 
-    def test_tools_support_skillkit_namespace_patterns(self):
+    def test_tools_support_toolkit_namespace_patterns(self):
         """
         测试 tools 支持 <skillkit>.<pattern> 形式的命名空间过滤
         """
@@ -173,21 +173,21 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
 
         block = ExploreBlock(context=self.context)
 
-        content = "/explore/(tools=[resource_skillkit.*]) 用户问题 -> result"
+        content = "/explore/(tools=[resource_toolkit.*]) 用户问题 -> result"
         block.parse_block_content(
             content, category=CategoryBlock.EXPLORE, replace_variables=False
         )
 
-        filtered_skillkit = block.get_skillkit()
-        filtered_names = set(filtered_skillkit.getSkillNames())
+        filtered_toolkit = block.get_skillkit()
+        filtered_names = set(filtered_toolkit.getToolNames())
         self.assertEqual(filtered_names, {"mock_other_tool"})
 
-        content = "/explore/(tools=[vm_skillkit.mock_*]) 用户问题 -> result"
+        content = "/explore/(tools=[vm_toolkit.mock_*]) 用户问题 -> result"
         block.parse_block_content(
             content, category=CategoryBlock.EXPLORE, replace_variables=False
         )
-        filtered_skillkit = block.get_skillkit()
-        filtered_names = set(filtered_skillkit.getSkillNames())
+        filtered_toolkit = block.get_skillkit()
+        filtered_names = set(filtered_toolkit.getToolNames())
         self.assertEqual(filtered_names, {"mock_search", "mock_calculator"})
 
     def test_new_block_needs_skills_from_kwargs(self):
@@ -204,8 +204,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertIsNone(new_block.skills)
 
         # 新 block 的 get_skillkit() 会返回 all_skills（因为 skills=None）
-        new_skillkit = new_block.get_skillkit()
-        new_skill_names = new_skillkit.getSkillNames()
+        new_toolkit = new_block.get_skillkit()
+        new_skill_names = new_toolkit.getToolNames()
         
         # 应该包含所有三个技能
         self.assertEqual(len(new_skill_names), 3)
@@ -222,8 +222,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertEqual(set(new_block.skills), {"mock_search", "mock_calculator"})
         
         # 验证 get_skillkit() 返回正确的技能子集
-        filtered_skillkit = new_block.get_skillkit()
-        filtered_skill_names = filtered_skillkit.getSkillNames()
+        filtered_toolkit = new_block.get_skillkit()
+        filtered_skill_names = filtered_toolkit.getToolNames()
         
         self.assertEqual(len(filtered_skill_names), 2)
         self.assertIn("mock_search", filtered_skill_names)
@@ -252,7 +252,7 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         block.skills = ["mock_search"]
         
         skillkit = block.get_skillkit()
-        skill_names = skillkit.getSkillNames()
+        skill_names = skillkit.getToolNames()
         
         self.assertEqual(len(skill_names), 1)
         self.assertIn("mock_search", skill_names)
@@ -292,8 +292,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertEqual(set(new_block.skills), {"mock_search", "mock_calculator"})
         
         # 验证 get_skillkit() 返回正确的技能子集
-        filtered_skillkit = new_block.get_skillkit()
-        filtered_skill_names = filtered_skillkit.getSkillNames()
+        filtered_toolkit = new_block.get_skillkit()
+        filtered_skill_names = filtered_toolkit.getToolNames()
         
         self.assertEqual(len(filtered_skill_names), 2)
         self.assertIn("mock_search", filtered_skill_names)
@@ -325,8 +325,8 @@ class TestContinueExplorationSkillsInheritance(unittest.TestCase):
         self.assertEqual(new_block.skills, ["mock_other_tool"])
         
         # 验证 get_skillkit() 返回 kwargs 配置的技能
-        filtered_skillkit = new_block.get_skillkit()
-        filtered_skill_names = filtered_skillkit.getSkillNames()
+        filtered_toolkit = new_block.get_skillkit()
+        filtered_skill_names = filtered_toolkit.getToolNames()
         
         self.assertEqual(len(filtered_skill_names), 1)
         self.assertIn("mock_other_tool", filtered_skill_names)
@@ -350,11 +350,11 @@ class TestContinueExplorationSkillsWithKwargsParam(unittest.TestCase):
             context_manager=self.context_manager,
         )
 
-        # 创建包含多个技能的 Skillset
-        self.all_skills = Skillset()
-        self.all_skills.addSkill(SkillFunction(mock_search))
-        self.all_skills.addSkill(SkillFunction(mock_calculator))
-        self.all_skills.addSkill(SkillFunction(mock_other_tool))
+        # 创建包含多个技能的 ToolSet
+        self.all_skills = ToolSet()
+        self.all_skills.addTool(ToolFunction(mock_search))
+        self.all_skills.addTool(ToolFunction(mock_calculator))
+        self.all_skills.addTool(ToolFunction(mock_other_tool))
 
         # 设置 context 的技能
         self.context.set_skills(self.all_skills)
@@ -388,7 +388,7 @@ class TestContinueExplorationSkillsWithKwargsParam(unittest.TestCase):
         
         # 验证 get_skillkit 返回正确的技能集
         skillkit = block.get_skillkit()
-        skill_names = skillkit.getSkillNames()
+        skill_names = skillkit.getToolNames()
         
         self.assertEqual(len(skill_names), 1)
         self.assertIn("mock_search", skill_names)
@@ -409,7 +409,7 @@ class TestContinueExplorationSkillsWithKwargsParam(unittest.TestCase):
         self.assertEqual(block.skills, ["mock_calculator"])
         
         skillkit = block.get_skillkit()
-        skill_names = skillkit.getSkillNames()
+        skill_names = skillkit.getToolNames()
         
         self.assertEqual(len(skill_names), 1)
         self.assertIn("mock_calculator", skill_names)
@@ -429,9 +429,9 @@ class TestContinueExplorationModeInheritance(unittest.TestCase):
             context_manager=self.context_manager,
         )
 
-        # 创建包含技能的 Skillset
-        self.all_skills = Skillset()
-        self.all_skills.addSkill(SkillFunction(mock_search))
+        # 创建包含技能的 ToolSet
+        self.all_skills = ToolSet()
+        self.all_skills.addTool(ToolFunction(mock_search))
 
         # 设置 context 的技能
         self.context.set_skills(self.all_skills)
@@ -566,10 +566,10 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
         )
 
         # 验证 global_skills 包含技能（这些技能应该被加载到 context）
-        if hasattr(executor.global_skills, "getAllSkills"):
-            global_skills = executor.global_skills.getAllSkills()
+        if hasattr(executor.global_skills, "getAllTools"):
+            global_skills = executor.global_skills.getAllTools()
             self.assertGreater(
-                len(global_skills.getSkills()),
+                len(global_skills.getTools()),
                 0,
                 "global_skills 应该包含技能"
             )
@@ -584,7 +584,7 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
         # 验证 explore_block.get_skillkit() 可以正常获取技能
         # 因为 Context 初始化时已经调用了 _calc_all_skills()
         skillkit = explore_block.get_skillkit()
-        skills_count = len(skillkit.getSkills())
+        skills_count = len(skillkit.getTools())
 
         # 验证技能已经可用（无需调用 _prepare_for_run）
         self.assertGreater(
@@ -595,7 +595,7 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
 
         # 验证 context.skillkit 初始时为空（与 all_skills 不同）
         self.assertTrue(
-            executor.context.is_skillkit_empty(),
+            executor.context.is_toolkit_empty(),
             "初始状态下 context.skillkit 应该为空"
         )
 
@@ -604,7 +604,7 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
 
         # 验证 _prepare_for_run 填充了 context.skillkit
         self.assertFalse(
-            executor.context.is_skillkit_empty(),
+            executor.context.is_toolkit_empty(),
             "调用 _prepare_for_run 后，context.skillkit 应该被填充"
         )
 
@@ -641,7 +641,7 @@ class TestDolphinExecutorContinueExplorationInitialization(unittest.TestCase):
 
             # 验证 context.skillkit 初始时为空（与 all_skills 不同）
             self.assertTrue(
-                executor.context.is_skillkit_empty(),
+                executor.context.is_toolkit_empty(),
                 "初始状态下 context.skillkit 应该为空"
             )
 

@@ -212,8 +212,8 @@ class TestPinnedMessageRole(unittest.TestCase):
         self.assertEqual(history_entry["metadata"]["source"], "tool")
 
 
-class TestResourceSkillkitPinMarker(unittest.TestCase):
-    """Test PIN_MARKER usage in resource_skillkit."""
+class TestResourceToolkitPinMarker(unittest.TestCase):
+    """Test PIN_MARKER usage in resource_toolkit."""
 
     def test_pin_marker_prefix_format(self):
         """Resource skillkit should prefix content with PIN_MARKER."""
@@ -227,7 +227,7 @@ class TestResourceSkillkitPinMarker(unittest.TestCase):
         """Should not double-prefix if content already has PIN_MARKER."""
         already_prefixed = f"{PIN_MARKER}\nContent"
 
-        # Simulating resource_skillkit behavior
+        # Simulating resource_toolkit behavior
         if already_prefixed.startswith(PIN_MARKER):
             result = already_prefixed
         else:
