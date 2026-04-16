@@ -24,8 +24,8 @@ class TriditionalToolkit(Toolkit):
         """Get the toolkit name"""
         return "triditional_toolkit"
 
-    def _createSkills(self) -> List[ToolFunction]:
-        """Create all skill functions wrapped from tools"""
+    def _createTools(self) -> List[ToolFunction]:
+        """Create all tool functions wrapped from tools"""
         return list(self.openai_functions.values())
 
     @staticmethod
