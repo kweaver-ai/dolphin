@@ -1,10 +1,10 @@
 from typing import Dict, List, Any, Callable
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skill_function import SkillFunction
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.tool_function import ToolFunction
 from dolphin.core.utils.tools import Tool
 
 
-class TriditionalToolkit(Skillkit):
+class TriditionalToolkit(Toolkit):
     """
     Traditional toolkit that wraps Tools as OpenAI Functions
     """
@@ -24,7 +24,7 @@ class TriditionalToolkit(Skillkit):
         """Get the toolkit name"""
         return "triditional_toolkit"
 
-    def _createSkills(self) -> List[SkillFunction]:
+    def _createSkills(self) -> List[ToolFunction]:
         """Create all skill functions wrapped from tools"""
         return list(self.openai_functions.values())
 
@@ -41,12 +41,12 @@ class TriditionalToolkit(Skillkit):
         """
         return TriditionalToolkit(tooldict)
 
-    def _create_openai_functions(self) -> Dict[str, SkillFunction]:
+    def _create_openai_functions(self) -> Dict[str, ToolFunction]:
         """
         Create skill functions from the tools
 
         Returns:
-            Dictionary mapping function names to SkillFunction instances
+            Dictionary mapping function names to ToolFunction instances
         """
         openai_functions = {}
 
@@ -57,17 +57,17 @@ class TriditionalToolkit(Skillkit):
             # Create OpenAI tool schema from tool's metadata, use tool_name as function name
             openai_tool_schema = self._tool_to_openai_schema(tool, tool_name)
 
-            # Create SkillFunction with custom schema and tool type information
-            openai_function = SkillFunction(
+            # Create ToolFunction with custom schema and tool type information
+            openai_function = ToolFunction(
                 func=wrapper_func,
                 openai_tool_schema=openai_tool_schema,
                 result_process_strategies=tool.result_process_strategy_cfg,
             )
 
-            # Add tool type information to the SkillFunction
+            # Add tool type information to the ToolFunction
             openai_function.original_tool = tool
-            
-            # Copy interrupt_config from tool to SkillFunction if it exists
+
+            # Copy interrupt_config from tool to ToolFunction if it exists
             if hasattr(tool, 'interrupt_config'):
                 openai_function.interrupt_config = tool.interrupt_config
 

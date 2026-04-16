@@ -6,77 +6,77 @@ from typing import Dict, Optional
 
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.logging.logger import get_logger
-from dolphin.core.skill.skillset import Skillset
-from dolphin.lib.skillkits.agent_skillkit import AgentSkillKit
-from dolphin.lib.skillkits.system_skillkit import (
-    SystemFunctionsSkillKit,
+from dolphin.core.tool.toolset import ToolSet
+from dolphin.lib.toolkits.agent_toolkit import AgentToolkit
+from dolphin.lib.toolkits.system_toolkit import (
+    SystemFunctionsToolkit,
 )
 from dolphin.core.agent.base_agent import BaseAgent
 from dolphin.core.utils.rich_status import safe_rich_status
 
-logger = get_logger("skill")
+logger = get_logger("tool")
 
 
-class GlobalSkills:
+class GlobalToolkits:
     """
-    Global skills manager that handles both installed skills and agent skills
+    Global tools manager that handles both installed tools and agent tools
     """
 
     def __init__(self, globalConfig: GlobalConfig):
         """
-        Initialize global skills manager
+        Initialize global tools manager
 
         Args:
             globalConfig (GlobalConfig): Global configuration object
         """
         self.globalConfig = globalConfig
-        self.installedSkillset = Skillset()
-        self.agentSkillset = Skillset()
-        self.agentSkills: Dict[str, BaseAgent] = {}
+        self.installedToolSet = ToolSet()
+        self.agentToolSet = ToolSet()
+        self.agentTools: Dict[str, BaseAgent] = {}
 
-        # Load installed skills from skill/installed directory
+        # Load installed tools from skill/installed directory
         self._loadInstalledSkills()
 
         # Load MCP skills if enabled
         if globalConfig.mcp_config and globalConfig.mcp_config.enabled:
             self._loadMCPSkills()
 
-        self._syncAllSkills()
+        self._syncAllTools()
 
     def _loadInstalledSkills(self):
         """
-        Load all skillkits using entry points first, fallback to file-based loading
+        Load all toolkits using entry points first, fallback to file-based loading
         """
         # Try loading from entry points first (preferred method for pyinstaller compatibility)
-        if self._loadSkillkitsFromEntryPoints():
-            logger.debug("Successfully loaded skillkits from entry points")
+        if self._loadToolkitsFromEntryPoints():
+            logger.debug("Successfully loaded toolkits from entry points")
         else:
             logger.debug(
                 "Entry points loading failed, falling back to file-based loading"
             )
             # Fallback to original file-based loading
-            self._loadSkillkitsFromFiles()
+            self._loadToolkitsFromFiles()
 
         # Handle system function loading, following skill_config configuration
         enabled_system_functions = self._get_enabled_system_functions()
         # Decide how to load system functions based on the value of enabled_system_functions
-        system_functions = SystemFunctionsSkillKit(enabled_system_functions)
+        system_functions = SystemFunctionsToolkit(enabled_system_functions)
         for skill in system_functions.getSkills():
-            self.installedSkillset.addSkill(skill)
+            self.installedToolSet.addSkill(skill)
 
-    def _loadSkillkitsFromEntryPoints(self) -> bool:
+    def _loadToolkitsFromEntryPoints(self) -> bool:
         """
-        Load skillkits from setuptools entry points
+        Load toolkits from setuptools entry points
 
         Returns:
             bool: True if loading succeeded, False if failed
         """
         try:
-            # Get all entry points for dolphin.skillkits
-            entry_points = importlib.metadata.entry_points(group="dolphin.skillkits")
-            
+            # Get all entry points for dolphin.toolkits
+            entry_points = importlib.metadata.entry_points(group="dolphin.toolkits")
+
             if not entry_points:
-                logger.debug("No dolphin.skillkits entry points found")
+                logger.debug("No dolphin.toolkits entry points found")
                 return False
 
             # Initialize VM if needed
@@ -94,73 +94,73 @@ class GlobalSkills:
 
             loaded_count = 0
             with safe_rich_status(
-                "[bold green]Loading skillkits from entry points..."
+                "[bold green]Loading toolkits from entry points..."
             ) as status:
                 for entry_point in entry_points:
-                    status.update(f"[bold blue]Loading skillkit:[/][white] {entry_point.name}[/]")
+                    status.update(f"[bold blue]Loading toolkit:[/][white] {entry_point.name}[/]")
                     try:
                         # Check if this skill should be loaded based on config
                         if not self.globalConfig.skill_config.should_load_skill(entry_point.name):
-                            logger.debug(f"Skipping disabled skillkit: {entry_point.name}")
+                            logger.debug(f"Skipping disabled toolkit: {entry_point.name}")
                             continue
 
-                        # Load the skillkit class from entry point
-                        skillkit_class = entry_point.load()
+                        # Load the toolkit class from entry point
+                        toolkit_class = entry_point.load()
 
-                        # Verify it's a Skillkit subclass
+                        # Verify it's a Toolkit subclass
                         if not self._is_obj_hierarchy_from_class_name(
-                            skillkit_class, "Skillkit"
+                            toolkit_class, "Toolkit"
                         ):
                             logger.warning(
-                                f"Entry point {entry_point.name} is not a Skillkit subclass, skipping"
+                                f"Entry point {entry_point.name} is not a Toolkit subclass, skipping"
                             )
                             continue
 
                         # Create instance and configure
-                        skillkit_instance = skillkit_class()
+                        toolkit_instance = toolkit_class()
 
-                        # Set VM if this is VMSkillkit and we have a VM configured
-                        if hasattr(skillkit_instance, "setVM") and vm is not None:
-                            skillkit_instance.setVM(vm)
+                        # Set VM if this is VMToolkit and we have a VM configured
+                        if hasattr(toolkit_instance, "setVM") and vm is not None:
+                            toolkit_instance.setVM(vm)
 
-                        # Set global context if the skillkit supports it
-                        if hasattr(skillkit_instance, "setGlobalConfig"):
-                            skillkit_instance.setGlobalConfig(self.globalConfig)
+                        # Set global context if the toolkit supports it
+                        if hasattr(toolkit_instance, "setGlobalConfig"):
+                            toolkit_instance.setGlobalConfig(self.globalConfig)
 
-                        # Add skillkit to the installed skillset
-                        # This tracks the skillkit for metadata aggregation
-                        self.installedSkillset.addSkillkit(skillkit_instance)
+                        # Add toolkit to the installed toolset
+                        # This tracks the toolkit for metadata aggregation
+                        self.installedToolSet.addSkillkit(toolkit_instance)
 
                         loaded_count += 1
                         logger.debug(
-                            f"Loaded skillkit from entry point: {entry_point.name}"
+                            f"Loaded toolkit from entry point: {entry_point.name}"
                         )
 
                     except Exception as e:
                         import traceback
                         logger.error(
-                            f"Failed to load skillkit from entry point {entry_point.name}: {str(e)}"
+                            f"Failed to load toolkit from entry point {entry_point.name}: {str(e)}"
                         )
                         logger.error(traceback.format_exc())
                         continue
 
             logger.debug(
-                f"Successfully loaded {loaded_count} skillkits from entry points"
+                f"Successfully loaded {loaded_count} toolkits from entry points"
             )
             return loaded_count > 0
 
         except Exception as e:
-            logger.error(f"Failed to load skillkits from entry points: {str(e)}")
+            logger.error(f"Failed to load toolkits from entry points: {str(e)}")
             return False
 
-    def _loadSkillkitsFromFiles(self):
+    def _loadToolkitsFromFiles(self):
         """
-        Load all skillkits from skill/installed directory (fallback method)
+        Load all toolkits from skill/installed directory (fallback method)
         Reuses existing code from DolphinExecutor::set_installed_skills
         """
-        # Load built-in skillkits (fallback for development mode when entry points are not available)
-        self._loadBuiltinSkillkits()
-        
+        # Load built-in toolkits (fallback for development mode when entry points are not available)
+        self._loadBuiltinToolkits()
+
         # Get the path to skill/installed directory
         current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         installed_skills_dir = os.path.join(current_dir, "skill", "installed")
@@ -170,44 +170,44 @@ class GlobalSkills:
                 f"Installed skills directory not found: {installed_skills_dir}"
             )
             return
-        self._loadSkillkitsFromPath(installed_skills_dir, "installed")
-    
-    def _loadBuiltinSkillkits(self):
+        self._loadToolkitsFromPath(installed_skills_dir, "installed")
+
+    def _loadBuiltinToolkits(self):
         """
-        Load built-in skillkits from dolphin.lib.skillkits.
+        Load built-in toolkits from dolphin.lib.toolkits.
         This serves as a fallback for development mode or non-installed environments.
         """
-        builtin_skillkits = {
-            "plan_skillkit": "dolphin.lib.skillkits.plan_skillkit.PlanSkillkit",
-            "cognitive": "dolphin.lib.skillkits.cognitive_skillkit.CognitiveSkillkit",
-            "env_skillkit": "dolphin.lib.skillkits.env_skillkit.EnvSkillkit",
+        builtin_toolkits = {
+            "plan_toolkit": "dolphin.lib.toolkits.plan_toolkit.PlanToolkit",
+            "cognitive": "dolphin.lib.toolkits.cognitive_toolkit.CognitiveToolkit",
+            "env_toolkit": "dolphin.lib.toolkits.env_toolkit.EnvToolkit",
         }
-        
-        for skillkit_name, class_path in builtin_skillkits.items():
-            # Check if this skillkit should be loaded
-            if not self.globalConfig.skill_config.should_load_skill(skillkit_name):
-                logger.debug(f"Skipping disabled skillkit: {skillkit_name}")
+
+        for toolkit_name, class_path in builtin_toolkits.items():
+            # Check if this toolkit should be loaded
+            if not self.globalConfig.skill_config.should_load_skill(toolkit_name):
+                logger.debug(f"Skipping disabled toolkit: {toolkit_name}")
                 continue
-            
+
             try:
-                # Import the skillkit class
+                # Import the toolkit class
                 module_path, class_name = class_path.rsplit(".", 1)
                 module = importlib.import_module(module_path)
-                skillkit_class = getattr(module, class_name)
-                
+                toolkit_class = getattr(module, class_name)
+
                 # Create instance
-                skillkit_instance = skillkit_class()
-                
+                toolkit_instance = toolkit_class()
+
                 # Set global config if supported
-                if hasattr(skillkit_instance, "setGlobalConfig"):
-                    skillkit_instance.setGlobalConfig(self.globalConfig)
-                
-                # Add to installed skillset
-                self.installedSkillset.addSkillkit(skillkit_instance)
-                
-                logger.debug(f"Loaded built-in skillkit: {skillkit_name}")
+                if hasattr(toolkit_instance, "setGlobalConfig"):
+                    toolkit_instance.setGlobalConfig(self.globalConfig)
+
+                # Add to installed toolset
+                self.installedToolSet.addSkillkit(toolkit_instance)
+
+                logger.debug(f"Loaded built-in toolkit: {toolkit_name}")
             except Exception as e:
-                logger.error(f"Failed to load built-in skillkit {skillkit_name}: {str(e)}")
+                logger.error(f"Failed to load built-in toolkit {toolkit_name}: {str(e)}")
 
     def _get_enabled_system_functions(self) -> Optional[list[str]]:
         """Extract system function configurations from skill_config.enabled_skills"""
@@ -244,50 +244,50 @@ class GlobalSkills:
             return
 
         try:
-            from dolphin.lib.skillkits.mcp_skillkit import MCPSkillkit
+            from dolphin.lib.toolkits.mcp_toolkit import MCPToolkit
 
             # Create a single MCP skill suite instance
-            skillkit = MCPSkillkit()
-            skillkit.setGlobalConfig(self.globalConfig)
+            toolkit = MCPToolkit()
+            toolkit.setGlobalConfig(self.globalConfig)
 
-            # Get skills and add to installed skill set
-            skills = skillkit.getSkills()
+            # Get skills and add to installed tool set
+            skills = toolkit.getSkills()
             for skill in skills:
-                self.installedSkillset.addSkill(skill)
+                self.installedToolSet.addSkill(skill)
 
-            logger.debug(f"Loaded MCP skillkit: {len(skills)} skills")
+            logger.debug(f"Loaded MCP toolkit: {len(skills)} skills")
 
         except ImportError as e:
             logger.warning(f"Failed to import MCP components: {str(e)}")
         except Exception as e:
             logger.warning(f"Error loading MCP skills: {str(e)}")
 
-    def _loadCustomSkillkitsFromPath(self, skillkitFolderPath: str):
+    def _loadCustomToolkitsFromPath(self, toolkitFolderPath: str):
         """
-        Load all skillkits from custom skillkit folder
+        Load all toolkits from custom toolkit folder
 
         Args:
-            skillkitFolderPath (str): Path to the custom skillkit folder
+            toolkitFolderPath (str): Path to the custom toolkit folder
         """
         # Normalize the path to handle both relative and absolute paths
-        if not os.path.isabs(skillkitFolderPath):
+        if not os.path.isabs(toolkitFolderPath):
             # Convert relative path to absolute path based on current working directory
-            skillkitFolderPath = os.path.abspath(skillkitFolderPath)
+            toolkitFolderPath = os.path.abspath(toolkitFolderPath)
 
-        if not os.path.exists(skillkitFolderPath):
-            logger.warning(f"Custom skillkit folder not found: {skillkitFolderPath}")
+        if not os.path.exists(toolkitFolderPath):
+            logger.warning(f"Custom toolkit folder not found: {toolkitFolderPath}")
             return
 
-        logger.debug(f"Loading custom skillkits from: {skillkitFolderPath}")
-        self._loadSkillkitsFromPath(skillkitFolderPath, "custom")
+        logger.debug(f"Loading custom toolkits from: {toolkitFolderPath}")
+        self._loadToolkitsFromPath(toolkitFolderPath, "custom")
 
-    def _loadSkillkitsFromPath(self, folderPath: str, skillkitType: str = "installed"):
+    def _loadToolkitsFromPath(self, folderPath: str, toolkitType: str = "installed"):
         """
-        Load skillkits from the specified folder path (only top-level directory)
+        Load toolkits from the specified folder path (only top-level directory)
 
         Args:
-            folderPath (str): Path to scan for skillkits
-            skillkitType (str): Type of skillkits being loaded ("installed" or "custom")
+            folderPath (str): Path to scan for toolkits
+            toolkitType (str): Type of toolkits being loaded ("installed" or "custom")
         """
         # Initialize VM if needed
         vm = None
@@ -302,15 +302,15 @@ class GlobalSkills:
             except Exception as e:
                 logger.warning(f"Failed to create VM: {str(e)}")
 
-        # Define files to skip (not skillkits but utility modules)
+        # Define files to skip (not toolkits but utility modules)
         SKIP_MODULES = {
-            "mcp_adapter",  # MCP adapter utility, not a skillkit
+            "mcp_adapter",  # MCP adapter utility, not a toolkit
             # Add other utility modules here as needed
         }
 
-        # Only scan top-level directory for both installed and custom skillkits
+        # Only scan top-level directory for both installed and custom toolkits
         if not os.path.exists(folderPath):
-            logger.warning(f"Skillkit folder does not exist: {folderPath}")
+            logger.warning(f"Toolkit folder does not exist: {folderPath}")
             return
 
         for filename in os.listdir(folderPath):
@@ -324,7 +324,7 @@ class GlobalSkills:
 
                 moduleName = filename[:-3]  # Remove .py extension
 
-                # Skip utility modules that are not skillkits
+                # Skip utility modules that are not toolkits
                 if moduleName in SKIP_MODULES:
                     continue
 
@@ -332,25 +332,25 @@ class GlobalSkills:
                     continue
 
                 try:
-                    self._loadSkillkitFromFile(filePath, moduleName, vm, skillkitType)
+                    self._loadToolkitFromFile(filePath, moduleName, vm, toolkitType)
                 except Exception as e:
                     # Log error but continue with other files
                     logger.error(
-                        f"Failed to load {skillkitType} skillkit from {filename}: {str(e)}"
+                        f"Failed to load {toolkitType} toolkit from {filename}: {str(e)}"
                     )
                     continue
 
-    def _loadSkillkitFromFile(
-        self, filePath: str, moduleName: str, vm, skillkitType: str
+    def _loadToolkitFromFile(
+        self, filePath: str, moduleName: str, vm, toolkitType: str
     ):
         """
-        Load skillkit from a single file
+        Load toolkit from a single file
 
         Args:
             filePath (str): Path to the Python file
             moduleName (str): Module name for import
             vm: VM instance (if available)
-            skillkitType (str): Type of skillkit being loaded
+            toolkitType (str): Type of toolkit being loaded
         """
         import sys
         import os
@@ -523,32 +523,32 @@ class GlobalSkills:
             if module is None:
                 raise Exception(f"Failed to load module: {import_errors}")
 
-            # Find all Skillkit classes in the module
+            # Find all Toolkit classes in the module
             for name, obj in inspect.getmembers(module, inspect.isclass):
-                # Check if it's a Skillkit subclass but not Skillkit itself
-                if self._is_obj_hierarchy_from_class_name(obj, "Skillkit"):
-                    # Create an instance of the skillkit
-                    skillkit_instance = obj()
+                # Check if it's a Toolkit subclass but not Toolkit itself
+                if self._is_obj_hierarchy_from_class_name(obj, "Toolkit"):
+                    # Create an instance of the toolkit
+                    toolkit_instance = obj()
 
-                    # Set VM if this is VMSkillkit and we have a VM configured
-                    if hasattr(skillkit_instance, "setVM") and vm is not None:
-                        skillkit_instance.setVM(vm)
+                    # Set VM if this is VMToolkit and we have a VM configured
+                    if hasattr(toolkit_instance, "setVM") and vm is not None:
+                        toolkit_instance.setVM(vm)
 
-                    # Set global context if the skillkit supports it
-                    if hasattr(skillkit_instance, "setGlobalConfig"):
-                        skillkit_instance.setGlobalConfig(self.globalConfig)
+                    # Set global context if the toolkit supports it
+                    if hasattr(toolkit_instance, "setGlobalConfig"):
+                        toolkit_instance.setGlobalConfig(self.globalConfig)
 
-                    # Add skillkit to the installed skillset
-                    # This tracks the skillkit for metadata aggregation
-                    self.installedSkillset.addSkillkit(skillkit_instance)
+                    # Add toolkit to the installed toolset
+                    # This tracks the toolkit for metadata aggregation
+                    self.installedToolSet.addSkillkit(toolkit_instance)
 
                     logger.debug(
-                        f"Loaded {skillkitType} skillkit: {moduleName} from {filePath}"
+                        f"Loaded {toolkitType} toolkit: {moduleName} from {filePath}"
                     )
 
         except Exception as e:
             logger.error(
-                f"Failed to load {skillkitType} skillkit from {filePath}: {str(e)}"
+                f"Failed to load {toolkitType} toolkit from {filePath}: {str(e)}"
             )
         finally:
             # Clean up sys.modules to avoid conflicts, but keep package modules
@@ -568,140 +568,140 @@ class GlobalSkills:
             # Restore original sys.path
             sys.path = originalSysPath
 
-    def registerAgentSkill(self, agentName: str, agent: BaseAgent):
+    def registerAgentTool(self, agentName: str, agent: BaseAgent):
         """
-        Register an agent as a skill
+        Register an agent as a tool
 
         Args:
             agentName (str): Name of the agent
             agent (BaseAgent): BaseAgent instance to register
         """
         # Store agent reference
-        self.agentSkills[agentName] = agent
+        self.agentTools[agentName] = agent
 
-        # Create AgentSkillKit to wrap the agent
-        agentSkillKit = AgentSkillKit(agent, agentName)
+        # Create AgentToolkit to wrap the agent
+        agentToolkit = AgentToolkit(agent, agentName)
 
-        # Add agent skills to the agent skillset
-        for skill in agentSkillKit.getSkills():
-            self.agentSkillset.addSkill(skill)
+        # Add agent tools to the agent toolset
+        for skill in agentToolkit.getSkills():
+            self.agentToolSet.addSkill(skill)
 
-        self._syncAllSkills()
+        self._syncAllTools()
 
-        logger.debug(f"Registered agent skill: {agentName}")
+        logger.debug(f"Registered agent tool: {agentName}")
 
-    def unregisterAgentSkill(self, agentName: str):
+    def unregisterAgentTool(self, agentName: str):
         """
-        Unregister an agent skill
+        Unregister an agent tool
 
         Args:
             agentName (str): Name of the agent to unregister
         """
-        if agentName in self.agentSkills:
-            # Remove from agent skills
-            del self.agentSkills[agentName]
+        if agentName in self.agentTools:
+            # Remove from agent tools
+            del self.agentTools[agentName]
 
-            # Remove from skillset - this is tricky as we need to identify which skills belong to this agent
-            # We'll rebuild the agent skillset
-            self._rebuildAgentSkillset()
+            # Remove from toolset - this is tricky as we need to identify which tools belong to this agent
+            # We'll rebuild the agent toolset
+            self._rebuildAgentToolSet()
 
-            logger.debug(f"Unregistered agent skill: {agentName}")
-        self._syncAllSkills()
+            logger.debug(f"Unregistered agent tool: {agentName}")
+        self._syncAllTools()
 
-    def _rebuildAgentSkillset(self):
+    def _rebuildAgentToolSet(self):
         """
-        Rebuild the agent skillset from current agent skills
+        Rebuild the agent toolset from current agent tools
         """
-        self.agentSkillset = Skillset()
-        for agentName, agent in self.agentSkills.items():
-            agentSkillKit = AgentSkillKit(agent, agentName)
-            for skill in agentSkillKit.getSkills():
-                self.agentSkillset.addSkill(skill)
+        self.agentToolSet = ToolSet()
+        for agentName, agent in self.agentTools.items():
+            agentToolkit = AgentToolkit(agent, agentName)
+            for skill in agentToolkit.getSkills():
+                self.agentToolSet.addSkill(skill)
 
-    def clearAgentSkills(self):
+    def clearAgentTools(self):
         """
-        Clear all agent skills
+        Clear all agent tools
         """
-        self.agentSkills.clear()
-        self.agentSkillset = Skillset()
-        self._syncAllSkills()
+        self.agentTools.clear()
+        self.agentToolSet = ToolSet()
+        self._syncAllTools()
 
-    def getInstalledSkills(self) -> Skillset:
+    def getInstalledTools(self) -> ToolSet:
         """
-        Get the installed skills skillset
-
-        Returns:
-            Skillset containing installed skills
-        """
-        return self.installedSkillset
-
-    def getAgentSkills(self) -> Skillset:
-        """
-        Get the agent skills skillset
+        Get the installed tools toolset
 
         Returns:
-            Skillset containing agent skills
+            ToolSet containing installed tools
         """
-        return self.agentSkillset
+        return self.installedToolSet
 
-    def _syncAllSkills(self):
+    def getAgentTools(self) -> ToolSet:
         """
-        Sync all skills (installed + agent skills) as a combined skillset.
+        Get the agent tools toolset
+
+        Returns:
+            ToolSet containing agent tools
+        """
+        return self.agentToolSet
+
+    def _syncAllTools(self):
+        """
+        Sync all tools (installed + agent tools) as a combined toolset.
 
         Note: Metadata prompt is not copied here. It is dynamically collected
         via skill.owner_skillkit in ExploreStrategy._collect_metadata_prompt().
         """
-        self.allSkills = Skillset()
+        self.allTools = ToolSet()
 
-        # Add installed skills (owner_skillkit is already bound)
-        for skill in self.installedSkillset.getSkills():
-            self.allSkills.addSkill(skill)
+        # Add installed tools (owner_skillkit is already bound)
+        for skill in self.installedToolSet.getSkills():
+            self.allTools.addSkill(skill)
 
-        # Add agent skills
-        for skill in self.agentSkillset.getSkills():
-            self.allSkills.addSkill(skill)
+        # Add agent tools
+        for skill in self.agentToolSet.getSkills():
+            self.allTools.addSkill(skill)
 
-    def getAllSkills(self) -> Skillset:
+    def getAllTools(self) -> ToolSet:
         """
-        Get all skills (installed + agent skills) as a combined skillset
+        Get all tools (installed + agent tools) as a combined toolset
 
         Returns:
-            Skillset containing all skills
+            ToolSet containing all tools
         """
-        return self.allSkills
+        return self.allTools
 
-    def getSkillNames(self) -> list:
+    def getToolNames(self) -> list:
         """
-        Get all skill names
+        Get all tool names
 
         Returns:
-            List of all skill names
+            List of all tool names
         """
-        return self.getAllSkills().getSkillNames()
+        return self.getAllTools().getSkillNames()
 
-    def hasSkill(self, skillName: str) -> bool:
+    def hasTool(self, toolName: str) -> bool:
         """
-        Check if a skill exists
+        Check if a tool exists
 
         Args:
-            skillName (str): Name of the skill to check
+            toolName (str): Name of the tool to check
 
         Returns:
-            True if skill exists, False otherwise
+            True if tool exists, False otherwise
         """
-        return self.getAllSkills().hasSkill(skillName)
+        return self.getAllTools().hasSkill(toolName)
 
-    def getSkill(self, skillName: str):
+    def getTool(self, toolName: str):
         """
-        Get a skill by name
+        Get a tool by name
 
         Args:
-            skillName (str): Name of the skill to get
+            toolName (str): Name of the tool to get
 
         Returns:
-            SkillFunction skill or None if not found
+            ToolFunction tool or None if not found
         """
-        return self.getAllSkills().getSkill(skillName)
+        return self.getAllTools().getSkill(toolName)
 
     def getAgent(self, agentName: str) -> Optional[BaseAgent]:
         """
@@ -713,7 +713,7 @@ class GlobalSkills:
         Returns:
             BaseAgent instance or None if not found
         """
-        return self.agentSkills.get(agentName)
+        return self.agentTools.get(agentName)
 
     def getAgentNames(self) -> list:
         """
@@ -722,7 +722,7 @@ class GlobalSkills:
         Returns:
             List of agent names
         """
-        return list(self.agentSkills.keys())
+        return list(self.agentTools.keys())
 
     def _is_obj_hierarchy_from_class_name(self, obj: object, className: str) -> bool:
         """
@@ -738,9 +738,9 @@ class GlobalSkills:
 
     def __str__(self) -> str:
         """
-        String representation of global skills
+        String representation of global tools
 
         Returns:
             Description string
         """
-        return f"GlobalSkills(installed={len(self.installedSkillset.getSkills())}, agents={len(self.agentSkills)})"
+        return f"GlobalToolkits(installed={len(self.installedToolSet.getSkills())}, agents={len(self.agentTools)})"
