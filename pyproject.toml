@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kweaver-dolphin"
-version = "0.5.0"
+version = "0.6.0"
 description = "Dolphin Language - An intelligent agent framework"
 authors = [
     {name = "AnyData", email = "contact@anydata.com"}
@@ -101,6 +101,7 @@ include = ["dolphin*", "DolphinLanguageSDK*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

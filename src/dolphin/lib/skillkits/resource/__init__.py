@@ -28,7 +28,12 @@ from .resource_skillkit import ResourceSkillkit
 from .models.skill_config import ResourceSkillConfig
 from .models.skill_meta import SkillMeta, SkillContent
 from .skill_loader import SkillLoader, SkillLoaderError
-from .skill_validator import SkillValidator, ValidationResult
+from .skill_validator import (
+    SkillValidator,
+    ValidationResult,
+    validate_entry_shell,
+    get_script_path_from_entry_shell,
+)
 from .skill_cache import SkillMetaCache, SkillContentCache, TTLLRUCache
 
 __all__ = [
@@ -45,6 +50,8 @@ __all__ = [
     # Validator
     "SkillValidator",
     "ValidationResult",
+    "validate_entry_shell",
+    "get_script_path_from_entry_shell",
     # Cache
     "SkillMetaCache",
     "SkillContentCache",

@@ -69,6 +69,16 @@ dolphin run --folder examples/resource_skill/ \
     --query "Help me brainstorm a new feature"
 ```
 
+On Windows PowerShell, prefer the installed CLI entry or the `.cmd` wrapper:
+
+```powershell
+uv run dolphin run `
+  --folder .\examples\resource_skill `
+  --agent skill_guided_assistant `
+  --config .\examples\resource_skill\config\global.yaml `
+  --query "Help me brainstorm a new feature"
+```
+
 ### Directory Structure
 
 ```
@@ -131,6 +141,16 @@ dolphin run --folder examples/deepsearch/ \
     --query "What are the latest developments in AI agents?"
 ```
 
+Windows PowerShell:
+
+```powershell
+uv run dolphin run `
+  --folder .\examples\deepsearch `
+  --agent deepsearch `
+  --config .\examples\deepsearch\config\global.yaml `
+  --query "What are the latest developments in AI agents?"
+```
+
 ### Directory Structure
 
 ```
@@ -183,6 +203,17 @@ dolphin run --folder examples/tabular_analyst/ \
     --config examples/tabular_analyst/config/global.yaml \
     --skill_folder examples/tabular_analyst/skillkits/ \
     --query "/path/to/your/data.csv"
+```
+
+Windows PowerShell:
+
+```powershell
+uv run dolphin run `
+  --folder .\examples\tabular_analyst `
+  --agent tabular_analyst `
+  --config .\examples\tabular_analyst\config\global.yaml `
+  --skill_folder .\examples\tabular_analyst\skillkits `
+  --query "D:\path\to\your\data.csv"
 ```
 
 ### Directory Structure

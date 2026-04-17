@@ -5,10 +5,12 @@ This module provides validation for skill packages, including:
 - Path security validation (prevent path traversal)
 - Size limit validation
 - File type validation
+- entry_shell command validation for builtin_skill_execute_script
 """
 
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import List, Optional, Tuple, Set, Union
 from dataclasses import dataclass
@@ -309,6 +311,208 @@ class SkillValidator:
             r"(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
         )
         return bool(semver_pattern.match(version))
+
+
+_ALLOWED_FILE_PREFIXES = ("SKILL.md", "references/", "scripts/")
+_ALLOWED_SCRIPT_PREFIX = "scripts/"
+
+
+def _reject_bad_path_segments(normalized: str, original: str) -> Optional[str]:
+    """Return an error message if any path segment is illegal, otherwise None.
+
+    Illegal segments:
+    - empty string  (produced by leading/trailing/double slashes, e.g. "a//b")
+    - "."           (current-directory reference, e.g. "references/./a.md")
+    - ".."          (parent-directory traversal, e.g. "references/../etc/passwd")
+    """
+    for part in normalized.split("/"):
+        if part in ("", ".", ".."):
+            return f"Path contains illegal segment '{part}': {original}"
+    return None
+
+
+def _matches_allowed_prefix(normalized: str, prefixes: tuple) -> bool:
+    """Return True when *normalized* is permitted by the given prefix tuple.
+
+    For prefixes that end with "/" (e.g. "references/", "scripts/"), the path
+    must *start with* that prefix — meaning there must be at least one more
+    character after the slash.
+
+    For exact tokens without a trailing "/" (e.g. "SKILL.md"), the path must
+    *equal* that token exactly.  Using startswith here would wrongly accept
+    "SKILL.md.extra.md".
+    """
+    for prefix in prefixes:
+        if prefix.endswith("/"):
+            if normalized.startswith(prefix) and len(normalized) > len(prefix):
+                return True
+        else:
+            if normalized == prefix:
+                return True
+    return False
+
+
+def validate_skill_file_path(file_path: str) -> Tuple[bool, Optional[str]]:
+    """Validate the format of a file_path for builtin_skill_read_file.
+
+    Enforces the rules from the design document (section 6.4 / 7.3):
+    - Must be a non-empty string
+    - Backslashes converted to forward-slashes before checking
+    - No absolute paths or drive letters
+    - No empty, '.', or '..' path segments
+    - Only SKILL.md (exact), references/<something>, or scripts/<something>
+
+    Args:
+        file_path: The relative file path to validate
+
+    Returns:
+        Tuple of (is_valid, error_message) — error_message is None when valid
+    """
+    if not file_path or not file_path.strip():
+        return False, "file_path must not be empty"
+
+    normalized = file_path.replace("\\", "/").strip()
+
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        return False, f"Absolute paths are not allowed: {file_path}"
+
+    seg_error = _reject_bad_path_segments(normalized, file_path)
+    if seg_error:
+        return False, seg_error
+
+    if not _matches_allowed_prefix(normalized, _ALLOWED_FILE_PREFIXES):
+        return False, (
+            f"file_path must be exactly 'SKILL.md', or start with 'references/' "
+            f"or 'scripts/' followed by a filename: {file_path}"
+        )
+
+    return True, None
+
+
+def validate_skill_script_path(script_path: str) -> Tuple[bool, Optional[str]]:
+    """Validate the format of a script_path for builtin_skill_execute_script.
+
+    Enforces the rules from the design document (section 6.5 / 7.3):
+    - Must be a non-empty string
+    - Same normalisation rules as validate_skill_file_path
+    - Only scripts/<something> paths allowed
+
+    Args:
+        script_path: The relative script path to validate
+
+    Returns:
+        Tuple of (is_valid, error_message) — error_message is None when valid
+    """
+    if not script_path or not script_path.strip():
+        return False, "script_path must not be empty"
+
+    normalized = script_path.replace("\\", "/").strip()
+
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        return False, f"Absolute paths are not allowed: {script_path}"
+
+    seg_error = _reject_bad_path_segments(normalized, script_path)
+    if seg_error:
+        return False, seg_error
+
+    if not normalized.startswith(_ALLOWED_SCRIPT_PREFIX) or len(normalized) <= len(_ALLOWED_SCRIPT_PREFIX):
+        return False, f"script_path must start with 'scripts/' followed by a filename: {script_path}"
+
+    return True, None
+
+
+# Flags that indicate shell injection or indirect execution — always forbidden
+# in entry_shell regardless of interpreter.
+_FORBIDDEN_ENTRY_SHELL_FLAGS = frozenset({"-c", "-m"})
+
+
+def validate_entry_shell(entry_shell: str) -> Tuple[bool, Optional[str]]:
+    """Validate an entry_shell command for builtin_skill_execute_script.
+
+    Enforces an explicit allowlist form:  <interpreter> scripts/<path> [args...]
+
+    Examples that must be accepted:
+        python scripts/analyze.py
+        bash scripts/run.sh --verbose
+        node scripts/process.js
+
+    Examples that must be rejected:
+        sh -c "rm -rf /"          (shell injection via -c)
+        bash -c "cat /etc/passwd" (shell injection via -c)
+        python -c "import os; ..."(inline code via -c)
+        python -m http.server     (module execution via -m)
+        scripts/run.sh            (bare path, no interpreter — ambiguous)
+
+    Args:
+        entry_shell: Shell command string to validate
+
+    Returns:
+        Tuple of (is_valid, error_message) — error_message is None when valid
+    """
+    if not entry_shell or not entry_shell.strip():
+        return False, "entry_shell must not be empty"
+
+    # Normalize backslashes to forward slashes before shlex parsing.
+    # shlex treats \ as an escape character, so a bare backslash in a Windows
+    # path like scripts\run.py would be consumed and corrupt the token.
+    normalized = entry_shell.replace("\\", "/")
+    try:
+        tokens = shlex.split(normalized)
+    except ValueError as e:
+        return False, f"Failed to parse entry_shell: {e}"
+
+    if len(tokens) < 2:
+        return False, (
+            "entry_shell must have the form '<interpreter> scripts/<path> [args...]', "
+            f"got: {entry_shell!r}"
+        )
+
+    # Explicitly reject forbidden flags at position 1 before checking the script path.
+    # This catches sh -c / bash -c / python -c / python -m with a clear error.
+    if tokens[1] in _FORBIDDEN_ENTRY_SHELL_FLAGS:
+        return False, (
+            f"entry_shell flag '{tokens[1]}' is not allowed. "
+            "Flags -c and -m enable shell injection or module execution. "
+            "Use the form: <interpreter> scripts/<path> [args...]"
+        )
+
+    # The second token must be the script path (starting with scripts/).
+    # Enforcing this at position 1 means no flags of any kind are allowed
+    # before the script path, closing the injection surface entirely.
+    script_token = tokens[1]
+    if not script_token.startswith("scripts/"):
+        return False, (
+            f"The second token must be the script path starting with 'scripts/', "
+            f"got: {tokens[1]!r}. "
+            "Use the form: <interpreter> scripts/<path> [args...]"
+        )
+
+    seg_error = _reject_bad_path_segments(script_token, tokens[1])
+    if seg_error:
+        return False, seg_error
+
+    if len(script_token) <= len("scripts/"):
+        return False, (
+            f"Script path must include a filename after 'scripts/': {tokens[1]!r}"
+        )
+
+    return True, None
+
+
+def get_script_path_from_entry_shell(entry_shell: str) -> str:
+    """Extract the script path from a pre-validated entry_shell command.
+
+    Must only be called after validate_entry_shell has returned (True, None).
+    Returns tokens[1] normalised to forward slashes.
+
+    Args:
+        entry_shell: A command already validated by validate_entry_shell
+
+    Returns:
+        The scripts/-relative path string (e.g. 'scripts/analyze.py')
+    """
+    tokens = shlex.split(entry_shell.replace("\\", "/"))
+    return tokens[1]
 
 
 def validate_skill_name(name: str) -> Tuple[bool, Optional[str]]:

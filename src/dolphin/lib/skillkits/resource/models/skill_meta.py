@@ -64,12 +64,15 @@ class SkillContent:
         body: The markdown content after frontmatter
         available_scripts: List of script file paths in scripts/ directory
         available_references: List of reference file paths in references/ directory
+        raw_skill_md: Full raw SKILL.md text as read from disk (frontmatter + body).
+            This is the authoritative content returned by builtin_skill_load.
     """
 
     frontmatter: Dict[str, Any]
     body: str
     available_scripts: List[str] = field(default_factory=list)
     available_references: List[str] = field(default_factory=list)
+    raw_skill_md: str = ""
 
     def get_name(self) -> str:
         """Get skill name from frontmatter.

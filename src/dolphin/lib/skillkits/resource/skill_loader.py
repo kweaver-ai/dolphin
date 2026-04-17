@@ -168,8 +168,21 @@ class SkillLoader:
             for warning in validation.warnings:
                 logger.debug(f"Frontmatter warning for {skill_md}: {warning}")
 
+            name = frontmatter.get("name", "")
+
+            # Validate that the directory name matches SKILL.md frontmatter 'name'.
+            # In local testing mode skill_id == frontmatter.name, so the directory
+            # name must be consistent to avoid ambiguous lookups.
+            dir_name = skill_dir.name
+            if name and dir_name != name:
+                logger.warning(
+                    f"Skill directory name '{dir_name}' does not match "
+                    f"SKILL.md frontmatter name '{name}' in {skill_dir}. "
+                    f"The directory name should equal the frontmatter 'name' field."
+                )
+
             return SkillMeta(
-                name=frontmatter.get("name", ""),
+                name=name,
                 description=frontmatter.get("description", ""),
                 base_path=str(skill_dir.resolve()),
                 version=frontmatter.get("version"),
@@ -225,6 +238,7 @@ class SkillLoader:
                 body=body.strip(),
                 available_scripts=scripts,
                 available_references=references,
+                raw_skill_md=content,
             )
 
         except Exception as e:
