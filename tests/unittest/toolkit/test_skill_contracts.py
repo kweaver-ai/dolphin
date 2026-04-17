@@ -1,4 +1,4 @@
-"""Unit tests for dolphin.sdk.skill.skill_contracts.
+"""Unit tests for dolphin.sdk.tool.skill_contracts.
 
 Covers:
 - Contract name constants have expected, stable values
@@ -16,7 +16,7 @@ class TestContractNameConstants(unittest.TestCase):
     """Contract names must be fixed strings that the executor and SDK share."""
 
     def setUp(self):
-        from dolphin.sdk.skill.skill_contracts import (
+        from dolphin.sdk.tool.skill_contracts import (
             BUILTIN_SKILL_LOAD,
             BUILTIN_SKILL_READ_FILE,
             BUILTIN_SKILL_EXECUTE_SCRIPT,
@@ -47,7 +47,7 @@ class TestContractDescriptions(unittest.TestCase):
     """Descriptions must be non-empty strings containing key guidance."""
 
     def setUp(self):
-        from dolphin.sdk.skill.skill_contracts import (
+        from dolphin.sdk.tool.skill_contracts import (
             SKILL_LOAD_DESCRIPTION,
             SKILL_READ_FILE_DESCRIPTION,
             SKILL_EXECUTE_SCRIPT_DESCRIPTION,
@@ -82,7 +82,7 @@ class TestContractInputSchemas(unittest.TestCase):
     """Input schemas must satisfy minimal JSON Schema requirements."""
 
     def setUp(self):
-        from dolphin.sdk.skill.skill_contracts import (
+        from dolphin.sdk.tool.skill_contracts import (
             SKILL_LOAD_INPUTS_SCHEMA,
             SKILL_READ_FILE_INPUTS_SCHEMA,
             SKILL_EXECUTE_SCRIPT_INPUTS_SCHEMA,
@@ -137,7 +137,7 @@ class TestContractOutputSchemas(unittest.TestCase):
     """Output schemas must declare all fields from the design contract."""
 
     def setUp(self):
-        from dolphin.sdk.skill.skill_contracts import (
+        from dolphin.sdk.tool.skill_contracts import (
             SKILL_LOAD_OUTPUTS,
             SKILL_READ_FILE_OUTPUTS,
             SKILL_EXECUTE_SCRIPT_OUTPUTS,
@@ -165,7 +165,7 @@ class TestBuildOpenaiToolSchema(unittest.TestCase):
     """build_openai_tool_schema must produce the OpenAI function-calling format."""
 
     def setUp(self):
-        from dolphin.sdk.skill.skill_contracts import build_openai_tool_schema
+        from dolphin.sdk.tool.skill_contracts import build_openai_tool_schema
         self.build = build_openai_tool_schema
 
     def test_output_structure(self):
@@ -194,7 +194,7 @@ class TestPreBuiltOpenAISchemas(unittest.TestCase):
     """Pre-built SKILL_*_OPENAI_SCHEMA constants must reference the correct contract names."""
 
     def setUp(self):
-        from dolphin.sdk.skill.skill_contracts import (
+        from dolphin.sdk.tool.skill_contracts import (
             BUILTIN_SKILL_LOAD,
             BUILTIN_SKILL_READ_FILE,
             BUILTIN_SKILL_EXECUTE_SCRIPT,

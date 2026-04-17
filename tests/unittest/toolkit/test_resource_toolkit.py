@@ -1158,8 +1158,8 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         try:
-            from dolphin.lib.skillkits.resource import ResourceSkillkit
-            from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+            from dolphin.lib.toolkits.resource import ResourceToolkit as ResourceSkillkit
+            from dolphin.lib.toolkits.resource.models.skill_config import ResourceSkillConfig
             cls.ResourceSkillkit = ResourceSkillkit
             cls.ResourceSkillConfig = ResourceSkillConfig
             cls.available = True
@@ -1497,7 +1497,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
         """The SkillFunction for _builtin_skill_load_handler must carry the OpenAI schema."""
         self._skip_if_unavailable()
         sk = self._make_skillkit()
-        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        skill_by_name = {s.func.__name__: s for s in sk.getTools()}
         sf = skill_by_name.get("_builtin_skill_load_handler")
         self.assertIsNotNone(sf, "_builtin_skill_load_handler not found in skills")
         schema = sf.get_openai_tool_schema()
@@ -1506,7 +1506,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
     def test_builtin_skill_read_file_has_openai_schema(self):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
-        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        skill_by_name = {s.func.__name__: s for s in sk.getTools()}
         sf = skill_by_name.get("_builtin_skill_read_file_handler")
         self.assertIsNotNone(sf)
         schema = sf.get_openai_tool_schema()
@@ -1515,7 +1515,7 @@ class TestBuiltinSkillContractHandlers(unittest.TestCase):
     def test_builtin_skill_execute_script_has_openai_schema(self):
         self._skip_if_unavailable()
         sk = self._make_skillkit()
-        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        skill_by_name = {s.func.__name__: s for s in sk.getTools()}
         sf = skill_by_name.get("_builtin_skill_execute_script_handler")
         self.assertIsNotNone(sf)
         schema = sf.get_openai_tool_schema()

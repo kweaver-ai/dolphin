@@ -20,16 +20,16 @@ from dolphin.core.tool.tool_function import ToolFunction
 from dolphin.core.tool.toolkit import Toolkit
 from dolphin.core.logging.logger import get_logger
 
-from .models.tool_meta import SkillMeta, SkillContent
-from .models.tool_config import ResourceSkillConfig
-from .tool_loader import SkillLoader, truncate_content
-from .tool_cache import SkillMetaCache, SkillContentCache
-from .tool_validator import (
+from .models.skill_meta import SkillMeta, SkillContent
+from .models.skill_config import ResourceSkillConfig
+from .skill_loader import SkillLoader, truncate_content
+from .skill_cache import SkillMetaCache, SkillContentCache
+from .skill_validator import (
     validate_skill_name,
     validate_skill_file_path,
 )
 from .local_script_executor import execute_skill_script
-from dolphin.sdk.skill.skill_contracts import (
+from dolphin.sdk.tool.skill_contracts import (
     BUILTIN_SKILL_LOAD,
     BUILTIN_SKILL_READ_FILE,
     BUILTIN_SKILL_EXECUTE_SCRIPT,

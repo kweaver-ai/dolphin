@@ -11,7 +11,7 @@ Covers the functions added to support the unified skill contract:
 
 import unittest
 
-from dolphin.lib.skillkits.resource.skill_validator import (
+from dolphin.lib.toolkits.resource.skill_validator import (
     _reject_bad_path_segments,
     _matches_allowed_prefix,
     validate_skill_file_path,

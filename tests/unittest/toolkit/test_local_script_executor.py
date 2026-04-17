@@ -1,4 +1,4 @@
-"""Unit tests for dolphin.lib.skillkits.resource.local_script_executor.
+"""Unit tests for dolphin.lib.toolkits.resource.local_script_executor.
 
 Covers:
 - entry_shell validation (via skill_validator.validate_entry_shell):
@@ -27,7 +27,7 @@ class TestValidateScriptPath(unittest.TestCase):
     """validate_entry_shell (in skill_validator) validates format only — no filesystem access."""
 
     def setUp(self):
-        from dolphin.lib.skillkits.resource.skill_validator import validate_entry_shell
+        from dolphin.lib.toolkits.resource.skill_validator import validate_entry_shell
         self._validate = validate_entry_shell
 
     def _ok(self, entry_shell):
@@ -129,7 +129,7 @@ class TestExecuteSkillScriptSuccess(unittest.TestCase):
         shutil.rmtree(cls.temp_dir, ignore_errors=True)
 
     def setUp(self):
-        from dolphin.lib.skillkits.resource.local_script_executor import execute_skill_script
+        from dolphin.lib.toolkits.resource.local_script_executor import execute_skill_script
         self._execute = execute_skill_script
 
     def test_success_has_expected_keys(self):
@@ -174,7 +174,7 @@ class TestExecuteSkillScriptPathValidation(unittest.TestCase):
     """execute_skill_script must reject bad paths before touching the filesystem."""
 
     def setUp(self):
-        from dolphin.lib.skillkits.resource.local_script_executor import execute_skill_script
+        from dolphin.lib.toolkits.resource.local_script_executor import execute_skill_script
         self._execute = execute_skill_script
         self.temp_dir = Path(tempfile.mkdtemp(prefix="test_exec_pv_"))
         (self.temp_dir / "scripts").mkdir()
@@ -224,7 +224,7 @@ class TestExecuteSkillScriptTimeout(unittest.TestCase):
 
     def test_timeout_returns_minus_one_exit_code(self):
         import subprocess
-        from dolphin.lib.skillkits.resource.local_script_executor import execute_skill_script
+        from dolphin.lib.toolkits.resource.local_script_executor import execute_skill_script
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="python", timeout=1)):
             result = execute_skill_script(self.temp_dir, "python scripts/slow.py", timeout_seconds=1)
@@ -233,7 +233,7 @@ class TestExecuteSkillScriptTimeout(unittest.TestCase):
 
     def test_timeout_stderr_mentions_timeout(self):
         import subprocess
-        from dolphin.lib.skillkits.resource.local_script_executor import execute_skill_script
+        from dolphin.lib.toolkits.resource.local_script_executor import execute_skill_script
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="python", timeout=1)):
             result = execute_skill_script(self.temp_dir, "python scripts/slow.py", timeout_seconds=1)
@@ -242,7 +242,7 @@ class TestExecuteSkillScriptTimeout(unittest.TestCase):
 
     def test_timeout_source_is_local(self):
         import subprocess
-        from dolphin.lib.skillkits.resource.local_script_executor import execute_skill_script
+        from dolphin.lib.toolkits.resource.local_script_executor import execute_skill_script
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="python", timeout=1)):
             result = execute_skill_script(self.temp_dir, "python scripts/slow.py", timeout_seconds=1)
@@ -263,7 +263,7 @@ class TestExecuteSkillScriptInterpreterNotFound(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_missing_interpreter_returns_error(self):
-        from dolphin.lib.skillkits.resource.local_script_executor import execute_skill_script
+        from dolphin.lib.toolkits.resource.local_script_executor import execute_skill_script
 
         with patch("subprocess.run", side_effect=FileNotFoundError("bash: not found")):
             result = execute_skill_script(self.temp_dir, "bash scripts/run.sh")
@@ -272,7 +272,7 @@ class TestExecuteSkillScriptInterpreterNotFound(unittest.TestCase):
         self.assertIn("command", result["stderr"].lower())
 
     def test_missing_interpreter_source_is_local(self):
-        from dolphin.lib.skillkits.resource.local_script_executor import execute_skill_script
+        from dolphin.lib.toolkits.resource.local_script_executor import execute_skill_script
 
         with patch("subprocess.run", side_effect=FileNotFoundError("bash: not found")):
             result = execute_skill_script(self.temp_dir, "bash scripts/run.sh")
@@ -284,7 +284,7 @@ class TestErrorResult(unittest.TestCase):
     """_error_result helper must always produce the correct structure."""
 
     def setUp(self):
-        from dolphin.lib.skillkits.resource.local_script_executor import _error_result
+        from dolphin.lib.toolkits.resource.local_script_executor import _error_result
         self._error = _error_result
 
     def test_all_required_keys_present(self):
