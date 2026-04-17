@@ -139,7 +139,7 @@ class PlanToolkit(Toolkit):
 
         # Capture parent Agent's tools configuration for subtasks
         # This allows subtasks to inherit the same tool set (minus excluded tools)
-        self._parent_tools = self._context.get_last_skills()
+        self._parent_tools = self._context.get_last_tools()
         logger.debug(
             f"[PlanToolkit] Captured parent tools for subtasks: {self._parent_tools}"
         )

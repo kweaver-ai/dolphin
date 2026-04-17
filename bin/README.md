@@ -215,7 +215,7 @@ The following options apply to all subcommands:
 |--------|-------------|
 | `-a, --agent NAME` | Entry Agent name (required) |
 | `--folder PATH` | Agent folder path (required) |
-| `--skill-folder PATH` | Custom Skillkit folder path |
+| `--tool-folder PATH` | Custom Toolkit folder path |
 | `-q, --query TEXT` | Query string, passed as `query` variable |
 
 ### Configuration Options

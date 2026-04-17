@@ -84,7 +84,7 @@ async def _recoverAgentFromError(env, args: Args, agent):
             tempAgent = DolphinAgent(
                 file_path=filePath,
                 global_config=env.globalConfig,
-                global_skills=env.globalSkills,
+                global_toolkits=env.globalToolkits,
                 global_types=env.global_types,
             )
             if tempAgent.get_name() == args.agent:
@@ -97,7 +97,7 @@ async def _recoverAgentFromError(env, args: Args, agent):
         freshAgent = DolphinAgent(
             file_path=agentFilePath,
             global_config=env.globalConfig,
-            global_skills=env.globalSkills,
+            global_toolkits=env.globalToolkits,
             global_types=env.global_types,
         )
         env.agents[args.agent] = freshAgent
@@ -124,18 +124,18 @@ def _get_toolkit_info(agent) -> Optional[Dict[str, int]]:
         if context is None:
             return None
 
-        all_skills = context.all_skills.getTools() if context.all_skills else []
-        if not all_skills:
+        all_tools = context.all_tools.getTools() if context.all_tools else []
+        if not all_tools:
             return None
 
-        # Group skills by owner toolkit name
+        # Group tools by owner toolkit name
         toolkit_counts: Dict[str, int] = {}
-        for skill in all_skills:
-            owner_name = getattr(skill, 'owner_name', None)
+        for tool in all_tools:
+            owner_name = getattr(tool, 'owner_name', None)
             if owner_name:
                 toolkit_counts[owner_name] = toolkit_counts.get(owner_name, 0) + 1
             else:
-                # Skills without owner go to "builtin"
+                # Tools without owner go to "builtin"
                 toolkit_counts["builtin"] = toolkit_counts.get("builtin", 0) + 1
 
         return toolkit_counts if toolkit_counts else None

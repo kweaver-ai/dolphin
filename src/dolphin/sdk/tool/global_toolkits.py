@@ -35,15 +35,15 @@ class GlobalToolkits:
         self.agentTools: Dict[str, BaseAgent] = {}
 
         # Load installed tools from tool/installed directory
-        self._loadInstalledSkills()
+        self._loadInstalledToolkits()
 
-        # Load MCP skills if enabled
+        # Load MCP toolkits if enabled
         if globalConfig.mcp_config and globalConfig.mcp_config.enabled:
-            self._loadMCPSkills()
+            self._loadMCPToolkits()
 
         self._syncAllTools()
 
-    def _loadInstalledSkills(self):
+    def _loadInstalledToolkits(self):
         """
         Load all toolkits using entry points first, fallback to file-based loading
         """
@@ -57,7 +57,7 @@ class GlobalToolkits:
             # Fallback to original file-based loading
             self._loadToolkitsFromFiles()
 
-        # Handle system function loading, following skill_config configuration
+        # Handle system function loading, following tool config configuration
         enabled_system_functions = self._get_enabled_system_functions()
         # Decide how to load system functions based on the value of enabled_system_functions
         system_functions = SystemFunctionsToolkit(enabled_system_functions)
@@ -72,8 +72,15 @@ class GlobalToolkits:
             bool: True if loading succeeded, False if failed
         """
         try:
-            # Get all entry points for dolphin.toolkits
-            entry_points = importlib.metadata.entry_points(group="dolphin.toolkits")
+            # Get all entry points for dolphin.toolkits (current) and dolphin.skillkits (deprecated)
+            entry_points = list(importlib.metadata.entry_points(group="dolphin.toolkits"))
+            legacy_entry_points = list(importlib.metadata.entry_points(group="dolphin.skillkits"))
+            if legacy_entry_points:
+                logger.warning(
+                    "Entry point group 'dolphin.skillkits' is deprecated. "
+                    "Please update your package to register under 'dolphin.toolkits' instead."
+                )
+                entry_points = entry_points + legacy_entry_points
 
             if not entry_points:
                 logger.debug("No dolphin.toolkits entry points found")
@@ -99,8 +106,8 @@ class GlobalToolkits:
                 for entry_point in entry_points:
                     status.update(f"[bold blue]Loading toolkit:[/][white] {entry_point.name}[/]")
                     try:
-                        # Check if this skill should be loaded based on config
-                        if not self.globalConfig.skill_config.should_load_skill(entry_point.name):
+                        # Check if this toolkit should be loaded based on config
+                        if not self.globalConfig.tool_config.should_load_tool(entry_point.name):
                             logger.debug(f"Skipping disabled toolkit: {entry_point.name}")
                             continue
 
@@ -156,21 +163,21 @@ class GlobalToolkits:
     def _loadToolkitsFromFiles(self):
         """
         Load all toolkits from tool/installed directory (fallback method)
-        Reuses existing code from DolphinExecutor::set_installed_skills
+        Reuses existing code from DolphinExecutor::set_installed_tools
         """
         # Load built-in toolkits (fallback for development mode when entry points are not available)
         self._loadBuiltinToolkits()
 
         # Get the path to tool/installed directory
         current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        installed_skills_dir = os.path.join(current_dir, "tool", "installed")
+        installed_tools_dir = os.path.join(current_dir, "tool", "installed")
 
-        if not os.path.exists(installed_skills_dir):
+        if not os.path.exists(installed_tools_dir):
             logger.warning(
-                f"Installed skills directory not found: {installed_skills_dir}"
+                f"Installed tools directory not found: {installed_tools_dir}"
             )
             return
-        self._loadToolkitsFromPath(installed_skills_dir, "installed")
+        self._loadToolkitsFromPath(installed_tools_dir, "installed")
 
     def _loadBuiltinToolkits(self):
         """
@@ -185,7 +192,7 @@ class GlobalToolkits:
 
         for toolkit_name, class_path in builtin_toolkits.items():
             # Check if this toolkit should be loaded
-            if not self.globalConfig.skill_config.should_load_skill(toolkit_name):
+            if not self.globalConfig.tool_config.should_load_tool(toolkit_name):
                 logger.debug(f"Skipping disabled toolkit: {toolkit_name}")
                 continue
 
@@ -210,22 +217,22 @@ class GlobalToolkits:
                 logger.error(f"Failed to load built-in toolkit {toolkit_name}: {str(e)}")
 
     def _get_enabled_system_functions(self) -> Optional[list[str]]:
-        """Extract system function configurations from skill_config.enabled_skills"""
-        enabled_skills = self.globalConfig.skill_config.enabled_skills
+        """Extract system function configurations from tool_config.enabled_tools"""
+        enabled_tools = self.globalConfig.tool_config.enabled_tools
 
-        # If enabled_skills is None, it means all skills (including system functions) will be loaded.
-        if enabled_skills is None:
+        # If enabled_tools is None, it means all tools (including system functions) will be loaded.
+        if enabled_tools is None:
             return None
 
         # Extract configurations in the format of system_functions.*
         system_functions = []
-        for skill in enabled_skills:
-            if skill.startswith("system_functions."):
-                function_name = skill.replace("system_functions.", "")
+        for tool in enabled_tools:
+            if tool.startswith("system_functions."):
+                function_name = tool.replace("system_functions.", "")
                 system_functions.append(function_name)
         # If system_functions are explicitly configured but the list is empty, return an empty list (no system functions will be loaded)
         has_system_config = any(
-            skill.startswith("system_functions") for skill in enabled_skills
+            tool.startswith("system_functions") for tool in enabled_tools
         )
         if has_system_config and not system_functions:
             return []
@@ -236,21 +243,21 @@ class GlobalToolkits:
 
         return system_functions
 
-    def _loadMCPSkills(self):
-        """Load MCP skill suite"""
-        # Check whether MCP skills should be loaded
-        if not self.globalConfig.skill_config.should_load_skill("mcp"):
-            logger.debug("MCP skills are disabled by configuration")
+    def _loadMCPToolkits(self):
+        """Load MCP toolkit suite"""
+        # Check whether MCP toolkits should be loaded
+        if not self.globalConfig.tool_config.should_load_tool("mcp"):
+            logger.debug("MCP toolkits are disabled by configuration")
             return
 
         try:
             from dolphin.lib.toolkits.mcp_toolkit import MCPToolkit
 
-            # Create a single MCP skill suite instance
+            # Create a single MCP toolkit instance
             toolkit = MCPToolkit()
             toolkit.setGlobalConfig(self.globalConfig)
 
-            # Get skills and add to installed tool set
+            # Get tools and add to installed tool set
             tools = toolkit.getTools()
             for tool in tools:
                 self.installedToolSet.addTool(tool)
@@ -260,7 +267,7 @@ class GlobalToolkits:
         except ImportError as e:
             logger.warning(f"Failed to import MCP components: {str(e)}")
         except Exception as e:
-            logger.warning(f"Error loading MCP skills: {str(e)}")
+            logger.warning(f"Error loading MCP toolkits: {str(e)}")
 
     def _loadCustomToolkitsFromPath(self, toolkitFolderPath: str):
         """
@@ -328,7 +335,7 @@ class GlobalToolkits:
                 if moduleName in SKIP_MODULES:
                     continue
 
-                if not self.globalConfig.skill_config.should_load_skill(moduleName):
+                if not self.globalConfig.tool_config.should_load_tool(moduleName):
                     continue
 
                 try:

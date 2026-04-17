@@ -190,10 +190,13 @@ class VariablePool:
             self.variable_pool[name] = Var(value)
 
     def set_var_output(
-        self, name, value, source_type=SourceType.OTHER, skill_info=None
+        self, name, value, source_type=SourceType.OTHER, tool_info=None, skill_info=None
     ):
-        # Create VarOutput with all parameters
-        self.variable_pool[name] = VarOutput(name, value, source_type, skill_info)
+        # Create VarOutput with all parameters; skill_info is a deprecated alias for tool_info
+        self.variable_pool[name] = VarOutput(
+            name, value, source_type,
+            tool_info=tool_info if tool_info is not None else skill_info,
+        )
 
     def delete_var(self, name):
         if name in self.variable_pool:

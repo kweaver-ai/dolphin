@@ -182,13 +182,13 @@ def create_tool_run_mock(responses: List[Any]):
         # record the tool output into recorder so ExploreBlock can build tool_response messages correctly.
         try:
             if getattr(self, "recorder", None) is not None:
-                skill_name = kwargs.get("skill_name")
-                skill_args = kwargs.get("skill_params_json") or {}
-                if skill_name:
+                tool_name = kwargs.get("tool_name")
+                tool_args = kwargs.get("skill_params_json") or {}
+                if tool_name:
                     self.recorder.update(
                         item=resp,
-                        skill_name=skill_name,
-                        skill_args=skill_args,
+                        tool_name=tool_name,
+                        tool_args=tool_args,
                     )
         except Exception:
             pass

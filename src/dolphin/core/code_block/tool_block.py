@@ -71,7 +71,7 @@ class ToolBlock(BasicCodeBlock):
                 assert new_tool_name == tool_name, (
                     "(tool_block) new_tool_name 和中断之前的 tool_name不一致"
                 )
-                tool_obj = self.context.get_skill(tool_name)
+                tool_obj = self.context.get_tool(tool_name)
                 raw_tool_args = input_dict["tool_args"]
                 new_tool_args = {arg["key"]: arg["value"] for arg in raw_tool_args}
 
@@ -106,9 +106,9 @@ class ToolBlock(BasicCodeBlock):
                         self.recorder.update(
                             stage=TypeStage.SKILL,
                             item=resp_item,
-                            skill_name=tool_name,
-                            skill_args=new_tool_args,
-                            skill_type=self.context.get_skill_type(tool_name),
+                            tool_name=tool_name,
+                            tool_args=new_tool_args,
+                            tool_type=self.context.get_tool_type(tool_name),
                             source_type=SourceType.SKILL,
                             is_completed=True,
                             is_skipped=True,
@@ -120,7 +120,7 @@ class ToolBlock(BasicCodeBlock):
                     resp_item = None
                     async for resp_item in self.tool_run(
                         source_type=SourceType.SKILL,
-                        skill_name=tool_name,
+                        tool_name=tool_name,
                         skill_params_json=new_tool_args,
                         props=props,
                     ):
@@ -130,9 +130,9 @@ class ToolBlock(BasicCodeBlock):
                         self.recorder.update(
                             stage=TypeStage.SKILL,
                             item=resp_item,
-                            skill_name=tool_name,
-                            skill_args=new_tool_args,
-                            skill_type=self.context.get_skill_type(tool_name),
+                            tool_name=tool_name,
+                            tool_args=new_tool_args,
+                            tool_type=self.context.get_tool_type(tool_name),
                             source_type=SourceType.SKILL,
                             is_completed=True,
                         )
@@ -164,7 +164,7 @@ class ToolBlock(BasicCodeBlock):
 
                 async for resp_item in self.tool_run(
                     source_type=SourceType.SKILL,
-                    skill_name=tool_name,
+                    tool_name=tool_name,
                     skill_params_json=tool_call_info["args"],
                 ):
                     yield resp_item

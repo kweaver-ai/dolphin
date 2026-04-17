@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dolphin.core.common.enums import StreamItem
-from dolphin.core.common.enums import TypeStage, Status, SkillInfo, ToolType
+from dolphin.core.common.enums import TypeStage, Status, ToolInfo, ToolType
 from dolphin.core.runtime.runtime_instance import ProgressInstance
 from dolphin.core.common.types import SourceType
 from typing import Union, Dict, Any
@@ -43,21 +43,21 @@ class Recorder:
         input_messages=None,
         source_type=SourceType.OTHER,
         raw_output=None,
-        skill_name=None,
-        skill_args={},
-        skill_type=None,
+        tool_name=None,
+        tool_args={},
+        tool_type=None,
         checked=True,
     ):
-        skill_info = None
-        if skill_name:
+        tool_info = None
+        if tool_name:
             stage = TypeStage.SKILL
-            # Use provided skill_type or default to TOOL
-            if skill_type is None:
-                skill_type = ToolType.TOOL
-            skill_info = SkillInfo.build(
-                skill_type=skill_type,
-                skill_name=skill_name,
-                skill_args=skill_args,
+            # Use provided tool_type or default to TOOL
+            if tool_type is None:
+                tool_type = ToolType.TOOL
+            tool_info = ToolInfo.build(
+                tool_type=tool_type,
+                tool_name=tool_name,
+                tool_args=tool_args,
                 checked=checked,
             )
             source_type = SourceType.SKILL
@@ -87,7 +87,7 @@ class Recorder:
         params = {
             "stage": stage,
             "status": status,
-            "skill_info": skill_info,
+            "tool_info": tool_info,
             "raw_output": raw_output,
             "input_messages": input_messages,
         }
@@ -120,9 +120,9 @@ class Recorder:
             self.update_output_variable(
                 item=item,
                 source_type=source_type,
-                skill_name=skill_name,
-                skill_args=skill_args,
-                skill_type=skill_type,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                tool_type=tool_type,
                 checked=checked,
             )
 
@@ -132,20 +132,20 @@ class Recorder:
         self,
         item: Union[StreamItem, Dict[str, Any], str],
         source_type=SourceType.OTHER,
-        skill_name=None,
-        skill_args={},
-        skill_type=None,
+        tool_name=None,
+        tool_args={},
+        tool_type=None,
         checked=True,
     ):
-        skill_info = None
-        if skill_name:
-            # Use provided skill_type or default to TOOL
-            if skill_type is None:
-                skill_type = ToolType.TOOL
-            skill_info = SkillInfo.build(
-                skill_type=skill_type,
-                skill_name=skill_name,
-                skill_args=skill_args,
+        tool_info = None
+        if tool_name:
+            # Use provided tool_type or default to TOOL
+            if tool_type is None:
+                tool_type = ToolType.TOOL
+            tool_info = ToolInfo.build(
+                tool_type=tool_type,
+                tool_name=tool_name,
+                tool_args=tool_args,
                 checked=checked,
             )
             source_type = SourceType.SKILL
@@ -164,7 +164,7 @@ class Recorder:
                     name=self.output_var,
                     value=var_value,
                     source_type=source_type,
-                    skill_info=skill_info,
+                    tool_info=tool_info,
                 )
                 self.appended = True
             else:
@@ -172,14 +172,14 @@ class Recorder:
                     name=self.output_var,
                     value=var_value,
                     source_type=source_type,
-                    skill_info=skill_info,
+                    tool_info=tool_info,
                 )
         else:
             self.context.set_var_output(
                 name=self.output_var,
                 value=var_value,
                 source_type=source_type,
-                skill_info=skill_info,
+                tool_info=tool_info,
             )
 
     def get_answer(self):

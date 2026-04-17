@@ -2,7 +2,7 @@
 
 This module tests:
 1. Claude Skills fixtures validity and structure
-2. SkillLoader parsing compatibility
+2. ToolLoader parsing compatibility
 3. ResourceToolkit three-level progressive loading
 4. Integration with Dolphin's skillkit system
 
@@ -174,7 +174,7 @@ class TestSkillFrontmatter(unittest.TestCase):
                 )
 
 
-class TestSkillContent(unittest.TestCase):
+class TestToolContent(unittest.TestCase):
     """Test skill content structure and quality."""
 
     def test_all_skills_have_body_content(self):
@@ -312,25 +312,25 @@ class TestSuperpowersSkills(unittest.TestCase):
             )
 
 
-class TestSkillLoaderCompatibility(unittest.TestCase):
-    """Test compatibility with the actual SkillLoader class."""
+class TestToolLoaderCompatibility(unittest.TestCase):
+    """Test compatibility with the actual ToolLoader class."""
 
     @classmethod
     def setUpClass(cls):
         """Try to import SkillLoader."""
         try:
-            from dolphin.lib.toolkits.resource.tool_loader import SkillLoader
-            cls.SkillLoader = SkillLoader
+            from dolphin.lib.toolkits.resource.skill_loader import SkillLoader
+            cls.ToolLoader = SkillLoader
             cls.loader_available = True
         except ImportError:
             cls.loader_available = False
 
     def test_skills_parseable_by_skill_loader(self):
-        """Test that skills can be parsed by SkillLoader._parse_frontmatter."""
+        """Test that skills can be parsed by ToolLoader._parse_frontmatter."""
         if not self.loader_available:
-            self.skipTest("SkillLoader not available")
+            self.skipTest("ToolLoader not available")
 
-        loader = self.SkillLoader()
+        loader = self.ToolLoader()
         skills = get_all_skill_files()
 
         for skill_path in skills:
@@ -340,7 +340,7 @@ class TestSkillLoaderCompatibility(unittest.TestCase):
 
                 self.assertIsNotNone(
                     frontmatter,
-                    f"SkillLoader failed to parse {skill_path.name}"
+                    f"ToolLoader failed to parse {skill_path.name}"
                 )
                 self.assertIn("name", frontmatter)
                 self.assertIn("description", frontmatter)
@@ -416,7 +416,7 @@ class TestResourceToolkitEntryPointLoading(unittest.TestCase):
 
         from dolphin.core.config.global_config import (
             GlobalConfig,
-            SkillConfig,
+            ToolConfig,
             MCPConfig,
         )
         from dolphin.sdk.tool.global_toolkits import GlobalToolkits
@@ -433,7 +433,7 @@ class TestResourceToolkitEntryPointLoading(unittest.TestCase):
             ]
 
         config = GlobalConfig(
-            skill_config=SkillConfig(enabled_skills=["resource_toolkit"]),
+            tool_config=ToolConfig(enabled_tools=["resource_toolkit"]),
             mcp_config=MCPConfig(enabled=False),
         )
 
@@ -441,20 +441,20 @@ class TestResourceToolkitEntryPointLoading(unittest.TestCase):
             "dolphin.sdk.tool.global_toolkits.importlib.metadata.entry_points",
             new=fake_entry_points,
         ):
-            global_skills = GlobalToolkits(config)
+            global_toolkits = GlobalToolkits(config)
 
-        skill_names = set(global_skills.installedToolSet.getToolNames())
+        skill_names = set(global_toolkits.installedToolSet.getToolNames())
         # Note: _list_resource_skills is removed; Level 1 metadata is auto-injected
         self.assertIn("_load_resource_skill", skill_names)
         self.assertIn("_read_skill_asset", skill_names)
 
     def test_resource_toolkit_reads_global_resource_skills_config(self):
-        """验证 ResourceToolkit 可从 GlobalConfig.resource_skills 读取扫描目录等配置。"""
+        """验证 ResourceToolkit 可从 GlobalConfig.resource_tools 读取扫描目录等配置。"""
         from importlib.metadata import EntryPoint
 
         from dolphin.core.config.global_config import (
             GlobalConfig,
-            SkillConfig,
+            ToolConfig,
             MCPConfig,
         )
         from dolphin.sdk.tool.global_toolkits import GlobalToolkits
@@ -480,9 +480,9 @@ class TestResourceToolkitEntryPointLoading(unittest.TestCase):
                 ]
 
             config = GlobalConfig(
-                skill_config=SkillConfig(enabled_skills=["resource_toolkit"]),
+                tool_config=ToolConfig(enabled_tools=["resource_toolkit"]),
                 mcp_config=MCPConfig(enabled=False),
-                resource_skills={
+                resource_tools={
                     "enabled": True,
                     "directories": [temp_dir],
                     "limits": {"max_skill_size_mb": 8, "max_content_tokens": 8000},
@@ -493,19 +493,19 @@ class TestResourceToolkitEntryPointLoading(unittest.TestCase):
                 "dolphin.sdk.tool.global_toolkits.importlib.metadata.entry_points",
                 new=fake_entry_points,
             ):
-                global_skills = GlobalToolkits(config)
+                global_toolkits = GlobalToolkits(config)
 
-            # Metadata is now collected via skill.owner_toolkit, not ToolSet.get_metadata_prompt()
-            # Find skills from ResourceToolkit and check their owner has metadata
-            resource_skills = [
-                s for s in global_skills.installedToolSet.getTools()
+            # Metadata is now collected via tool.owner_toolkit, not ToolSet.get_metadata_prompt()
+            # Find tools from ResourceToolkit and check their owner has metadata
+            resource_tools = [
+                s for s in global_toolkits.installedToolSet.getTools()
                 if hasattr(s, 'owner_toolkit') and s.owner_toolkit is not None
                 and hasattr(s.owner_toolkit, 'get_metadata_prompt')
             ]
-            self.assertTrue(len(resource_skills) > 0, "No ResourceToolkit skills found")
-            
-            # Get metadata from owner skillkit
-            metadata_prompt = resource_skills[0].owner_toolkit.get_metadata_prompt()
+            self.assertTrue(len(resource_tools) > 0, "No ResourceToolkit tools found")
+
+            # Get metadata from owner toolkit
+            metadata_prompt = resource_tools[0].owner_toolkit.get_metadata_prompt()
             self.assertTrue(len(metadata_prompt) > 0, "No metadata prompt generated")
             self.assertIn("test-skill", metadata_prompt)
 
@@ -526,22 +526,22 @@ class TestResourceToolkitIntegration(unittest.TestCase):
             from dolphin.lib.toolkits.resource import (
                 ResourceToolkit,
             )
-            from dolphin.lib.toolkits.resource.models.tool_config import (
-                ResourceSkillConfig,
+            from dolphin.lib.toolkits.resource.models.skill_config import (
+                ResourceToolConfig,
             )
-            from dolphin.lib.toolkits.resource.tool_loader import (
+            from dolphin.lib.toolkits.resource.skill_loader import (
                 SkillLoader,
             )
-            from dolphin.lib.toolkits.resource.models.tool_meta import (
+            from dolphin.lib.toolkits.resource.models.skill_meta import (
                 SkillMeta,
                 SkillContent,
             )
 
             cls.ResourceToolkit = ResourceToolkit
-            cls.ResourceSkillConfig = ResourceSkillConfig
-            cls.SkillLoader = SkillLoader
-            cls.SkillMeta = SkillMeta
-            cls.SkillContent = SkillContent
+            cls.ResourceToolConfig = ResourceToolConfig
+            cls.ToolLoader = SkillLoader
+            cls.ToolMeta = SkillMeta
+            cls.ToolContent = SkillContent
             cls.skillkit_available = True
         except ImportError as e:
             cls.skillkit_available = False
@@ -595,7 +595,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -611,7 +611,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -647,7 +647,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         import tempfile
         empty_dir = tempfile.mkdtemp()
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[empty_dir],
             enabled=True,
         )
@@ -669,7 +669,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -698,7 +698,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -717,7 +717,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -742,7 +742,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
 
         from dolphin.core.common.constants import PIN_MARKER
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -770,7 +770,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not scripts_dir.exists():
             self.skipTest("Synthetic skill with scripts not available")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -791,7 +791,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -810,11 +810,11 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         assert "asset_path" in new_schema["function"]["parameters"]["required"]
 
     def test_skill_meta_data_class(self):
-        """Test SkillMeta data class functionality."""
+        """Test ToolMeta data class functionality."""
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        meta = self.SkillMeta(
+        meta = self.ToolMeta(
             name="test-skill",
             description="A test skill for unit testing",
             base_path="/tmp/test",
@@ -834,11 +834,11 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         self.assertEqual(meta_dict["tags"], ["test", "unittest"])
 
     def test_skill_content_data_class(self):
-        """Test SkillContent data class functionality."""
+        """Test ToolContent data class functionality."""
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        content = self.SkillContent(
+        content = self.ToolContent(
             frontmatter={"name": "test", "description": "Test skill"},
             body="# Test Skill\n\nThis is a test.",
             available_scripts=["scripts/test.py"],
@@ -861,7 +861,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -892,7 +892,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -921,7 +921,7 @@ class TestResourceToolkitIntegration(unittest.TestCase):
         if not self.skillkit_available:
             self.skipTest(f"ResourceToolkit not available: {self.import_error}")
 
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
         )
@@ -945,20 +945,20 @@ class TestResourceToolkitIntegration(unittest.TestCase):
 
 
 
-class TestResourceSkillConfigIncludeExclude(unittest.TestCase):
-    """Test include/exclude fields on ResourceSkillConfig."""
+class TestResourceToolConfigIncludeExclude(unittest.TestCase):
+    """Test include/exclude fields on ResourceToolConfig."""
 
     def test_default_include_exclude_are_none(self):
         """Default config has no include/exclude filter."""
-        from dolphin.lib.toolkits.resource.models.tool_config import ResourceSkillConfig
-        config = ResourceSkillConfig()
+        from dolphin.lib.toolkits.resource.models.skill_config import ResourceToolConfig
+        config = ResourceToolConfig()
         self.assertIsNone(config.include)
         self.assertIsNone(config.exclude)
 
     def test_from_dict_parses_include(self):
         """from_dict should parse include list."""
-        from dolphin.lib.toolkits.resource.models.tool_config import ResourceSkillConfig
-        config = ResourceSkillConfig.from_dict({
+        from dolphin.lib.toolkits.resource.models.skill_config import ResourceToolConfig
+        config = ResourceToolConfig.from_dict({
             "resource_skills": {
                 "include": ["skill-a", "skill-b"],
             }
@@ -968,8 +968,8 @@ class TestResourceSkillConfigIncludeExclude(unittest.TestCase):
 
     def test_from_dict_parses_exclude(self):
         """from_dict should parse exclude list."""
-        from dolphin.lib.toolkits.resource.models.tool_config import ResourceSkillConfig
-        config = ResourceSkillConfig.from_dict({
+        from dolphin.lib.toolkits.resource.models.skill_config import ResourceToolConfig
+        config = ResourceToolConfig.from_dict({
             "resource_skills": {
                 "exclude": ["skill-c"],
             }
@@ -979,8 +979,8 @@ class TestResourceSkillConfigIncludeExclude(unittest.TestCase):
 
     def test_from_dict_no_filter_by_default(self):
         """from_dict without include/exclude yields None for both."""
-        from dolphin.lib.toolkits.resource.models.tool_config import ResourceSkillConfig
-        config = ResourceSkillConfig.from_dict({
+        from dolphin.lib.toolkits.resource.models.skill_config import ResourceToolConfig
+        config = ResourceToolConfig.from_dict({
             "resource_skills": {"enabled": True}
         })
         self.assertIsNone(config.include)
@@ -988,16 +988,16 @@ class TestResourceSkillConfigIncludeExclude(unittest.TestCase):
 
     def test_to_dict_includes_filter_fields(self):
         """to_dict should round-trip include/exclude."""
-        from dolphin.lib.toolkits.resource.models.tool_config import ResourceSkillConfig
-        config = ResourceSkillConfig(include=["a"], exclude=["b"])
+        from dolphin.lib.toolkits.resource.models.skill_config import ResourceToolConfig
+        config = ResourceToolConfig(include=["a"], exclude=["b"])
         d = config.to_dict()
         self.assertEqual(d["include"], ["a"])
         self.assertEqual(d["exclude"], ["b"])
 
     def test_to_dict_none_filter_fields(self):
         """to_dict should include None for unset filters."""
-        from dolphin.lib.toolkits.resource.models.tool_config import ResourceSkillConfig
-        config = ResourceSkillConfig()
+        from dolphin.lib.toolkits.resource.models.skill_config import ResourceToolConfig
+        config = ResourceToolConfig()
         d = config.to_dict()
         self.assertIsNone(d["include"])
         self.assertIsNone(d["exclude"])
@@ -1010,9 +1010,9 @@ class TestResourceToolkitIncludeExcludeFilter(unittest.TestCase):
     def setUpClass(cls):
         try:
             from dolphin.lib.toolkits.resource import ResourceToolkit
-            from dolphin.lib.toolkits.resource.models.tool_config import ResourceSkillConfig
+            from dolphin.lib.toolkits.resource.models.skill_config import ResourceToolConfig
             cls.ResourceToolkit = ResourceToolkit
-            cls.ResourceSkillConfig = ResourceSkillConfig
+            cls.ResourceToolConfig = ResourceToolConfig
             cls.available = True
         except ImportError as e:
             cls.available = False
@@ -1034,7 +1034,7 @@ class TestResourceToolkitIncludeExcludeFilter(unittest.TestCase):
             shutil.rmtree(cls.temp_dir)
 
     def _make_toolkit(self, include=None, exclude=None):
-        config = self.ResourceSkillConfig(
+        config = self.ResourceToolConfig(
             directories=[self.temp_dir],
             enabled=True,
             include=include,
@@ -1130,13 +1130,13 @@ class TestResourceToolkitIncludeExcludeFilter(unittest.TestCase):
         """Filter should work when config comes through setGlobalConfig()."""
         if not self.available:
             self.skipTest(self.import_error)
-        from dolphin.core.config.global_config import GlobalConfig, SkillConfig, MCPConfig
+        from dolphin.core.config.global_config import GlobalConfig, ToolConfig, MCPConfig
 
         sk = self.ResourceToolkit()
         config = GlobalConfig(
-            skill_config=SkillConfig(enabled_skills=["resource_toolkit"]),
+            tool_config=ToolConfig(enabled_tools=["resource_toolkit"]),
             mcp_config=MCPConfig(enabled=False),
-            resource_skills={
+            resource_tools={
                 "enabled": True,
                 "directories": [self.temp_dir],
                 "include": ["beta"],

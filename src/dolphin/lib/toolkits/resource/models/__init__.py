@@ -1,6 +1,6 @@
 """Data models for ResourceToolkit."""
 
-from .tool_meta import SkillMeta, SkillContent
-from .tool_config import ResourceSkillConfig
+from .skill_meta import SkillMeta, SkillContent, ToolMeta, ToolContent
+from .skill_config import ResourceSkillConfig, ResourceToolConfig
 
-__all__ = ["SkillMeta", "SkillContent", "ResourceSkillConfig"]
+__all__ = ["SkillMeta", "SkillContent", "ResourceSkillConfig", "ResourceToolConfig", "ToolMeta", "ToolContent"]

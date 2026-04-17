@@ -644,28 +644,39 @@ class MCPConfig:
         }
 
 
-class SkillConfig:
-    """Skill Loading Configuration"""
+class ToolConfig:
+    """Tool Loading Configuration"""
 
-    def __init__(self, enabled_skills: List[str] = None):
-        """Initialize skill configuration
+    def __init__(self, enabled_tools: List[str] = None, enabled_skills: List[str] = None):
+        """Initialize tool configuration
 
         Args:
-            enabled_skills: List of enabled skills, None means load all skills
-                                 Supports the following formats:
-                                 - "vm_toolkit": Load a specific toolkit
-                                 - "mcp": Load all MCP servers
-                                 - "mcp.filesystem": Load a specific MCP server
+            enabled_tools: List of enabled tools, None means load all tools.
+                           Supports the following formats:
+                           - "vm_toolkit": Load a specific toolkit
+                           - "mcp": Load all MCP servers
+                           - "mcp.filesystem": Load a specific MCP server
+            enabled_skills: Deprecated alias for *enabled_tools*.
         """
-        self.enabled_skills = enabled_skills
+        # Backward-compatibility: enabled_skills was renamed to enabled_tools
+        if enabled_skills is not None:
+            import warnings
+            warnings.warn(
+                "ToolConfig parameter 'enabled_skills' is deprecated, use 'enabled_tools' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if enabled_tools is None:
+                enabled_tools = enabled_skills
+        self.enabled_tools = enabled_tools
 
     @staticmethod
-    def _normalize_skill_name(name: str) -> str:
-        """Normalize skill identifiers for backward compatibility.
+    def _normalize_tool_name(name: str) -> str:
+        """Normalize tool identifiers for backward compatibility.
 
         Historically, config examples used names like "vm_skillkit" or "vm_toolkit"
         while the entry-point based loader uses names like "vm". We accept both by
-        normalizing the "_skillkit" or "_toolkit" suffix for non-namespaced skill ids.
+        normalizing the "_skillkit" or "_toolkit" suffix for non-namespaced tool ids.
         """
         if not isinstance(name, str):
             return name
@@ -678,40 +689,40 @@ class SkillConfig:
             return name[: -len("_skillkit")]
         return name
 
-    def should_load_skill(self, skill_name: str) -> bool:
-        """Check whether a certain skill should be loaded
+    def should_load_tool(self, tool_name: str) -> bool:
+        """Check whether a certain tool should be loaded
 
         Args:
-            skill_name: Name of the skill
+            tool_name: Name of the tool
 
         Returns:
             bool: Whether it should be loaded
         """
-        if self.enabled_skills is None:
+        if self.enabled_tools is None:
             return True
 
-        # If it's an empty list, no skills will be loaded.
-        if len(self.enabled_skills) == 0:
+        # If it's an empty list, no tools will be loaded.
+        if len(self.enabled_tools) == 0:
             return False
 
         normalized_enabled = set()
-        for enabled in self.enabled_skills:
+        for enabled in self.enabled_tools:
             normalized_enabled.add(enabled)
-            normalized_enabled.add(self._normalize_skill_name(enabled))
+            normalized_enabled.add(self._normalize_tool_name(enabled))
 
-        normalized_skill_name = self._normalize_skill_name(skill_name)
+        normalized_tool_name = self._normalize_tool_name(tool_name)
 
         # Check direct match
-        if skill_name in normalized_enabled or normalized_skill_name in normalized_enabled:
+        if tool_name in normalized_enabled or normalized_tool_name in normalized_enabled:
             return True
 
         # Check MCP mode matching
-        if skill_name.startswith("mcp."):
+        if tool_name.startswith("mcp."):
             # If "mcp" is included, load all MCP servers
             if "mcp" in normalized_enabled:
                 return True
             # If a specific MCP server name is included, load that server
-            if skill_name in normalized_enabled:
+            if tool_name in normalized_enabled:
                 return True
 
         return False
@@ -725,27 +736,84 @@ class SkillConfig:
         Returns:
             bool: Whether it should be loaded
         """
-        if self.enabled_skills is None:
+        if self.enabled_tools is None:
             return True
 
         # If "mcp" is included, load all MCP servers
-        if "mcp" in self.enabled_skills:
+        if "mcp" in self.enabled_tools:
             return True
 
         # If a specific MCP server name is included, load that server.
-        if f"mcp.{server_name}" in self.enabled_skills:
+        if f"mcp.{server_name}" in self.enabled_tools:
             return True
 
         return False
 
     @staticmethod
-    def from_dict(config_dict: dict) -> "SkillConfig":
-        """Create configuration from dictionary"""
-        return SkillConfig(enabled_skills=config_dict.get("enabled_skills"))
+    def from_dict(config_dict: dict) -> "ToolConfig":
+        """Create configuration from dictionary.
+
+        Accepts both the new key ``enabled_tools`` and the deprecated key
+        ``enabled_skills`` for backward compatibility.
+        """
+        # Prefer new key; fall back to deprecated key
+        enabled = config_dict.get("enabled_tools")
+        if enabled is None:
+            enabled = config_dict.get("enabled_skills")
+        return ToolConfig(enabled_tools=enabled)
 
     def to_dict(self) -> dict:
         """Convert to dictionary"""
-        return {"enabled_skills": self.enabled_skills}
+        return {
+            "enabled_tools": self.enabled_tools,
+            # Deprecated alias kept for consumers reading the old key
+            "enabled_skills": self.enabled_tools,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility alias (deprecated)
+# ---------------------------------------------------------------------------
+
+#: .. deprecated::
+#:    Use :class:`ToolConfig` instead.
+class SkillConfig(ToolConfig):
+    """Deprecated compatibility wrapper for ToolConfig."""
+
+    @property
+    def enabled_skills(self):
+        """Deprecated alias for enabled_tools."""
+        import warnings
+
+        warnings.warn(
+            "SkillConfig.enabled_skills is deprecated, use enabled_tools instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.enabled_tools
+
+    @enabled_skills.setter
+    def enabled_skills(self, value):
+        """Deprecated alias setter for enabled_tools."""
+        import warnings
+
+        warnings.warn(
+            "SkillConfig.enabled_skills is deprecated, use enabled_tools instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.enabled_tools = value
+
+    def should_load_skill(self, skill_name: str) -> bool:
+        """Deprecated alias for should_load_tool()."""
+        import warnings
+
+        warnings.warn(
+            "SkillConfig.should_load_skill() is deprecated, use should_load_tool() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.should_load_tool(skill_name)
 
 
 class RetrievalProcessingConfig:
@@ -908,12 +976,34 @@ class GlobalConfig:
         context_engineer_config: ContextEngineerConfig = None,
         memory_config: MemoryConfig = None,
         mcp_config: MCPConfig = None,
-        skill_config: SkillConfig = None,
-        resource_skills: Optional[Dict[str, Any]] = None,
+        tool_config: ToolConfig = None,
+        resource_tools: Optional[Dict[str, Any]] = None,
         ontology_config: OntologyConfig = None,
         retrieval_model_config: RetrievalModelConfig = None,
         base_dir: Optional[str] = None,
+        skill_config: ToolConfig = None,
+        resource_skills: Optional[Dict[str, Any]] = None,
     ):
+        # Backward-compatibility: skill_config was renamed to tool_config
+        if skill_config is not None:
+            import warnings
+            warnings.warn(
+                "GlobalConfig parameter 'skill_config' is deprecated, use 'tool_config' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if tool_config is None:
+                tool_config = skill_config
+        # Backward-compatibility: resource_skills was renamed to resource_tools
+        if resource_skills is not None:
+            import warnings
+            warnings.warn(
+                "GlobalConfig parameter 'resource_skills' is deprecated, use 'resource_tools' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if resource_tools is None:
+                resource_tools = resource_skills
         self.default_llm = default_llm
         self.fast_llm = fast_llm if fast_llm else default_llm
         self.all_clouds_config = all_clouds_config
@@ -924,8 +1014,8 @@ class GlobalConfig:
         )
         self._memory_config = memory_config or MemoryConfig()
         self._mcp_config = mcp_config or MCPConfig()
-        self._skill_config = skill_config or SkillConfig()
-        self._resource_skills = resource_skills
+        self._tool_config = tool_config or ToolConfig()
+        self._resource_tools = resource_tools
         self._llm_cache = GlobalCacheKVCenter.getCacheMgr(
             "data/cache/", category="llm", expireTimeByDay=7
         )
@@ -965,12 +1055,34 @@ class GlobalConfig:
         return self._mcp_config
 
     @property
-    def skill_config(self) -> SkillConfig:
-        return self._skill_config
+    def tool_config(self) -> ToolConfig:
+        return self._tool_config
+
+    @property
+    def resource_tools(self) -> Optional[Dict[str, Any]]:
+        return self._resource_tools
+
+    @property
+    def skill_config(self) -> "ToolConfig":
+        """Deprecated: use :attr:`tool_config` instead."""
+        import warnings
+        warnings.warn(
+            "GlobalConfig.skill_config is deprecated, use GlobalConfig.tool_config instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._tool_config
 
     @property
     def resource_skills(self) -> Optional[Dict[str, Any]]:
-        return self._resource_skills
+        """Deprecated: use :attr:`resource_tools` instead."""
+        import warnings
+        warnings.warn(
+            "GlobalConfig.resource_skills is deprecated, use GlobalConfig.resource_tools instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._resource_tools
 
     @property
     def ontology_config(self) -> OntologyConfig:
@@ -1070,12 +1182,20 @@ class GlobalConfig:
             mcp = config_dict.get("mcp", None)
             mcp_config = MCPConfig.from_dict(mcp) if mcp else None
 
-            # Parse skill configuration
+            # Parse tool configuration
             skill = config_dict.get("skill", None)
-            skill_config = SkillConfig.from_dict(skill) if skill else None
+            tool_config = ToolConfig.from_dict(skill) if skill else None
 
             # ResourceToolkit configuration (Claude Skill format support)
-            resource_skills = config_dict.get("resource_skills", None)
+            # NOTE: 'resource_skills' key is deprecated; prefer 'resource_tools'.
+            resource_tools = config_dict.get("resource_tools") or config_dict.get("resource_skills")
+            if "resource_skills" in config_dict and "resource_tools" not in config_dict:
+                import warnings
+                warnings.warn(
+                    "YAML config key 'resource_skills' is deprecated, please rename it to 'resource_tools'.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
             ontology = config_dict.get("ontology", None)
             ontology_config = OntologyConfig.from_dict(ontology) if ontology else None
@@ -1097,8 +1217,8 @@ class GlobalConfig:
                 context_engineer_config=context_engineer_config,
                 memory_config=memory_config,
                 mcp_config=mcp_config,
-                skill_config=skill_config,
-                resource_skills=resource_skills,
+                tool_config=tool_config,
+                resource_tools=resource_tools,
                 ontology_config=ontology_config,
                 retrieval_model_config=retrieval_model_config,
                 base_dir=base_dir,
@@ -1124,9 +1244,17 @@ class GlobalConfig:
             mcp_config = MCPConfig.from_dict(mcp) if mcp else None
 
             skill = config_dict.get("skill", None)
-            skill_config = SkillConfig.from_dict(skill) if skill else None
+            tool_config = ToolConfig.from_dict(skill) if skill else None
 
-            resource_skills = config_dict.get("resource_skills", None)
+            # NOTE: 'resource_skills' key is deprecated; prefer 'resource_tools'.
+            resource_tools = config_dict.get("resource_tools") or config_dict.get("resource_skills")
+            if "resource_skills" in config_dict and "resource_tools" not in config_dict:
+                import warnings
+                warnings.warn(
+                    "YAML config key 'resource_skills' is deprecated, please rename it to 'resource_tools'.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
             ontology = config_dict.get("ontology", None)
             ontology_config = OntologyConfig.from_dict(ontology) if ontology else None
@@ -1148,8 +1276,8 @@ class GlobalConfig:
                 context_engineer_config=context_engineer_config,
                 memory_config=memory_config,
                 mcp_config=mcp_config,
-                skill_config=skill_config,
-                resource_skills=resource_skills,
+                tool_config=tool_config,
+                resource_tools=resource_tools,
                 ontology_config=ontology_config,
                 retrieval_model_config=retrieval_model_config,
             )
@@ -1311,11 +1439,13 @@ class GlobalConfig:
         if self._mcp_config:
             result["mcp"] = self._mcp_config.to_dict()
 
-        if self._skill_config:
-            result["skill"] = self._skill_config.to_dict()
+        if self._tool_config:
+            result["skill"] = self._tool_config.to_dict()
 
-        if self._resource_skills is not None:
-            result["resource_skills"] = self._resource_skills
+        if self._resource_tools is not None:
+            result["resource_tools"] = self._resource_tools
+            # Deprecated alias: keep old key so legacy parsers still find the data
+            result["resource_skills"] = self._resource_tools
 
         if self._ontology_config:
             result["ontology"] = self._ontology_config.to_dict()

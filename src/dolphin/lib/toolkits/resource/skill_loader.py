@@ -14,9 +14,9 @@ from typing import Optional, List, Tuple, Dict, Any
 
 import yaml
 
-from .models.tool_meta import SkillMeta, SkillContent
-from .models.tool_config import ResourceSkillConfig
-from .tool_validator import SkillValidator, ValidationResult, resolve_safe_path
+from .models.skill_meta import SkillMeta, SkillContent
+from .models.skill_config import ResourceToolConfig
+from .skill_validator import SkillValidator, ValidationResult, resolve_safe_path
 from dolphin.core.logging.logger import get_logger
 
 logger = get_logger("resource_toolkit")
@@ -44,13 +44,13 @@ class SkillLoader:
         re.DOTALL
     )
 
-    def __init__(self, config: Optional[ResourceSkillConfig] = None):
+    def __init__(self, config: Optional[ResourceToolConfig] = None):
         """Initialize the loader.
 
         Args:
             config: Optional configuration, uses defaults if not provided
         """
-        self.config = config or ResourceSkillConfig()
+        self.config = config or ResourceToolConfig()
         self.validator = SkillValidator(self.config)
 
     def scan_directories(self, base_path: Optional[Path] = None) -> List[SkillMeta]:
@@ -85,7 +85,7 @@ class SkillLoader:
                     if meta and meta.name not in skills:
                         # First occurrence wins (higher priority directory)
                         skills[meta.name] = meta
-                        logger.debug(f"Found tool: {meta.name} at {item}")
+                        logger.debug(f"Found skill: {meta.name} at {item}")
                 except Exception as e:
                     logger.warning(f"Failed to load skill from {item}: {e}")
 
@@ -377,6 +377,11 @@ class SkillLoader:
                 return skill_dir
 
         return None
+
+
+# Backward-compatibility aliases
+ToolLoaderError = SkillLoaderError
+ToolLoader = SkillLoader
 
 
 def truncate_content(content: str, max_tokens: int, chars_per_token: int = 4) -> str:

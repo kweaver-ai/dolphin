@@ -424,12 +424,12 @@ test_tool -> result
         assert exc_info.value.code == "INIT_FAILED"
 
     @pytest.mark.asyncio
-    async def test_dolphin_agent_global_skills_typo(self):
-        """测试 global_skills 拼写错误的兼容性"""
-        skills = object()
-        agent = DolphinAgent(content="/PROMPT/\nhello", global_skills=skills)
-        assert hasattr(agent, "global_skills")
-        assert agent.global_skills is skills
+    async def test_dolphin_agent_global_toolkits_param(self):
+        """测试 global_toolkits 参数传递"""
+        toolkits = object()
+        agent = DolphinAgent(content="/PROMPT/\nhello", global_toolkits=toolkits)
+        assert hasattr(agent, "global_toolkits")
+        assert agent.global_toolkits is toolkits
 
     @pytest.mark.asyncio
     async def test_dolphin_agent_init_does_not_block_event_loop(self):

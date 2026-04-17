@@ -101,10 +101,10 @@ async def runDolphinAgent(args: Args) -> None:
             env, _ = await initializeEnvironment(args)
             
             status.update(f"[bold blue]Loading agents from:[/][white] {args.folder}[/]")
-            if args.skillFolder:
+            if args.toolFolder:
                 status.update(
                     f"[bold blue]Loading agents from:[/][white] {args.folder}[/] "
-                    f"[dim](& skills from {args.skillFolder})[/]"
+                    f"[dim](& tools from {args.toolFolder})[/]"
                 )
             
             status.update(f"[bold blue]Initializing agent:[/][white] {args.agent}[/]")
@@ -180,7 +180,7 @@ async def runBuiltinExploreAgent(args: Args) -> None:
     env = Env(
         globalConfig=globalConfig,
         agentFolderPath=BUILTIN_AGENTS_DIR,
-        skillkitFolderPath=args.skillFolder,
+        toolkitFolderPath=args.toolFolder,
         output_variables=[],
         verbose=args.saveHistory,
         is_cli=True,
@@ -193,8 +193,8 @@ async def runBuiltinExploreAgent(args: Args) -> None:
     env_toolkit = EnvToolkit()
     env_toolkit.setGlobalConfig(globalConfig)
     for skill in env_toolkit.getTools():
-        env.globalSkills.installedToolSet.addTool(skill)
-    env.globalSkills._syncAllTools()
+        env.globalToolkits.installedToolSet.addTool(skill)
+    env.globalToolkits._syncAllTools()
     
     console(f"[bold green]👋 Hi! I'm Dolphin, your AI Pair Programmer.[/]")
     console(f"   I can help you write code, debug issues, and explore this project.")

@@ -41,9 +41,12 @@ class _TrackingVariablePool(VariablePool):
         self._owner.deletes.discard(name)
 
     def set_var_output(
-        self, name, value, source_type: SourceType = SourceType.OTHER, skill_info=None
+        self, name, value, source_type: SourceType = SourceType.OTHER, tool_info=None, skill_info=None
     ):
-        super().set_var_output(name, value, source_type=source_type, skill_info=skill_info)
+        super().set_var_output(
+            name, value, source_type=source_type,
+            tool_info=tool_info if tool_info is not None else skill_info,
+        )
         # Track the user-facing value for merging behavior consistency.
         self._owner.writes[name] = value
         self._owner.deletes.discard(name)
@@ -76,7 +79,7 @@ class COWContext(Context):
         # Subtask outputs are captured in task.answer and can be retrieved via _get_task_output().
         super().__init__(
             config=parent.config,
-            global_skills=parent.global_skills,
+            global_toolkits=parent.global_toolkits,
             memory_manager=parent.memory_manager,
             global_types=parent.global_types,
             toolkit_hook=getattr(parent, "toolkit_hook", None),
@@ -117,33 +120,33 @@ class COWContext(Context):
         self.task_registry = None
 
         # Filter out orchestration-only tools (e.g., PlanToolkit) from subtask toolset.
-        # Create a new isolated ToolSet instead of referencing parent's skillkit directly
-        # to prevent permission escalation via context.skillkit.getTools()
+        # Create a new isolated ToolSet instead of referencing parent's toolkit directly
+        # to prevent permission escalation via context.toolkit.getTools()
         self._calc_all_tools()
-        self.all_skills = self._filter_subtask_skills(self.all_skills)
-        # Create a new ToolSet that contains only filtered skills
-        # This ensures context.get_skill() and context.skillkit.getTools() both respect filtering
-        filtered_skillkit = ToolSet()
-        for skill in self.all_skills.getTools():
-            filtered_skillkit.addTool(skill)
-        self.skillkit = filtered_skillkit
+        self.all_tools = self._filter_subtask_tools(self.all_tools)
+        # Create a new ToolSet that contains only filtered tools
+        # This ensures context.get_tool() and context.toolkit.getTools() both respect filtering
+        filtered_toolkit = ToolSet()
+        for skill in self.all_tools.getTools():
+            filtered_toolkit.addTool(skill)
+        self.toolkit = filtered_toolkit
 
         # Inherit last-session configs where safe.
         self._last_model_name = getattr(parent, "_last_model_name", None)
         self._last_explore_mode = getattr(parent, "_last_explore_mode", None)
         self._last_system_prompt = getattr(parent, "_last_system_prompt", None)
-        self._last_skills = None
+        self._last_tools = None
 
         logger.debug(f"COWContext initialized for task: {task_id}")
 
     @staticmethod
-    def _filter_subtask_skills(skillset: ToolSet) -> ToolSet:
+    def _filter_subtask_tools(toolset: ToolSet) -> ToolSet:
         """Filter out toolkits that should not be exposed to subtasks."""
         filtered = ToolSet()
-        for skill in skillset.getTools():
+        for tool in toolset.getTools():
             owner = None
-            if hasattr(skill, "get_owner_toolkit"):
-                owner = skill.get_owner_toolkit()
+            if hasattr(tool, "get_owner_toolkit"):
+                owner = tool.get_owner_toolkit()
             if owner is not None:
                 should_exclude = getattr(owner, "should_exclude_from_subtask", None)
                 if callable(should_exclude):
@@ -153,7 +156,7 @@ class COWContext(Context):
                     except Exception:
                         # Fail-open: do not exclude if the hook misbehaves.
                         pass
-            filtered.addTool(skill)
+            filtered.addTool(tool)
         return filtered
 
     def get_variable(self, key: str, default_value: Any = None) -> Any:
@@ -371,26 +374,26 @@ class COWContext(Context):
         )
 
     def __getattr__(self, name: str):
-        """Delegate unknown attributes to parent with special handling for skillkit.
+        """Delegate unknown attributes to parent with special handling for toolkit.
 
         Args:
             name: Attribute name
 
         Returns:
-            Attribute value from parent, or filtered skillkit for security
+            Attribute value from parent, or filtered toolkit for security
 
         Raises:
             AttributeError: If attribute not found in parent
 
         Note:
-            Special handling for 'skillkit' attribute to prevent subtasks from
+            Special handling for 'toolkit' attribute to prevent subtasks from
             bypassing PLAN_ORCHESTRATION_TOOLS filtering by directly accessing
-            parent's skillkit via attribute delegation.
+            parent's toolkit via attribute delegation.
         """
-        # Intercept skillkit access to return filtered version
-        if name == "skillkit":
-            # Return the filtered skillkit stored in __init__
-            # This prevents subtasks from accessing parent's unfiltered skillkit
+        # Intercept toolkit access to return filtered version
+        if name == "toolkit":
+            # Return the filtered toolkit stored in __init__
+            # This prevents subtasks from accessing parent's unfiltered toolkit
             return object.__getattribute__(self, name)
 
         # Delegate all other attributes to parent

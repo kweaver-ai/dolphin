@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Set, Union
 from dataclasses import dataclass
 
-from .models.tool_config import ResourceSkillConfig
+from .models.skill_config import ResourceToolConfig
 
 
 @dataclass
@@ -70,13 +70,13 @@ class SkillValidator:
     # Pattern for valid skill names (alphanumeric, hyphens, underscores)
     SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 
-    def __init__(self, config: Optional[ResourceSkillConfig] = None):
+    def __init__(self, config: Optional[ResourceToolConfig] = None):
         """Initialize the validator.
 
         Args:
             config: Optional configuration, uses defaults if not provided
         """
-        self.config = config or ResourceSkillConfig()
+        self.config = config or ResourceToolConfig()
         self._allowed_extensions: Set[str] = set(self.config.allowed_extensions)
 
     def validate_frontmatter(self, frontmatter: dict) -> ValidationResult:
@@ -234,7 +234,7 @@ class SkillValidator:
                     if any(part in self.SIZE_EXCLUDE_DIRS for part in parts):
                         continue
                     total_size += f.stat().st_size
-            
+
             if total_size > max_bytes:
                 return ValidationResult.failure(
                     [
@@ -513,6 +513,10 @@ def get_script_path_from_entry_shell(entry_shell: str) -> str:
     """
     tokens = shlex.split(entry_shell.replace("\\", "/"))
     return tokens[1]
+
+
+# Backward-compatibility alias
+ToolValidator = SkillValidator
 
 
 def validate_skill_name(name: str) -> Tuple[bool, Optional[str]]:

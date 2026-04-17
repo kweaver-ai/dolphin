@@ -20,6 +20,7 @@ Dolphin Core - 核心运行时引擎（内核态）
 依赖规则：
 - dolphin.core 无内部依赖（仅依赖第三方库）
 """
+import warnings
 
 # Context
 from dolphin.core.context.context import Context
@@ -45,6 +46,54 @@ from dolphin.core.tool.toolset import ToolSet
 from dolphin.core.tool.tool_function import ToolFunction
 from dolphin.core.tool.tool_matcher import ToolMatcher
 
+# Backward-compatibility aliases (deprecated)
+class Skillkit(Toolkit):
+    """Deprecated compatibility wrapper for Toolkit."""
+
+    def getSkills(self):
+        """Deprecated alias for getTools()."""
+        warnings.warn(
+            "Skillkit.getSkills() is deprecated, use Toolkit.getTools() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.getTools()
+
+
+class Skillset(ToolSet):
+    """Deprecated compatibility wrapper for ToolSet."""
+
+    def addSkill(self, skill: ToolFunction):
+        """Deprecated alias for addTool()."""
+        warnings.warn(
+            "Skillset.addSkill() is deprecated, use ToolSet.addTool() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.addTool(skill)
+
+    def addSkillkit(self, skillkit: Toolkit):
+        """Deprecated alias for addToolkit()."""
+        warnings.warn(
+            "Skillset.addSkillkit() is deprecated, use ToolSet.addToolkit() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.addToolkit(skillkit)
+
+    def getSkills(self):
+        """Deprecated alias for getTools()."""
+        warnings.warn(
+            "Skillset.getSkills() is deprecated, use ToolSet.getTools() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.getTools()
+
+
+SkillFunction = ToolFunction
+SkillMatcher = ToolMatcher
+
 # LLM
 from dolphin.core.llm.llm import LLM
 from dolphin.core.llm.llm_client import LLMClient
@@ -53,7 +102,7 @@ from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.config.global_config import GlobalConfig
 
 # Common
-from dolphin.core.common.enums import MessageRole, ToolType
+from dolphin.core.common.enums import MessageRole, ToolType, SkillType
 from dolphin.core.common.exceptions import DolphinException
 
 # Logging
@@ -86,6 +135,11 @@ __all__ = [
     "ToolSet",
     "ToolFunction",
     "ToolMatcher",
+    # Tool (deprecated aliases)
+    "Skillkit",
+    "Skillset",
+    "SkillFunction",
+    "SkillMatcher",
     # LLM
     "LLM",
     "LLMClient",
@@ -94,6 +148,7 @@ __all__ = [
     # Common
     "MessageRole",
     "ToolType",
+    "SkillType",
     "DolphinException",
     # Logging
     "get_logger",

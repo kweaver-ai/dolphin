@@ -86,4 +86,4 @@ class OntologyToolkit(Toolkit):
 
     # Add alias method to support getTools
     def getTools(self) -> List[ToolFunction]:
-        return self.getTools()
+        return super().getTools()

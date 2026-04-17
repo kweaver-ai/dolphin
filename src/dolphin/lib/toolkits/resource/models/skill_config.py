@@ -60,7 +60,12 @@ class ResourceSkillConfig:
         Returns:
             ResourceSkillConfig instance
         """
-        resource_config = config_dict.get("resource_skills", {})
+        # Accept both new key 'resource_tools' and deprecated key 'resource_skills'
+        resource_config = config_dict.get("resource_tools")
+        if resource_config is None:
+            resource_config = config_dict.get("resource_skills")
+        if resource_config is None:
+            resource_config = {}
 
         limits = resource_config.get("limits", {})
 
@@ -122,3 +127,7 @@ class ResourceSkillConfig:
             "include": self.include,
             "exclude": self.exclude,
         }
+
+
+# Backward-compatibility alias
+ResourceToolConfig = ResourceSkillConfig

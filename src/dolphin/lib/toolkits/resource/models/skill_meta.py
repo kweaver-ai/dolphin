@@ -128,3 +128,8 @@ class SkillContent:
             "available_scripts": self.available_scripts,
             "available_references": self.available_references,
         }
+
+
+# Backward-compatibility aliases (deprecated – use SkillMeta / SkillContent)
+ToolMeta = SkillMeta
+ToolContent = SkillContent

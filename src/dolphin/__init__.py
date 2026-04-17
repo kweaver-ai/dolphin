@@ -49,7 +49,31 @@ _module_lookup = {
     "GlobalToolkits": "dolphin.sdk",
 }
 
+# ---------------------------------------------------------------------------
+# Backward-compatibility aliases (deprecated – will be removed in a future release)
+# Maps old public name -> (new name, module path)
+# ---------------------------------------------------------------------------
+_deprecated_aliases = {
+    "Skillset": ("ToolSet", "dolphin.core"),
+    "Skillkit": ("Toolkit", "dolphin.core"),
+    "SkillFunction": ("ToolFunction", "dolphin.core"),
+    "GlobalSkills": ("GlobalToolkits", "dolphin.sdk"),
+}
+
+
 def __getattr__(name):
+    if name in _deprecated_aliases:
+        new_name, module_path = _deprecated_aliases[name]
+        import warnings
+        warnings.warn(
+            f"dolphin.{name!r} is deprecated and will be removed in a future release. "
+            f"Use dolphin.{new_name!r} instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        import importlib
+        module = importlib.import_module(module_path)
+        return getattr(module, new_name)
     if name in _module_lookup:
         import importlib
         module = importlib.import_module(_module_lookup[name])

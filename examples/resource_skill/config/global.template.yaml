@@ -60,10 +60,11 @@ skill:
     - "cognitive_toolkit"   # Enable thinking tools
 
 # ----------------------------------------------------------------------------
-# Resource Skills Configuration
+# Resource Tools Configuration
 # ----------------------------------------------------------------------------
-# The ResourceSkillkit will automatically scan these directories for skills
-resource_skills:
+# The ResourceToolkit will automatically scan these directories for skills/tools
+# NOTE: 'resource_skills' key is deprecated; use 'resource_tools' going forward.
+resource_tools:
   enabled: true
   directories:
     - "./skills"              # Project-level skills

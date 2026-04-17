@@ -211,7 +211,7 @@ class RuntimeGraph:
 
             if stage_type == TypeStage.SKILL:
                 detail = (
-                    f"Stage[{instance.id[:8]}/{stage_value}/{instance.skill_info.name}]"
+                    f"Stage[{instance.id[:8]}/{stage_value}/{instance.tool_info.name}]"
                 )
             else:
                 detail = f"Stage[{instance.id[:8]}/{stage_value}]"
@@ -329,7 +329,7 @@ class RuntimeGraph:
             if hasattr(stage_type_val, "value"):
                 stage_type_val = stage_type_val.value
             node_data["stage_type"] = stage_type_val
-            node_data["skill_name"] = instance.skill_info.name if stage_type_val == TypeStage.SKILL.value and instance.skill_info else None
+            node_data["tool_name"] = instance.tool_info.name if stage_type_val == TypeStage.SKILL.value and instance.tool_info else None
             
             is_llm = self.is_llm_stage(instance)
             if is_llm:
@@ -351,8 +351,8 @@ class RuntimeGraph:
         
         return node_data
 
-    def _is_skill_stage(self, instance):
-        """Helper to identify skill stages."""
+    def _is_tool_stage(self, instance):
+        """Helper to identify tool stages."""
         from dolphin.core.runtime.runtime_instance import TypeRuntimeInstance
         if instance.type != TypeRuntimeInstance.STAGE:
             return False
@@ -376,8 +376,8 @@ class RuntimeGraph:
             "call_chain": [],
             "llm_interactions": [],
             "llm_summary": {},
-            "skill_interactions": [],
-            "skill_summary": {},
+            "tool_interactions": [],
+            "tool_summary": {},
             "execution_summary": {},
             "context_information": {},
         }
@@ -389,7 +389,7 @@ class RuntimeGraph:
         for root in root_instances:
             profile_data["call_chain"].append(self._build_structured_call_chain_node(root))
 
-        # --- LLM and Skill Stages Collection ---
+        # --- LLM and Tool Stages Collection ---
         def _collect_all_stages_from_tree():
             roots = [i for i in self.visible_instances if i.parent is None]
             collected = []
@@ -404,7 +404,7 @@ class RuntimeGraph:
 
         stages_from_tree = _collect_all_stages_from_tree()
         llm_stages = [i for i in stages_from_tree if self.is_llm_stage(i)]
-        skill_stages = [i for i in stages_from_tree if self._is_skill_stage(i)]
+        tool_stages = [i for i in stages_from_tree if self._is_tool_stage(i)]
 
         # --- LLM Interactions Details ---
         total_input_tokens = 0
@@ -442,35 +442,35 @@ class RuntimeGraph:
             "avg_tokens_per_sec": (total_input_tokens + total_output_tokens) / total_llm_time if total_llm_time > 0 else 0,
         }
 
-        # --- Skill Interactions Details ---
-        skill_details_list = []
-        skill_summary_dict = {}
-        total_skill_time = 0
+        # --- Tool Interactions Details ---
+        tool_details_list = []
+        tool_summary_dict = {}
+        total_tool_time = 0
 
-        for stage in skill_stages:
-            skill_name = getattr(stage.skill_info, "name", "Unknown") if hasattr(stage, "skill_info") else "Unknown"
+        for stage in tool_stages:
+            tool_name = getattr(stage.tool_info, "name", "Unknown") if hasattr(stage, "tool_info") else "Unknown"
             stage_time = stage.end_time - stage.start_time
             raw_status = getattr(stage, "status", None)
             status_value = getattr(raw_status, "value", str(raw_status)) if raw_status is not None else "unknown"
-            
-            skill_details_list.append({
+
+            tool_details_list.append({
                 "id": stage.id[:8],
-                "name": skill_name,
+                "name": tool_name,
                 "duration": stage_time,
                 "status": status_value,
             })
-            
-            if skill_name not in skill_summary_dict:
-                skill_summary_dict[skill_name] = {"count": 0, "total_time": 0.0}
-            skill_summary_dict[skill_name]["count"] += 1
-            skill_summary_dict[skill_name]["total_time"] += stage_time
-            total_skill_time += stage_time
 
-        profile_data["skill_interactions"] = skill_details_list
-        profile_data["skill_summary"] = {
-            "total_stages": len(skill_stages),
-            "total_skill_time": total_skill_time,
-            "details_by_skill": skill_summary_dict,
+            if tool_name not in tool_summary_dict:
+                tool_summary_dict[tool_name] = {"count": 0, "total_time": 0.0}
+            tool_summary_dict[tool_name]["count"] += 1
+            tool_summary_dict[tool_name]["total_time"] += stage_time
+            total_tool_time += stage_time
+
+        profile_data["tool_interactions"] = tool_details_list
+        profile_data["tool_summary"] = {
+            "total_stages": len(tool_stages),
+            "total_tool_time": total_tool_time,
+            "details_by_tool": tool_summary_dict,
         }
 
         # --- Execution Summary ---
@@ -545,8 +545,8 @@ class RuntimeGraph:
                     detail = f"Progress[{node['id']}] ({node['stage_count']} stages)"
                 elif node['type'] == TypeRuntimeInstance.STAGE.value:
                     detail = f"Stage[{node['id']}/{node['stage_type']}]"
-                    if node['skill_name']:
-                        detail += f"/{node['skill_name']}"
+                    if node['tool_name']:
+                        detail += f"/{node['tool_name']}"
                     detail += f" - time[{node['duration']:.2f}s]"
                     if node['is_llm_stage']:
                         detail += f" - estimated_input[{node['estimated_input_tokens']}]"
@@ -669,13 +669,13 @@ class RuntimeGraph:
             if llm_summary['total_llm_time'] > 0:
                 lines.append(f"   🚀 Avg Tokens/sec: {llm_summary['avg_tokens_per_sec']:.2f}")
 
-        # --- Skill Interactions ---
-        if structured_profile['skill_interactions']:
-            lines.append(f"\n🛠️  SKILL INTERACTION SUMMARY ({structured_profile['skill_summary']['total_stages']} stages)")
+        # --- Tool Interactions ---
+        if structured_profile['tool_interactions']:
+            lines.append(f"\n🛠️  TOOL INTERACTION SUMMARY ({structured_profile['tool_summary']['total_stages']} stages)")
             lines.append("-" * 40)
-            for skill_name, stats in structured_profile['skill_summary']['details_by_skill'].items():
-                lines.append(f"   🔧 {skill_name}: {stats['count']} calls, {stats['total_time']:.2f}s")
-            lines.append(f"   ⏱️  Total Skill Time: {structured_profile['skill_summary']['total_skill_time']:.2f}s")
+            for tool_name, stats in structured_profile['tool_summary']['details_by_tool'].items():
+                lines.append(f"   🔧 {tool_name}: {stats['count']} calls, {stats['total_time']:.2f}s")
+            lines.append(f"   ⏱️  Total Tool Time: {structured_profile['tool_summary']['total_tool_time']:.2f}s")
 
         # --- Execution Summary ---
         exec_summary = structured_profile['execution_summary']

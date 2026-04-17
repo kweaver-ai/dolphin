@@ -25,28 +25,41 @@ Example usage:
 """
 
 from .resource_toolkit import ResourceToolkit
-from .models.tool_config import ResourceSkillConfig
-from .models.tool_meta import SkillMeta, SkillContent
-from .tool_loader import SkillLoader, SkillLoaderError
-from .tool_validator import SkillValidator, ValidationResult
-from .tool_cache import SkillMetaCache, SkillContentCache, TTLLRUCache
+from .models.skill_config import ResourceSkillConfig, ResourceToolConfig
+from .models.skill_meta import SkillMeta, SkillContent, ToolMeta, ToolContent
+from .skill_loader import SkillLoader, SkillLoaderError, ToolLoader, ToolLoaderError
+from .skill_validator import SkillValidator, ValidationResult, ToolValidator
+from .skill_cache import SkillMetaCache, SkillContentCache, ToolMetaCache, ToolContentCache, TTLLRUCache
 
 __all__ = [
     # Main class
     "ResourceToolkit",
-    # Configuration
+    # Configuration (主用名)
     "ResourceSkillConfig",
-    # Data models
+    # Configuration (向后兼容别名，deprecated)
+    "ResourceToolConfig",
+    # Data models (主用名)
     "SkillMeta",
     "SkillContent",
-    # Loader
+    # Data models (向后兼容别名，deprecated)
+    "ToolMeta",
+    "ToolContent",
+    # Loader (主用名)
     "SkillLoader",
     "SkillLoaderError",
-    # Validator
+    # Loader (向后兼容别名，deprecated)
+    "ToolLoader",
+    "ToolLoaderError",
+    # Validator (主用名)
     "SkillValidator",
     "ValidationResult",
-    # Cache
+    # Validator (向后兼容别名，deprecated)
+    "ToolValidator",
+    # Cache (主用名)
     "SkillMetaCache",
     "SkillContentCache",
+    # Cache (向后兼容别名，deprecated)
+    "ToolMetaCache",
+    "ToolContentCache",
     "TTLLRUCache",
 ]

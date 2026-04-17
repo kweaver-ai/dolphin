@@ -4,9 +4,9 @@
 问题描述：
   通过平台（API 模式）创建 Dolphin 模式的 orchestrator agent，
   在 DPH 脚本中通过 @agent_name() 语法调用 sub-agent 时，
-  sub-agent 从未被注册为 skill，导致调用静默失败。
+  sub-agent 从未被注册为 tool，导致调用静默失败。
 
-  CLI 模式（通过 Env 类）能正常工作，因为 Env._registerAgentsAsSkills()
+  CLI 模式（通过 Env 类）能正常工作，因为 Env._registerAgentsAsTools()
   会扫描并注册所有 agent。但 API 模式下 DolphinAgent 直接构造时，
   缺少这一注册步骤。
 
@@ -64,11 +64,11 @@ async def test_sub_agent_registered_as_skill_in_api_mode():
     sub_agent = _make_sub_agent()
 
     # 2. 创建 GlobalToolkits 并注册 sub-agent
-    global_skills = GlobalToolkits(GlobalConfig())
-    global_skills.registerAgentTool("helper_agent", sub_agent)
+    global_toolkits = GlobalToolkits(GlobalConfig())
+    global_toolkits.registerAgentTool("helper_agent", sub_agent)
 
     # 3. 验证 skill 已注册
-    skill_names = global_skills.getToolNames()
+    skill_names = global_toolkits.getToolNames()
     assert "helper_agent" in skill_names, (
         f"helper_agent should be registered as a skill, "
         f"but found: {skill_names}"
@@ -87,8 +87,8 @@ async def test_executor_can_call_sub_agent_via_at_syntax():
     sub_agent = _make_sub_agent()
 
     # 2. 创建 GlobalToolkits 并注册 sub-agent
-    global_skills = GlobalToolkits(GlobalConfig())
-    global_skills.registerAgentTool("helper_agent", sub_agent)
+    global_toolkits = GlobalToolkits(GlobalConfig())
+    global_toolkits.registerAgentTool("helper_agent", sub_agent)
 
     # 3. 创建 orchestrator 的 DPH 脚本
     orchestrator_dph = """
@@ -97,7 +97,7 @@ $helper_result -> answer
 """
 
     # 4. 创建 DolphinExecutor（API 模式）
-    executor = DolphinExecutor(global_skills=global_skills)
+    executor = DolphinExecutor(global_toolkits=global_toolkits)
     await executor.executor_init({
         "config": _make_llm_config(),
         "variables": {"query": "test"},
@@ -132,14 +132,14 @@ async def test_dolphin_agent_api_mode_sub_agent_call():
     sub_agent = _make_sub_agent()
 
     # 2. 创建 GlobalToolkits 并注册 sub-agent
-    global_skills = GlobalToolkits(GlobalConfig())
-    global_skills.registerAgentTool("helper_agent", sub_agent)
+    global_toolkits = GlobalToolkits(GlobalConfig())
+    global_toolkits.registerAgentTool("helper_agent", sub_agent)
 
     # 3. 创建 orchestrator agent（API 模式：直接传 content）
     orchestrator = DolphinAgent(
         name="orchestrator",
         content='@helper_agent(query_str="test") -> result\n$result -> answer',
-        global_skills=global_skills,
+        global_toolkits=global_toolkits,
     )
 
     # 4. 初始化并运行
@@ -192,9 +192,9 @@ async def test_cli_mode_agent_call_works_via_env():
             f"helper_agent should be loaded, found: {agent_names}"
         )
 
-        # 4. 验证 helper_agent 作为 skill 被注册
-        skill_names = env.globalSkills.getToolNames()
-        assert "helper_agent" in skill_names, (
-            f"helper_agent should be registered as skill in CLI mode, "
-            f"found: {skill_names}"
+        # 4. 验证 helper_agent 作为 tool 被注册
+        tool_names = env.globalToolkits.getToolNames()
+        assert "helper_agent" in tool_names, (
+            f"helper_agent should be registered as tool in CLI mode, "
+            f"found: {tool_names}"
         )

@@ -13,7 +13,7 @@ from dolphin.core.common.enums import (
 )
 from dolphin.core.common.constants import (
     MAX_TOOL_CALL_TIMES,
-    get_msg_duplicate_skill_call,
+    get_msg_duplicate_tool_call,
 )
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
@@ -347,9 +347,9 @@ class ExploreBlockV2(BasicCodeBlock):
         #     self.recorder.update(
         #         stage=TypeStage.SKILL,
         #         source_type=SourceType.EXPLORE,
-        #         skill_name=function_name,
-        #         skill_type=self.context.get_skill_type(function_name),
-        #         skill_args=function_params_json,
+        #         tool_name=function_name,
+        #         tool_type=self.context.get_tool_type(function_name),
+        #         tool_args=function_params_json,
         #     )
         #     if self.recorder
         #     else None
@@ -388,9 +388,9 @@ class ExploreBlockV2(BasicCodeBlock):
                     item={"answer": skip_response, "block_answer": skip_response},
                     stage=TypeStage.SKILL,
                     source_type=SourceType.EXPLORE,
-                    skill_name=function_name,
-                    skill_type=self.context.get_skill_type(function_name),
-                    skill_args=function_params_json,
+                    tool_name=function_name,
+                    tool_type=self.context.get_tool_type(function_name),
+                    tool_args=function_params_json,
                     is_completed=True,
                     is_skipped=True,
                 )
@@ -414,7 +414,7 @@ class ExploreBlockV2(BasicCodeBlock):
             have_answer = False
 
             async for resp in self.tool_run(
-                skill_name=function_name,
+                tool_name=function_name,
                 source_type=SourceType.EXPLORE,
                 skill_params_json=function_params_json,
                 props=props,
@@ -435,9 +435,9 @@ class ExploreBlockV2(BasicCodeBlock):
                             item={"answer": resp, "block_answer": resp},
                             stage=TypeStage.SKILL,
                             source_type=SourceType.EXPLORE,
-                            skill_name=function_name,
-                            skill_type=self.context.get_skill_type(function_name),
-                            skill_args=function_params_json,
+                            tool_name=function_name,
+                            tool_type=self.context.get_tool_type(function_name),
+                            tool_args=function_params_json,
                         )
                         if self.recorder
                         else None
@@ -611,7 +611,7 @@ class ExploreBlockV2(BasicCodeBlock):
 
             async for resp in self.tool_run(
                 source_type=SourceType.EXPLORE,
-                skill_name=stream_item.tool_name,
+                tool_name=stream_item.tool_name,
                 skill_params_json=(
                     stream_item.tool_args if stream_item.tool_args else {}
                 ),
@@ -653,7 +653,7 @@ class ExploreBlockV2(BasicCodeBlock):
 
     async def _handle_duplicate_tool_call(self, tool_call, stream_item):
         """Handling Duplicate Tool Calls"""
-        message = get_msg_duplicate_skill_call()
+        message = get_msg_duplicate_tool_call()
         self._append_assistant_message(message)
 
         (
@@ -724,7 +724,7 @@ class ExploreBlockV2(BasicCodeBlock):
             tuple[str | None, dict]: (Processed result, metadata)
         """
         # Get skill object
-        skill = self.context.get_skill(skill_name)
+        skill = self.context.get_tool(skill_name)
         if not skill:
             from dolphin.lib.toolkits.system_toolkit import SystemFunctions
             skill = SystemFunctions.getTool(skill_name)

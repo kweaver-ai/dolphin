@@ -207,7 +207,7 @@ class TestExploreBlockToolResponseOnce(unittest.TestCase):
         block.tool_run = mock_tool_run
 
         # 避免依赖 toolkit_hook / raw_output，直接返回固定 tool 输出
-        block._process_skill_result_with_hook = MagicMock(return_value=("hello", {}))
+        block._process_tool_result_with_hook = MagicMock(return_value=("hello", {}))
 
         # 截获追加行为，验证只追加一次
         block.strategy.get_deduplicator = MagicMock(return_value=MagicMock())
@@ -769,7 +769,7 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
         block.recorder.get_answer.return_value = "ok"
         block.strategy.get_deduplicator = MagicMock(return_value=MagicMock())
         block.strategy.append_tool_response_message = MagicMock()
-        block._process_skill_result_with_hook = MagicMock(return_value=("result", {}))
+        block._process_tool_result_with_hook = MagicMock(return_value=("result", {}))
         return block
 
     def test_finally_block_adds_response_on_generic_exception(self):
@@ -870,7 +870,7 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         block.recorder = MagicMock()
         block.recorder.get_progress_answers.return_value = {}
         block.recorder.get_answer.return_value = "ok"
-        block._process_skill_result_with_hook = MagicMock(return_value=("result", {}))
+        block._process_tool_result_with_hook = MagicMock(return_value=("result", {}))
         return block
 
     def test_all_tools_succeed(self):
@@ -881,7 +881,7 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
 
         @_async_gen
         async def mock_tool_run(*args, **kwargs):
-            call_log.append(kwargs.get("skill_name"))
+            call_log.append(kwargs.get("tool_name"))
 
         block.tool_run = mock_tool_run
 
@@ -908,7 +908,7 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
 
         @_async_gen
         async def mock_tool_run(*args, **kwargs):
-            call_log.append(kwargs.get("skill_name"))
+            call_log.append(kwargs.get("tool_name"))
 
         block.tool_run = mock_tool_run
 
@@ -943,7 +943,7 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
 
         @_async_gen
         async def mock_tool_run(*args, **kwargs):
-            call_log.append(kwargs.get("skill_name"))
+            call_log.append(kwargs.get("tool_name"))
 
         block.tool_run = mock_tool_run
 
@@ -986,7 +986,7 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         async def mock_tool_run(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            if kwargs.get("skill_name") == "_tool_a":
+            if kwargs.get("tool_name") == "_tool_a":
                 raise ToolInterrupt("limit reached")
 
         block.tool_run = mock_tool_run
@@ -1026,7 +1026,7 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
 
         @_async_gen
         async def mock_tool_run(*args, **kwargs):
-            name = kwargs.get("skill_name")
+            name = kwargs.get("tool_name")
             call_log.append(name)
             if name == "_tool_a":
                 raise ValueError("non-critical error")

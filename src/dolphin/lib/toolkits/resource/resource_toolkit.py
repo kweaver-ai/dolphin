@@ -104,16 +104,16 @@ class ResourceToolkit(Toolkit):
 
     def setGlobalConfig(self, globalConfig) -> None:
         super().setGlobalConfig(globalConfig)
-        resource_skills_cfg = getattr(globalConfig, "resource_skills", None)
-        if not isinstance(resource_skills_cfg, dict):
+        resource_tools_cfg = getattr(globalConfig, "resource_tools", None)
+        if not isinstance(resource_tools_cfg, dict):
             return
 
         try:
             new_config = ResourceSkillConfig.from_dict(
-                {"resource_skills": resource_skills_cfg}
+                {"resource_skills": resource_tools_cfg}
             )
         except Exception as e:
-            logger.warning(f"Failed to parse resource_skills config: {e}")
+            logger.warning(f"Failed to parse resource_tools config: {e}")
             return
 
         self.config = new_config
@@ -197,9 +197,9 @@ class ResourceToolkit(Toolkit):
     def _createTools(self) -> List[ToolFunction]:
         """Create the list of tool functions provided by this toolkit.
 
-        Note: _list_resource_skills is NOT exposed as a tool because
+        Note: _list_resource_tools is NOT exposed as a tool because
         Level 1 metadata is auto-injected into system prompt via
-        get_metadata_prompt(). LLM sees available skills upfront.
+        get_metadata_prompt(). LLM sees available tools upfront.
 
         Legacy entries (_load_resource_skill / _read_skill_asset) are kept for
         backwards compatibility.  The three unified contract handlers are added
@@ -283,8 +283,8 @@ class ResourceToolkit(Toolkit):
         if name not in self._skills_meta:
             available = sorted(self._skills_meta.keys())
             return (
-                f"Error: Skill '{name}' not found.\n"
-                f"Available skills: {', '.join(available) if available else 'none'}"
+                f"Error: Tool '{name}' not found.\n"
+                f"Available tools: {', '.join(available) if available else 'none'}"
             )
 
         # Check content cache
@@ -334,8 +334,8 @@ class ResourceToolkit(Toolkit):
         if meta is None:
             available = sorted(self._skills_meta.keys())
             return (
-                f"Error: Skill '{name}' not found.\n"
-                f"Available skills: {', '.join(available) if available else 'none'}"
+                f"Error: Tool '{name}' not found.\n"
+                f"Available tools: {', '.join(available) if available else 'none'}"
             )
 
         return (
@@ -368,8 +368,8 @@ class ResourceToolkit(Toolkit):
         if skill_name not in self._skills_meta:
             available = sorted(self._skills_meta.keys())
             return (
-                f"Error: Skill '{skill_name}' not found.\n"
-                f"Available skills: {', '.join(available) if available else 'none'}"
+                f"Error: Tool '{skill_name}' not found.\n"
+                f"Available tools: {', '.join(available) if available else 'none'}"
             )
 
         # Load resource

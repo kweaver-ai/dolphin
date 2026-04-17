@@ -6,7 +6,7 @@ from collections import deque
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
 
-from dolphin.core.common.enums import MessageRole, SkillInfo, Messages, ToolType
+from dolphin.core.common.enums import MessageRole, ToolInfo, Messages, ToolType
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.common.constants import (
     KEY_HISTORY_COMPACT_RECENT_TURNS,
@@ -68,7 +68,7 @@ class Context:
     def __init__(
         self,
         config: Optional[GlobalConfig] = None,
-        global_skills: Optional["GlobalToolkits"] = None,
+        global_toolkits: Optional["GlobalToolkits"] = None,
         memory_manager: Optional["MemoryManager"] = None,
         global_types=None,
         toolkit_hook: Optional["ToolkitHook"] = None,
@@ -77,11 +77,11 @@ class Context:
         is_cli: bool = False,
     ):
         self.config = config
-        self.global_skills = global_skills
+        self.global_toolkits = global_toolkits
         self.memory_manager = memory_manager
         self.global_types = global_types
         self.variable_pool = VariablePool()
-        self.skillkit = Toolkit()
+        self.toolkit = Toolkit()
         self.messages: Dict[str, Messages] = (
             dict()
         )  # Use Messages class instead of list
@@ -97,8 +97,8 @@ class Context:
 
         self.runtime_graph = RuntimeGraph()
         
-        # Initialize all_skills to avoid AttributeError
-        self.all_skills = ToolSet()
+        # Initialize all_tools to avoid AttributeError
+        self.all_tools = ToolSet()
 
         # Initialize toolkit_hook
         if toolkit_hook is not None:
@@ -118,8 +118,8 @@ class Context:
         # The name of the model used last (to maintain model consistency in multi-turn conversations)
         self._last_model_name: Optional[str] = None
 
-        # The final skills configuration used (inherited skill filtering configuration for multi-turn conversations)
-        self._last_skills: Optional[List[str]] = None
+        # The final tools configuration used (inherited tool filtering configuration for multi-turn conversations)
+        self._last_tools: Optional[List[str]] = None
 
         # The final exploration mode used (when conducting multi-turn conversations, inherits the mode configuration)
         self._last_explore_mode: Optional[str] = None
@@ -175,14 +175,14 @@ class Context:
     def copy(self):
         copied = Context(
             config=self.config,
-            global_skills=self.global_skills,
+            global_toolkits=self.global_toolkits,
             memory_manager=self.memory_manager,
             global_types=self.global_types,
             verbose=self.verbose,
             is_cli=self.is_cli,
         )
         copied.variable_pool = self.variable_pool.copy()
-        copied.skillkit = self.skillkit
+        copied.toolkit = self.toolkit
         # Copy Messages object
         copied.messages = {}
         for agent_name, messages in self.messages.items():
@@ -332,15 +332,20 @@ class Context:
         name,
         value,
         source_type=SourceType.OTHER,
-        skill_info: Optional[SkillInfo] = None,
+        tool_info: Optional[ToolInfo] = None,
+        skill_info: Optional[ToolInfo] = None,
     ):
         """Set variable
                 :param name: variable name
                 :param value: variable value
                 :param source_type: variable source type
-                :param skill_info: skill information
+                :param tool_info: tool information
+                :param skill_info: deprecated alias for tool_info
         """
-        self.variable_pool.set_var_output(name, value, source_type, skill_info)
+        self.variable_pool.set_var_output(
+            name, value, source_type,
+            tool_info=tool_info if tool_info is not None else skill_info,
+        )
 
     def init_variables(self, variables):
         """Initialize variable pool
@@ -348,8 +353,18 @@ class Context:
         """
         self.variable_pool.init_variables(variables)
 
+    def init_toolkit(self, toolkit: Toolkit):
+        self.set_tools(toolkit)
+
     def init_skillkit(self, skillkit: Toolkit):
-        self.set_tools(skillkit)
+        """Deprecated: use :meth:`init_toolkit` instead."""
+        import warnings
+        warnings.warn(
+            "Context.init_skillkit() is deprecated, use init_toolkit() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.init_toolkit(skillkit)
 
     def init_agents(self, agents):
         self.agents = agents
@@ -365,53 +380,53 @@ class Context:
         return self.agents
 
     def has_agent(self, agent_name):
-        """Check if the specified agent skill exists
+        """Check if the specified agent tool exists
                 :param agent_name: agent name
                 :return: whether it exists
         """
-        # Support direct use of agent_name and skill names with prefixes
+        # Support direct use of agent_name and tool names with prefixes
         return (
-            self.skillkit.hasTool(agent_name)
-            or self.skillkit.hasTool(f"run_{agent_name}")
-            or self.skillkit.hasTool(f"arun_{agent_name}")
+            self.toolkit.hasTool(agent_name)
+            or self.toolkit.hasTool(f"run_{agent_name}")
+            or self.toolkit.hasTool(f"arun_{agent_name}")
         )
 
     def exec_agent(self, agent_name, **kwargs):
-        """Synchronous execution of agent (via skill system)
+        """Synchronous execution of agent (via tool system)
                 :param agent_name: agent name
                 :param kwargs: parameters passed to the agent
                 :return: execution result
         """
         # First try directly using agent_name, then try the run_ prefix
-        skill_name = agent_name
-        if not self.skillkit.hasTool(skill_name):
-            skill_name = f"run_{agent_name}"
+        tool_name = agent_name
+        if not self.toolkit.hasTool(tool_name):
+            tool_name = f"run_{agent_name}"
 
-        if not self.skillkit.hasTool(skill_name):
+        if not self.toolkit.hasTool(tool_name):
             raise ValueError(
-                f"Agent skill not found: {agent_name} (tried: {agent_name}, run_{agent_name})"
+                f"Agent tool not found: {agent_name} (tried: {agent_name}, run_{agent_name})"
             )
 
-        result = self.skillkit.exec(skill_name, **kwargs)
+        result = self.toolkit.exec(tool_name, **kwargs)
         return result.result if hasattr(result, "result") else result
 
     async def aexec_agent(self, agent_name, **kwargs):
-        """Asynchronously execute agent (via skill system)
+        """Asynchronously execute agent (via tool system)
                 :param agent_name: agent name
                 :param kwargs: parameters to pass to the agent
                 :return: execution result
         """
         # First try directly using agent_name, then try the arun_ prefix
-        skill_name = agent_name
-        if not self.skillkit.hasTool(skill_name):
-            skill_name = f"arun_{agent_name}"
+        tool_name = agent_name
+        if not self.toolkit.hasTool(tool_name):
+            tool_name = f"arun_{agent_name}"
 
-        if not self.skillkit.hasTool(skill_name):
+        if not self.toolkit.hasTool(tool_name):
             raise ValueError(
-                f"Agent skill not found: {agent_name} (tried: {agent_name}, arun_{agent_name})"
+                f"Agent tool not found: {agent_name} (tried: {agent_name}, arun_{agent_name})"
             )
 
-        result = await self.skillkit.aexec(skill_name, **kwargs)
+        result = await self.toolkit.aexec(tool_name, **kwargs)
         return result.result if hasattr(result, "result") else result
 
     def get_var_value(self, name, default_value=None):
@@ -510,134 +525,163 @@ class Context:
                 )
         return result
 
-    def get_toolkit(self, skillNames: Optional[List[str]] = None):
-        """Get the skill set, supporting wildcard (glob), exact matching, and optional toolkit namespace.
+    def get_toolkit(self, toolNames: Optional[List[str]] = None):
+        """Get the tool set, supporting wildcard (glob), exact matching, and optional toolkit namespace.
 
         Args:
-            skillNames: List of skill patterns.
+            toolNames: List of tool patterns.
                                - Plain tool name/pattern: "_python", "*_resource*"
                                - Namespaced pattern: "<toolkit>.<pattern>", e.g. "resource_toolkit.*"
-                               If None, return the merged skill set;
-                               If empty list [], indicates no skills are enabled
+                               If None, return the merged tool set;
+                               If empty list [], indicates no tools are enabled
 
         Returns:
-            ToolSet: The matched skill set, or the merged skill set if no skills match
+            ToolSet: The matched tool set, or the merged tool set if no tools match
         """
 
-        # If no matching pattern is provided, return the merged skill set
-        if skillNames is None:
-            return self.all_skills
+        # If no matching pattern is provided, return the merged tool set
+        if toolNames is None:
+            return self.all_tools
 
         # When an explicit empty list is passed in, it indicates that the caller does not wish to expose any tools.
         # For example, the scenario where tools=[] is configured in DPH
-        if isinstance(skillNames, list) and len(skillNames) == 0:
+        if isinstance(toolNames, list) and len(toolNames) == 0:
             return ToolSet()
 
-        skills = self.all_skills.getTools()
-        owner_names = ToolMatcher.get_owner_toolkits(skills)
+        tools = self.all_tools.getTools()
+        owner_names = ToolMatcher.get_owner_toolkits(tools)
 
         # Use optimized batch matching (pre-parses patterns, deduplicates results)
-        matched_skills, any_namespaced_pattern = ToolMatcher.match_tools_batch(
-            skills, skillNames, owner_names
+        matched_tools, any_namespaced_pattern = ToolMatcher.match_tools_batch(
+            tools, toolNames, owner_names
         )
 
-        # If no skills match:
+        # If no tools match:
         # - if namespaced patterns were used, return an empty set (safer default)
-        # - otherwise keep the historical behavior and return the merged skill set
-        if not matched_skills:
+        # - otherwise keep the historical behavior and return the merged tool set
+        if not matched_tools:
             if any_namespaced_pattern:
                 return ToolSet()
-            return self.all_skills
+            return self.all_tools
 
-        # Return the matching skill set
-        result_skillset = ToolSet()
-        for skill in matched_skills:
-            result_skillset.addTool(skill)
-        
+        # Return the matching tool set
+        result_toolset = ToolSet()
+        for tool in matched_tools:
+            result_toolset.addTool(tool)
+
         # Auto-inject _get_result_detail if needed
-        self._inject_detail_skill_if_needed(result_skillset)
-        
-        return result_skillset
+        self._inject_detail_tool_if_needed(result_toolset)
 
-    def _inject_detail_skill_if_needed(self, skillset: ToolSet):
-        """Auto-inject _get_cached_result_detail if any skill uses omitting modes (SUMMARY/REFERENCE)"""
+        return result_toolset
+
+    def _inject_detail_tool_if_needed(self, toolset: ToolSet):
+        """Auto-inject _get_cached_result_detail if any tool uses omitting modes (SUMMARY/REFERENCE)"""
         try:
             from dolphin.core.tool.context_retention import ContextRetentionMode
             from dolphin.lib.toolkits.system_toolkit import SystemFunctions
         except ImportError:
             return
 
-        skills = skillset.getTools()
+        tools = toolset.getTools()
         should_inject = False
-        
-        for skill in skills:
+
+        for tool in tools:
             # Check for configured retention strategy
-            config = getattr(skill.func, '_context_retention', None)
+            config = getattr(tool.func, '_context_retention', None)
             if config and config.mode in (
                 ContextRetentionMode.SUMMARY,
                 ContextRetentionMode.REFERENCE,
             ):
                 should_inject = True
                 break
-        
+
         if should_inject:
-            # Check if already exists in skillset
-            has_detail_skill = any(
-                "_get_cached_result_detail" in s.get_function_name()
-                for s in skills
+            # Check if already exists in toolset
+            has_detail_tool = any(
+                "_get_cached_result_detail" in t.get_function_name()
+                for t in tools
             )
-            
-            if not has_detail_skill:
-                # Try to get the skill from SystemFunctions
+
+            if not has_detail_tool:
+                # Try to get the tool from SystemFunctions
                 # We try different name variations just in case
-                detail_skill = SystemFunctions.getTool("_get_cached_result_detail")
-                if not detail_skill:
-                    detail_skill = SystemFunctions.getTool("system_functions._get_cached_result_detail")
-                
+                detail_tool = SystemFunctions.getTool("_get_cached_result_detail")
+                if not detail_tool:
+                    detail_tool = SystemFunctions.getTool("system_functions._get_cached_result_detail")
+
                 # If still not found (e.g. SystemFunctions not initialized with it), we can pick it manually if possible
                 # But typically SystemFunctions singleton has it.
-                if detail_skill:
-                     skillset.addTool(detail_skill)
+                if detail_tool:
+                     toolset.addTool(detail_tool)
                 else:
                     # Fallback: look through SystemFunctions.getTools() manually
-                    for s in SystemFunctions.getTools():
-                        if "_get_cached_result_detail" in s.get_function_name():
-                            skillset.addTool(s)
+                    for t in SystemFunctions.getTools():
+                        if "_get_cached_result_detail" in t.get_function_name():
+                            toolset.addTool(t)
                             break
 
-    def get_skill(self, name):
-        return self.skillkit.getTool(name)
+    def get_skillkit(self, skillNames=None):
+        """Deprecated: use :meth:`get_toolkit` instead."""
+        import warnings
+        warnings.warn(
+            "Context.get_skillkit() is deprecated, use get_toolkit() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_toolkit(skillNames)
 
-    def get_skill_type(self, skill_name: str) -> ToolType:
-        """Get the type of a skill
+    def get_tool(self, name):
+        return self.toolkit.getTool(name)
+
+    # Backward compatibility alias
+    get_skill = get_tool
+
+    def get_tool_type(self, tool_name: str) -> ToolType:
+        """Get the type of a tool
 
         Args:
-            skill_name: The name of the skill
+            tool_name: The name of the tool
 
         Returns:
-            ToolType: The type of the skill
+            ToolType: The type of the tool
         """
-        skill = self.get_skill(skill_name)
-        if skill:
+        tool = self.get_tool(tool_name)
+        if tool:
             # Try to get the tool type, return the default type if not available
-            return getattr(skill, "tool_type", ToolType.TOOL)
+            return getattr(tool, "tool_type", ToolType.TOOL)
         else:
             # Default returns TOOL type
             return ToolType.TOOL
 
     def is_toolkit_empty(self):
-        return self.skillkit is None or self.skillkit.isEmpty()
+        return self.toolkit is None or self.toolkit.isEmpty()
 
-    def exec_skill(self, name, **kwargs):
-        return self.skillkit.exec(name, **kwargs)
+    def is_skillkit_empty(self):
+        """Deprecated: use :meth:`is_toolkit_empty` instead."""
+        import warnings
+        warnings.warn(
+            "Context.is_skillkit_empty() is deprecated, use is_toolkit_empty() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.is_toolkit_empty()
 
-    async def aexec_skill(self, name, **kwargs):
-        return self.skillkit.aexec(name, **kwargs)
+    def exec_tool(self, name, **kwargs):
+        return self.toolkit.exec(name, **kwargs)
 
-    def get_agent_skill(self, skill_function: ToolFunction):
-        if self.global_skills is None:
+    # Backward compatibility alias
+    exec_skill = exec_tool
+
+    async def aexec_tool(self, name, **kwargs):
+        return self.toolkit.aexec(name, **kwargs)
+
+    # Backward compatibility alias
+    aexec_skill = aexec_tool
+
+    def get_agent_tool(self, tool_function: ToolFunction):
+        if self.global_toolkits is None:
             return None
-        return self.global_skills.getAgent(skill_function.get_function_name())
+        return self.global_toolkits.getAgent(tool_function.get_function_name())
 
     def sync_variables(self, context: "Context"):
         self.variable_pool.sync_variables(context.variable_pool)
@@ -658,17 +702,27 @@ class Context:
         """
         return self.variable_pool.keys()
 
-    def set_tools(self, skillkit):
-        self.skillkit = skillkit
+    def set_tools(self, toolkit):
+        self.toolkit = toolkit
         self._calc_all_tools()
 
+    def set_skills(self, skillkit):
+        """Deprecated: use :meth:`set_tools` instead."""
+        import warnings
+        warnings.warn(
+            "Context.set_skills() is deprecated, use set_tools() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.set_tools(skillkit)
+
     def append_var_output(
-        self, name, value, source_type=SourceType.OTHER, skill_info=None
+        self, name, value, source_type=SourceType.OTHER, tool_info=None
     ):
         var = self.variable_pool.get_var(name)
         if not var:
             var = VarOutput(
-                name=name, value=[], source_type=SourceType.LIST, skill_info=skill_info
+                name=name, value=[], source_type=SourceType.LIST, tool_info=tool_info
             )
 
         if not isinstance(var, VarOutput):
@@ -679,7 +733,7 @@ class Context:
                             name=name,
                             value=[],
                             source_type=SourceType.LIST,
-                            skill_info=skill_info,
+                            tool_info=tool_info,
                         )
                         for item in var.value:
                             init_var.add(
@@ -687,7 +741,7 @@ class Context:
                                     name=name,
                                     value=item,
                                     source_type=source_type,
-                                    skill_info=skill_info,
+                                    tool_info=tool_info,
                                 )
                             )
                         var = init_var
@@ -696,32 +750,32 @@ class Context:
                             name=name,
                             value=[var],
                             source_type=SourceType.LIST,
-                            skill_info=skill_info,
+                            tool_info=tool_info,
                         )
                 else:
                     var = VarOutput(
                         name=name,
                         value=[],
                         source_type=SourceType.LIST,
-                        skill_info=skill_info,
+                        tool_info=tool_info,
                     )
             else:
                 var = VarOutput(
                     name=name,
                     value=[var],
                     source_type=SourceType.LIST,
-                    skill_info=skill_info,
+                    tool_info=tool_info,
                 )
 
         new_var = var.add(
             VarOutput(
-                name=name, value=value, source_type=source_type, skill_info=skill_info
+                name=name, value=value, source_type=source_type, tool_info=tool_info
             )
         )
         self.variable_pool.set_var(name, new_var)
 
     def set_last_var_output(
-        self, name, value, source_type=SourceType.OTHER, skill_info=None
+        self, name, value, source_type=SourceType.OTHER, tool_info=None
     ):
         var = self.variable_pool.get_var(name)
         if var:
@@ -730,19 +784,19 @@ class Context:
                     name=name,
                     value=value,
                     source_type=source_type,
-                    skill_info=skill_info,
+                    tool_info=tool_info,
                 )
             )
             self.variable_pool.set_var(name, var)
 
     def update_var_output(
-        self, name, value, source_type=SourceType.OTHER, skill_info=None
+        self, name, value, source_type=SourceType.OTHER, tool_info=None
     ):
         """Update variable
                 :param name: Variable name
                 :param value: Variable value
                 :param source_type: Variable source type
-                :param skill_info: Skill information
+                :param tool_info: Tool information
         """
         var = self.variable_pool.get_var(name)
         if var:
@@ -752,13 +806,13 @@ class Context:
                     var.value[-1] = value  # type: ignore
                 else:
                     setattr(var, "value", value)
-            # Try to update source_type and skill_info
+            # Try to update source_type and tool_info
             if hasattr(var, "source_type"):
                 setattr(var, "source_type", source_type)
-            if hasattr(var, "skill_info"):
-                setattr(var, "skill_info", skill_info)
+            if hasattr(var, "tool_info"):
+                setattr(var, "tool_info", tool_info)
         else:
-            self.set_var_output(name, value, source_type, skill_info)
+            self.set_var_output(name, value, source_type, tool_info)
 
     def recognize_variable(self, dolphin_str):
         # Identify the positions of all variables in a string - Simple variables: `$variableName` - Array indices: `$variableName[index]` - Nested properties: `$variableName.key1.key2`
@@ -1201,25 +1255,25 @@ class Context:
         """
         return self._last_model_name
 
-    def set_last_skills(self, skills: Optional[List[str]]):
+    def set_last_tools(self, tools: Optional[List[str]]):
         """
-        Set the last used skills configuration.
-        This should be called when executing explore blocks to maintain skills consistency across multiple rounds.
+        Set the last used tools configuration.
+        This should be called when executing explore blocks to maintain tools consistency across multiple rounds.
 
         Args:
-            skills: The skills list to store (can be None to clear)
+            tools: The tools list to store (can be None to clear)
         """
-        self._last_skills = skills
+        self._last_tools = tools
 
-    def get_last_skills(self) -> Optional[List[str]]:
+    def get_last_tools(self) -> Optional[List[str]]:
         """
-        Get the last used skills configuration.
-        This is useful for maintaining skills consistency across multiple rounds of conversation.
+        Get the last used tools configuration.
+        This is useful for maintaining tools consistency across multiple rounds of conversation.
 
         Returns:
-            Optional[List[str]]: The skills list if found, None otherwise
+            Optional[List[str]]: The tools list if found, None otherwise
         """
-        return self._last_skills
+        return self._last_tools
 
     def set_last_explore_mode(self, mode: Optional[str]):
         """
@@ -1364,7 +1418,7 @@ class Context:
         # Delegate to Trajectory class for actual saving
         Trajectory.save_simple(
             messages=self.get_messages().get_messages(),
-            tools=self.skillkit.getToolsSchema(),
+            tools=self.toolkit.getToolsSchema(),
             file_path=trajectory_path,
             pretty_format=pretty_format,
             user_id=self.user_id
@@ -1386,15 +1440,52 @@ class Context:
         """
         Calculate all tools
         """
-        self.all_skills = ToolSet()
+        self.all_tools = ToolSet()
 
-        # Add tools from self.skillkit
-        if self.skillkit and not self.skillkit.isEmpty():
-            self.all_skills.addToolkit(self.skillkit)
+        # Add tools from self.toolkit
+        if self.toolkit and not self.toolkit.isEmpty():
+            self.all_tools.addToolkit(self.toolkit)
 
-        # Add tools from global_skills
-        if self.global_skills is not None:
-            self.all_skills.addToolkit(self.global_skills.getAllTools())
+        # Add tools from global_toolkits
+        if self.global_toolkits is not None:
+            self.all_tools.addToolkit(self.global_toolkits.getAllTools())
+
+    # ---------------------------------------------------------------------------
+    # Deprecated attribute aliases (Skill → Tool rename)
+    # ---------------------------------------------------------------------------
+
+    @property
+    def skillkit(self):
+        """Deprecated: use :attr:`toolkit` instead."""
+        import warnings
+        warnings.warn(
+            "Context.skillkit is deprecated, use Context.toolkit instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.toolkit
+
+    @skillkit.setter
+    def skillkit(self, value):
+        """Deprecated: use :meth:`set_tools` instead."""
+        import warnings
+        warnings.warn(
+            "Context.skillkit setter is deprecated, use Context.set_tools() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.toolkit = value
+
+    @property
+    def all_skills(self):
+        """Deprecated: use :attr:`all_tools` instead."""
+        import warnings
+        warnings.warn(
+            "Context.all_skills is deprecated, use Context.all_tools instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.all_tools
 
     def _make_log(self, log_str):
         if len(log_str) < MAX_LOG_LENGTH:
@@ -1520,16 +1611,16 @@ class Context:
             "nesting_level": self._nesting_level,
         }
 
-        # Export skill set status
-        skillkit_state = {}
-        if self.skillkit and not self.skillkit.isEmpty():
+        # Export tool set status
+        toolkit_state = {}
+        if self.toolkit and not self.toolkit.isEmpty():
             try:
-                skillkit_state = {
-                    "skills_schema": self.skillkit.getToolsSchema(),
-                    "skill_count": len(self.skillkit.getTools()),
+                toolkit_state = {
+                    "tools_schema": self.toolkit.getToolsSchema(),
+                    "tool_count": len(self.toolkit.getTools()),
                 }
             except Exception as e:
-                logger.warning(f"Failed to export skillkit state: {e}")
+                logger.warning(f"Failed to export toolkit state: {e}")
 
         # Export the complete state of context_manager (including bucket structure)
         context_manager_state = self._export_context_manager_state()
@@ -1538,7 +1629,7 @@ class Context:
             variables=variables,
             messages=messages,
             runtime_state=runtime_state,
-            skillkit_state=skillkit_state,
+            toolkit_state=toolkit_state,
             context_manager_state=context_manager_state,
         )
 
@@ -1674,7 +1765,7 @@ class Context:
         """Check user interrupt status and raise exception if interrupted.
 
         This is the primary checkpoint method to be called at strategic locations
-        during execution (e.g., LLM streaming loop, before skill execution).
+        during execution (e.g., LLM streaming loop, before tool execution).
 
         Raises:
             UserInterrupt: If user has requested interrupt

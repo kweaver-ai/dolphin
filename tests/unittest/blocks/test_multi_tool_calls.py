@@ -325,7 +325,7 @@ class TestPromptStrategyMultiToolCalls:
         mock_toolkit = MagicMock()
         mock_toolkit.isEmpty.return_value = False
         mock_toolkit.getTool.return_value = MagicMock()  # Skill exists
-        context.skillkit = mock_toolkit
+        context.toolkit = mock_toolkit
 
         result = strategy.detect_tool_calls(stream_item, context)
 

@@ -113,7 +113,7 @@ def mock_context():
     }
     skillkit = TestToolkit(skills_dict)
     
-    # Use set_tools to properly initialize all_skills
+    # Use set_tools to properly initialize all_tools
     context.set_tools(skillkit)
     
     return context

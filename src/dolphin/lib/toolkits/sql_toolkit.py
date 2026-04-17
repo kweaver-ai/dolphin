@@ -271,4 +271,4 @@ class SQLToolkit(Toolkit):
         ]
 
     def getTools(self) -> List[ToolFunction]:
-        return self.getTools()  # Uses base class getTools() with caching
+        return super().getTools()  # Uses base class getTools() with caching

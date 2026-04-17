@@ -45,7 +45,7 @@ from dolphin.core.common.constants import (
     MAX_TOOL_CALL_TIMES,
     MAX_PLAN_SILENT_ROUNDS,
     MAX_PLAN_POLLING_ROUNDS,
-    get_msg_duplicate_skill_call,
+    get_msg_duplicate_tool_call,
 )
 from dolphin.core.context.context import Context
 from dolphin.core.logging.logger import console, console_tool_response
@@ -210,11 +210,11 @@ class ExploreBlock(BasicCodeBlock):
         if getattr(self, "system_prompt", None):
             self.context.set_last_system_prompt(self.system_prompt)
 
-        # Save the current skills configuration to context, so it can be inherited during multi-turn conversations.
-        if getattr(self, "skills", None):
-            self.context.set_last_skills(self.skills)
-            # Inject context to skillkits that support it
-            self._inject_context_to_skillkits()
+        # Save the current tools configuration to context, so it can be inherited during multi-turn conversations.
+        if getattr(self, "tools", None):
+            self.context.set_last_tools(self.tools)
+            # Inject context to toolkits that support it
+            self._inject_context_to_toolkits()
 
         # Save the current mode configuration to context for inheritance in multi-turn conversations.
         if getattr(self, "mode", None):
@@ -548,9 +548,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
     def _make_init_messages(self):
         """Build initialization message"""
-        skillkit = self.get_toolkit()
+        toolkit = self.get_toolkit()
         system_message = self.strategy.make_system_message(
-            skillkit=skillkit,
+            skillkit=toolkit,
             system_prompt=self.system_prompt,
             tools_format=self.tools_format,
             context=self.context,
@@ -689,9 +689,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
             self.recorder.update(
                 stage=TypeStage.SKILL,
                 source_type=SourceType.EXPLORE,
-                skill_name=function_name,
-                skill_type=self.context.get_skill_type(function_name),
-                skill_args=function_params_json,
+                tool_name=function_name,
+                tool_type=self.context.get_tool_type(function_name),
+                tool_args=function_params_json,
             )
         
         # *** Handle skip action ***
@@ -727,9 +727,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
                     item={"answer": skip_response, "block_answer": skip_response},
                     stage=TypeStage.SKILL,
                     source_type=SourceType.EXPLORE,
-                    skill_name=function_name,
-                    skill_type=self.context.get_skill_type(function_name),
-                    skill_args=function_params_json,
+                    tool_name=function_name,
+                    tool_type=self.context.get_tool_type(function_name),
+                    tool_args=function_params_json,
                     is_completed=True,
                     is_skipped=True,
                 )
@@ -752,7 +752,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             have_answer = False
 
             async for resp in self.tool_run(
-                skill_name=function_name,
+                tool_name=function_name,
                 source_type=SourceType.EXPLORE,
                 skill_params_json=function_params_json,
                 props=props,
@@ -773,9 +773,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
                             item={"answer": resp, "block_answer": resp},
                             stage=TypeStage.SKILL,
                             source_type=SourceType.EXPLORE,
-                            skill_name=function_name,
-                            skill_type=self.context.get_skill_type(function_name),
-                            skill_args=function_params_json,
+                            tool_name=function_name,
+                            tool_type=self.context.get_tool_type(function_name),
+                            tool_args=function_params_json,
                         )
                 have_answer = True
                 yield self.recorder.get_progress_answers() if self.recorder else None
@@ -825,9 +825,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
         current_counter = self.session_tool_call_counter
 
         # Regenerate system message to include dynamically loaded tools
-        current_skillkit = self.get_toolkit()
+        current_toolkit = self.get_toolkit()
         updated_system_message = self.strategy.make_system_message(
-            skillkit=current_skillkit,
+            skillkit=current_toolkit,
             system_prompt=self.system_prompt,
             tools_format=self.tools_format,
             context=self.context,
@@ -848,7 +848,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         llm_params = self.strategy.get_llm_params(
             messages=llm_messages,
             model=self.model,
-            skillkit=current_skillkit,  # Use current skillkit
+            skillkit=current_toolkit,  # Use current skillkit
             tool_choice=getattr(self, "tool_choice", None),  # Consistent with V2: use only when explicitly specified by user
             no_cache=no_cache,
         )
@@ -901,7 +901,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
         if self.times >= MAX_TOOL_CALL_TIMES:
             self.context.warn(
-                f"max skill call times reached {MAX_TOOL_CALL_TIMES} times, answer[{stream_item.to_dict()}]"
+                f"max tool call times reached {MAX_TOOL_CALL_TIMES} times, answer[{stream_item.to_dict()}]"
             )
         else:
             self.times += 1
@@ -938,7 +938,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
             else:
                 # No pending content, add current answer directly
                 self._append_assistant_message(stream_item.answer)
-                self.context.debug(f"no valid skill call, answer[{stream_item.answer}]")
+                self.context.debug(f"no valid tool call, answer[{stream_item.answer}]")
 
             # Always signal stop when no tool call is found.
             # The decision to continue despite this flag is made by
@@ -1000,13 +1000,13 @@ Please reconsider your approach and improve your answer based on the feedback ab
             deduplicator = self.strategy.get_deduplicator()
 
             # Check for duplicate calls
-            skill_call_for_dedup = (tool_call.name, tool_call.arguments)
-            if not deduplicator.is_duplicate(skill_call_for_dedup):
+            tool_call_for_dedup = (tool_call.name, tool_call.arguments)
+            if not deduplicator.is_duplicate(tool_call_for_dedup):
                 # Add tool call message
                 self.strategy.append_tool_call_message(
                     self.context, stream_item, tool_call
                 )
-                deduplicator.add(skill_call_for_dedup)
+                deduplicator.add(tool_call_for_dedup)
 
                 async for ret in self._execute_tool_call(stream_item, tool_call):
                     yield ret
@@ -1044,7 +1044,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
             async for resp in self.tool_run(
                 source_type=SourceType.EXPLORE,
-                skill_name=tool_call.name,
+                tool_name=tool_call.name,
                 skill_params_json=tool_call.arguments or {},
             ):
                 yield self.recorder.get_progress_answers() if self.recorder else None
@@ -1164,11 +1164,11 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 continue
             
             # Deduplicate to avoid repeated executions (side effects / cost).
-            skill_call_for_dedup = (tool_call.name, tool_call.arguments)
-            if deduplicator.is_duplicate(skill_call_for_dedup):
+            tool_call_for_dedup = (tool_call.name, tool_call.arguments)
+            if deduplicator.is_duplicate(tool_call_for_dedup):
                 failed_calls += 1
                 self.context.warn(
-                    f"Duplicate tool call skipped: {deduplicator.get_call_key(skill_call_for_dedup)}"
+                    f"Duplicate tool call skipped: {deduplicator.get_call_key(tool_call_for_dedup)}"
                 )
                 self.strategy.append_tool_response_message(
                     self.context,
@@ -1177,7 +1177,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
                     metadata={"duplicate": True},
                 )
                 continue
-            deduplicator.add(skill_call_for_dedup)
+            deduplicator.add(tool_call_for_dedup)
 
             # Execute the tool call
             try:
@@ -1218,7 +1218,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
     async def _handle_duplicate_tool_call(self, tool_call: ToolCall, stream_item: StreamItem):
         """Handling Duplicate Tool Calls"""
-        message = get_msg_duplicate_skill_call()
+        message = get_msg_duplicate_tool_call()
         self._append_assistant_message(message)
 
         if self.recorder:
@@ -1441,13 +1441,13 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
         return counts and max(counts) >= DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT
 
-    def _process_tool_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
-        """Handle skill results using toolkit_hook"""
-        # Get skill object
-        skill = self.context.get_skill(skill_name)
-        if not skill:
+    def _process_tool_result_with_hook(self, tool_name: str) -> tuple[str | None, dict]:
+        """Handle tool results using toolkit_hook"""
+        # Get tool object
+        tool = self.context.get_tool(tool_name)
+        if not tool:
             from dolphin.lib.toolkits.system_toolkit import SystemFunctions
-            skill = SystemFunctions.getTool(skill_name)
+            tool = SystemFunctions.getTool(tool_name)
 
         # Get the last stage as reference
         last_stage = self.recorder.getProgress().get_last_stage()
@@ -1458,9 +1458,9 @@ Please reconsider your approach and improve your answer based on the feedback ab
             # Use new hook to get context-optimized content
             content, metadata = self.toolkit_hook.on_before_send_to_context(
                 reference_id=reference.reference_id,
-                tool=skill,
-                toolkit_name=type(skill.owner_toolkit).__name__ if skill.owner_toolkit else "",
-                resource_tool_path=getattr(skill, 'resource_tool_path', None),
+                tool=tool,
+                toolkit_name=type(tool.owner_toolkit).__name__ if tool and tool.owner_toolkit else "",
+                resource_tool_path=getattr(tool, 'resource_tool_path', None) if tool else None,
             )
             return content, metadata
         return self.recorder.getProgress().get_step_answers(), {}
@@ -1522,7 +1522,7 @@ Please reconsider your approach and improve your answer based on the feedback ab
         self.assign_type = kwargs.get("assign_type", "->")
 
         # 2. Resolve inherited configurations
-        self._resolve_skills(kwargs)
+        self._resolve_tools(kwargs)
         self._resolve_mode(kwargs)
         self._resolve_system_prompt(kwargs)
         self._apply_deduplicator_config(kwargs)
@@ -1634,55 +1634,55 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 user_content = bucket._get_content_text()
         return user_content
 
-    def _resolve_skills(self, kwargs: dict):
-        """Resolve skills configuration from kwargs or inherit from context."""
-        if "skills" in kwargs:
-            self.skills = kwargs["skills"]
-        elif "tools" in kwargs:
-            self.skills = kwargs["tools"]
+    def _resolve_tools(self, kwargs: dict):
+        """Resolve tools configuration from kwargs or inherit from context."""
+        if "tools" in kwargs:
+            self.tools = kwargs["tools"]
+        elif "skills" in kwargs:
+            self.tools = kwargs["skills"]
         else:
-            last_skills = self.context.get_last_skills()
-            if last_skills is not None:
-                self.skills = last_skills
+            last_tools = self.context.get_last_tools()
+            if last_tools is not None:
+                self.tools = last_tools
 
-        if getattr(self, "skills", None):
-            self.context.set_last_skills(self.skills)
-            # Inject context to skillkits that support it
-            self._inject_context_to_skillkits()
+        if getattr(self, "tools", None):
+            self.context.set_last_tools(self.tools)
+            # Inject context to toolkits that support it
+            self._inject_context_to_toolkits()
     
-    def _inject_context_to_skillkits(self):
+    def _inject_context_to_toolkits(self):
         """Inject execution context to toolkits that need it (e.g., PlanToolkit)."""
-        if not self.skills or not self.context:
+        if not self.tools or not self.context:
             return
 
-        # Resolve skills to a list of ToolFunction objects
-        if hasattr(self.skills, 'getTools'):
-            skill_list = self.skills.getTools()
-        elif isinstance(self.skills, list) and self.skills and isinstance(self.skills[0], str):
-            current_skillkit = self.context.get_toolkit()
-            if not current_skillkit:
+        # Resolve tools to a list of ToolFunction objects
+        if hasattr(self.tools, 'getTools'):
+            tool_list = self.tools.getTools()
+        elif isinstance(self.tools, list) and self.tools and isinstance(self.tools[0], str):
+            current_toolkit = self.context.get_toolkit()
+            if not current_toolkit:
                 return
-            available_skills = current_skillkit.getTools()
-            owner_names = ToolMatcher.get_owner_toolkits(available_skills)
-            skill_list = [
-                skill for pattern in self.skills
-                for skill in available_skills
-                if ToolMatcher.match_tool(skill, pattern, owner_names=owner_names)
+            available_tools = current_toolkit.getTools()
+            owner_names = ToolMatcher.get_owner_toolkits(available_tools)
+            tool_list = [
+                t for pattern in self.tools
+                for t in available_tools
+                if ToolMatcher.match_tool(t, pattern, owner_names=owner_names)
             ]
-        elif isinstance(self.skills, list):
-            skill_list = self.skills
+        elif isinstance(self.tools, list):
+            tool_list = self.tools
         else:
             return
 
-        # Inject context to each unique skillkit instance
+        # Inject context to each unique toolkit instance
         processed = set()
-        for skill in skill_list:
-            skillkit = getattr(skill, 'owner_toolkit', None)
-            if not skillkit or not hasattr(skillkit, 'setContext'):
+        for tool in tool_list:
+            toolkit = getattr(tool, 'owner_toolkit', None)
+            if not toolkit or not hasattr(toolkit, 'setContext'):
                 continue
-            if id(skillkit) not in processed:
-                skillkit.setContext(self.context)
-                processed.add(id(skillkit))
+            if id(toolkit) not in processed:
+                toolkit.setContext(self.context)
+                processed.add(id(toolkit))
 
     def _resolve_mode(self, kwargs: dict):
         """Resolve exploration mode from kwargs or inherit from context."""
@@ -1714,16 +1714,16 @@ Please reconsider your approach and improve your answer based on the feedback ab
 
     def _setup_system_bucket(self):
         """Rebuild system bucket for multi-turn exploration (reset_for_block may have cleared it)."""
-        skillkit = self.get_toolkit()
+        toolkit = self.get_toolkit()
         system_message = self.strategy.make_system_message(
-            skillkit=skillkit,
+            skillkit=toolkit,
             system_prompt=getattr(self, "system_prompt", "") or "",
             tools_format=self.tools_format,
             context=self.context,
         )
 
-        # Auto-inject Plan orchestration guidance when plan_skillkit is used
-        if self._has_plan_skillkit():
+        # Auto-inject Plan orchestration guidance when plan_toolkit is used
+        if self._has_plan_toolkit():
             plan_guidance = self._get_plan_guidance()
             if plan_guidance:
                 system_message = system_message + "\n\n" + plan_guidance
@@ -1735,15 +1735,15 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 message_role=MessageRole.SYSTEM,
             )
 
-    def _has_plan_skillkit(self) -> bool:
-        """Check if plan_skillkit is included in the current skills."""
-        if not hasattr(self, "skills") or not self.skills:
+    def _has_plan_toolkit(self) -> bool:
+        """Check if plan_toolkit is included in the current tools."""
+        if not hasattr(self, "tools") or not self.tools:
             return False
 
-        # Check if skills list contains plan_skillkit pattern
-        if isinstance(self.skills, list):
-            for pattern in self.skills:
-                if isinstance(pattern, str) and "plan_skillkit" in pattern:
+        # Check if tools list contains plan_toolkit pattern
+        if isinstance(self.tools, list):
+            for pattern in self.tools:
+                if isinstance(pattern, str) and "plan_toolkit" in pattern:
                     return True
 
         return False

@@ -49,7 +49,7 @@ from dolphin.cli.runner.modules.conversation import (
 from dolphin.cli.runner.modules.errors import (
     handle_execution_error,
     extract_root_cause,
-    extract_skill_error_message,
+    extract_tool_error_message,
 )
 
 __all__ = [
@@ -78,5 +78,5 @@ __all__ = [
     # Errors
     'handle_execution_error',
     'extract_root_cause',
-    'extract_skill_error_message',
+    'extract_tool_error_message',
 ]

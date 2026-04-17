@@ -213,3 +213,8 @@ class SkillContentCache(TTLLRUCache):
             max_size: Maximum cache size (default 50 skills)
         """
         super().__init__(ttl_seconds=ttl_seconds, max_size=max_size)
+
+
+# Backward-compatibility aliases
+ToolMetaCache = SkillMetaCache
+ToolContentCache = SkillContentCache
