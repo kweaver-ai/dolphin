@@ -30,15 +30,6 @@ from .skill_validator import (
 )
 from .local_script_executor import execute_skill_script
 from dolphin.sdk.tool.skill_contracts import (
-    BUILTIN_SKILL_LOAD,
-    BUILTIN_SKILL_READ_FILE,
-    BUILTIN_SKILL_EXECUTE_SCRIPT,
-    SKILL_LOAD_DESCRIPTION,
-    SKILL_READ_FILE_DESCRIPTION,
-    SKILL_EXECUTE_SCRIPT_DESCRIPTION,
-    SKILL_LOAD_INPUTS_SCHEMA,
-    SKILL_READ_FILE_INPUTS_SCHEMA,
-    SKILL_EXECUTE_SCRIPT_INPUTS_SCHEMA,
     SKILL_LOAD_OPENAI_SCHEMA,
     SKILL_READ_FILE_OPENAI_SCHEMA,
     SKILL_EXECUTE_SCRIPT_OPENAI_SCHEMA,
@@ -110,7 +101,7 @@ class ResourceToolkit(Toolkit):
 
         try:
             new_config = ResourceSkillConfig.from_dict(
-                {"resource_skills": resource_tools_cfg}
+                {"resource_tools": resource_tools_cfg}
             )
         except Exception as e:
             logger.warning(f"Failed to parse resource_tools config: {e}")
