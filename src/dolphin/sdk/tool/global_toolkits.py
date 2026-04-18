@@ -188,6 +188,7 @@ class GlobalToolkits:
             "plan_toolkit": "dolphin.lib.toolkits.plan_toolkit.PlanToolkit",
             "cognitive": "dolphin.lib.toolkits.cognitive_toolkit.CognitiveToolkit",
             "env_toolkit": "dolphin.lib.toolkits.env_toolkit.EnvToolkit",
+            "resource": "dolphin.lib.toolkits.resource_toolkit.ResourceToolkit",
         }
 
         for toolkit_name, class_path in builtin_toolkits.items():
