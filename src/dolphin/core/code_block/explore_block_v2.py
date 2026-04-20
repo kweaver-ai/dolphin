@@ -12,33 +12,33 @@ from dolphin.core.common.enums import (
     StreamItem,
 )
 from dolphin.core.common.constants import (
-    MAX_SKILL_CALL_TIMES,
-    get_msg_duplicate_skill_call,
+    MAX_TOOL_CALL_TIMES,
+    get_msg_duplicate_tool_call,
 )
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.llm.llm_client import LLMClient
-from dolphin.core.logging.logger import console, console_skill_response, get_logger
-from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
+from dolphin.core.logging.logger import console, console_tool_response, get_logger
+from dolphin.lib.toolkits.cognitive_toolkit import CognitiveToolkit
 from dolphin.core.utils.tools import ToolInterrupt
 from dolphin.core.common.types import SourceType
 
 logger = get_logger("code_block.explore_block_v2")
 
 
-class DeduplicatorSkillCall:
+class DeduplicatorToolCall:
     MAX_DUPLICATE_COUNT = 5
 
     def __init__(self):
         # Optimize performance of duplicate checking using sets
-        self.skillcalls = {}
+        self.toolcalls = {}
         self.call_results = {}
         # Cache the string representation of skill calls to avoid redundant serialization.
         self._call_key_cache = {}
 
     def clear(self):
         """Clear all cached data"""
-        self.skillcalls.clear()
+        self.toolcalls.clear()
         self.call_results.clear()
         self._call_key_cache.clear()
 
@@ -56,7 +56,7 @@ class DeduplicatorSkillCall:
     def add(self, skill_call, result=None):
         """Add skill invocation record"""
         call_key = self._get_call_key(skill_call)
-        self.skillcalls[call_key] = self.skillcalls.get(call_key, 0) + 1
+        self.toolcalls[call_key] = self.toolcalls.get(call_key, 0) + 1
         if result is not None:
             self.call_results[call_key] = result
 
@@ -68,7 +68,7 @@ class DeduplicatorSkillCall:
         if self._should_allow_retry(skill_call, call_key):
             return False
 
-        return self.skillcalls.get(call_key, 0) >= self.MAX_DUPLICATE_COUNT
+        return self.toolcalls.get(call_key, 0) >= self.MAX_DUPLICATE_COUNT
 
     def _should_allow_retry(self, skill_call, call_key):
         """Determine whether to allow retrying a skill invocation"""
@@ -106,14 +106,14 @@ class ExploreBlockV2(BasicCodeBlock):
         self.llm_client = LLMClient(self.context)
         self.debug_infos = debug_infos
         self.times = 0
-        self.deduplicator_skillcall = DeduplicatorSkillCall()
+        self.deduplicator_toolcall = DeduplicatorToolCall()
         # Tools description format: "concise", "medium", or "detailed"
         self.tools_format = tools_format
         # Mark whether exploration should be stopped (set to True when there is no tool call)
         self.should_stop_exploration = False
         # Whether to enable skill call deduplication (consistent with the semantics of ExploreBlock, enabled by default)
-        self.enable_skill_deduplicator = getattr(
-            self, "enable_skill_deduplicator", True
+        self.enable_tool_deduplicator = getattr(
+            self, "enable_tool_deduplicator", True
         )
 
     async def execute(
@@ -178,7 +178,7 @@ class ExploreBlockV2(BasicCodeBlock):
 
         Includes:
         - Goals and tool descriptions
-        - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
+        - Metadata prompt from skillkits (e.g., ResourceToolkit Level 1)
         - User-provided system prompt
         """
         role_format = """
@@ -198,7 +198,7 @@ class ExploreBlockV2(BasicCodeBlock):
 {system_prompt}
         """
 
-        skillkit = self.get_skillkit()
+        skillkit = self.get_toolkit()
         if skillkit is not None and not skillkit.isEmpty():
             # Use the configured tools format (concise/medium/detailed)
             tools_description = skillkit.getFormattedToolsDescription(self.tools_format)
@@ -208,9 +208,9 @@ class ExploreBlockV2(BasicCodeBlock):
                 r"{tools}", "用户没有配置工具，你只能自己回答问题！"
             )
 
-        # Inject metadata prompt from skillkits via skill.owner_skillkit
-        from dolphin.core.skill.skillkit import Skillkit
-        metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
+        # Inject metadata prompt from skillkits via skill.owner_toolkit
+        from dolphin.core.tool.toolkit import Toolkit
+        metadata_prompt = Toolkit.collect_metadata_from_tools(skillkit)
         role_format = role_format.replace(r"{metadata_prompt}", metadata_prompt)
 
         # Replace user system prompt
@@ -341,15 +341,15 @@ class ExploreBlockV2(BasicCodeBlock):
                         tool_call.function.arguments = json.dumps(function_params_json, ensure_ascii=False)
 
         # *** FIX: Don't call recorder.update() here during resume ***
-        # skill_run() will create the stage with the correct saved_stage_id
+        # tool_run() will create the stage with the correct saved_stage_id
         # Calling update() here would create an extra stage with a new ID
         # (
         #     self.recorder.update(
         #         stage=TypeStage.SKILL,
         #         source_type=SourceType.EXPLORE,
-        #         skill_name=function_name,
-        #         skill_type=self.context.get_skill_type(function_name),
-        #         skill_args=function_params_json,
+        #         tool_name=function_name,
+        #         tool_type=self.context.get_tool_type(function_name),
+        #         tool_args=function_params_json,
         #     )
         #     if self.recorder
         #     else None
@@ -388,9 +388,9 @@ class ExploreBlockV2(BasicCodeBlock):
                     item={"answer": skip_response, "block_answer": skip_response},
                     stage=TypeStage.SKILL,
                     source_type=SourceType.EXPLORE,
-                    skill_name=function_name,
-                    skill_type=self.context.get_skill_type(function_name),
-                    skill_args=function_params_json,
+                    tool_name=function_name,
+                    tool_type=self.context.get_tool_type(function_name),
+                    tool_args=function_params_json,
                     is_completed=True,
                     is_skipped=True,
                 )
@@ -413,8 +413,8 @@ class ExploreBlockV2(BasicCodeBlock):
             props = {"intervention": False, "saved_stage_id": saved_stage_id}
             have_answer = False
 
-            async for resp in self.skill_run(
-                skill_name=function_name,
+            async for resp in self.tool_run(
+                tool_name=function_name,
                 source_type=SourceType.EXPLORE,
                 skill_params_json=function_params_json,
                 props=props,
@@ -435,9 +435,9 @@ class ExploreBlockV2(BasicCodeBlock):
                             item={"answer": resp, "block_answer": resp},
                             stage=TypeStage.SKILL,
                             source_type=SourceType.EXPLORE,
-                            skill_name=function_name,
-                            skill_type=self.context.get_skill_type(function_name),
-                            skill_args=function_params_json,
+                            tool_name=function_name,
+                            tool_type=self.context.get_tool_type(function_name),
+                            tool_args=function_params_json,
                         )
                         if self.recorder
                         else None
@@ -472,7 +472,7 @@ class ExploreBlockV2(BasicCodeBlock):
         yield [return_answer]
 
         # append tool response message to maintain consistent message flow
-        tool_response, metadata = self._process_skill_result_with_hook(function_name)
+        tool_response, metadata = self._process_tool_result_with_hook(function_name)
 
         if tool_response:
             # Extract tool_call_id from the restored messages
@@ -491,7 +491,7 @@ class ExploreBlockV2(BasicCodeBlock):
             "messages": llm_messages,
             "model": self.model,
             "no_cache": no_cache,
-            "tools": self.get_skillkit().getSkillsSchema(),
+            "tools": self.get_toolkit().getToolsSchema(),
         }
         # propagate tool_choice if provided in params/block
         if getattr(self, "tool_choice", None):
@@ -532,9 +532,9 @@ class ExploreBlockV2(BasicCodeBlock):
 
         # Removed extra newline - renderer.stop() already handles this
 
-        if self.times >= MAX_SKILL_CALL_TIMES:
+        if self.times >= MAX_TOOL_CALL_TIMES:
             self.context.warn(
-                f"max skill call times reached {MAX_SKILL_CALL_TIMES} times, answer[{stream_item.to_dict()}]"
+                f"max skill call times reached {MAX_TOOL_CALL_TIMES} times, answer[{stream_item.to_dict()}]"
             )
         else:
             self.times += 1
@@ -579,14 +579,14 @@ class ExploreBlockV2(BasicCodeBlock):
         ]
 
         tool_call = stream_item.get_tool_call()
-        # When enable_skill_deduplicator is False, disable the deduplication logic and always treat as non-duplicate calls.
-        if (not getattr(self, "enable_skill_deduplicator", True)) or (
-            not self.deduplicator_skillcall.is_duplicate(tool_call)
+        # When enable_tool_deduplicator is False, disable the deduplication logic and always treat as non-duplicate calls.
+        if (not getattr(self, "enable_tool_deduplicator", True)) or (
+            not self.deduplicator_toolcall.is_duplicate(tool_call)
         ):
             self._append_tool_call_message(
                 stream_item, tool_call_openai_format
             )
-            self.deduplicator_skillcall.add(tool_call)
+            self.deduplicator_toolcall.add(tool_call)
 
             async for ret in self._execute_tool_call(stream_item, tool_call_id):
                 yield ret
@@ -598,38 +598,38 @@ class ExploreBlockV2(BasicCodeBlock):
         intervention_tmp_key = "intervention_explore_block_vars"
 
         try:
-            # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
+            # Save intervention vars (stage_id will be filled by tool_run after creating the stage)
             intervention_vars = {
                 "prompt": self.context.get_messages().get_messages_as_dict(),
                 "tool_name": stream_item.tool_name,
                 "cur_llm_stream_answer": stream_item.answer,
                 "all_answer": stream_item.answer,
-                "stage_id": None,  # Will be updated by skill_run() after stage creation
+                "stage_id": None,  # Will be updated by tool_run() after stage creation
             }
 
             self.context.set_variable(intervention_tmp_key, intervention_vars)
 
-            async for resp in self.skill_run(
+            async for resp in self.tool_run(
                 source_type=SourceType.EXPLORE,
-                skill_name=stream_item.tool_name,
+                tool_name=stream_item.tool_name,
                 skill_params_json=(
                     stream_item.tool_args if stream_item.tool_args else {}
                 ),
             ):
                 yield self.recorder.get_progress_answers() if self.recorder else None
 
-            self.deduplicator_skillcall.add(
+            self.deduplicator_toolcall.add(
                 stream_item.get_tool_call(),
                 self.recorder.get_answer() if self.recorder else None,
             )
 
             # Add tool response message
-            tool_response, metadata = self._process_skill_result_with_hook(stream_item.tool_name)
+            tool_response, metadata = self._process_tool_result_with_hook(stream_item.tool_name)
 
             answer_content: str = (
                 tool_response
                 if tool_response is not None
-                and not CognitiveSkillkit.is_cognitive_skill(stream_item.tool_name)
+                and not CognitiveToolkit.is_cognitive_tool(stream_item.tool_name)
                 else ""
             )
 
@@ -653,7 +653,7 @@ class ExploreBlockV2(BasicCodeBlock):
 
     async def _handle_duplicate_tool_call(self, tool_call, stream_item):
         """Handling Duplicate Tool Calls"""
-        message = get_msg_duplicate_skill_call()
+        message = get_msg_duplicate_tool_call()
         self._append_assistant_message(message)
 
         (
@@ -666,7 +666,7 @@ class ExploreBlockV2(BasicCodeBlock):
             else None
         )
         self.context.warn(
-            f"Duplicate skill call detected: {self.deduplicator_skillcall._get_call_key(tool_call)}"
+            f"Duplicate skill call detected: {self.deduplicator_toolcall._get_call_key(tool_call)}"
         )
 
     def _handle_tool_interrupt(self, e: Exception, tool_name: str):
@@ -694,17 +694,17 @@ class ExploreBlockV2(BasicCodeBlock):
             bool: True if exploration should continue, False otherwise
         """
         # 1. If the maximum number of calls has been reached, stop exploring
-        if self.times >= MAX_SKILL_CALL_TIMES:
+        if self.times >= MAX_TOOL_CALL_TIMES:
             return False
 
         # 2. Check for duplicate calls (effective only when skill deduplicator is enabled)
-        if getattr(self, "enable_skill_deduplicator", True):
-            if self.deduplicator_skillcall.skillcalls:
-                recent_calls = list(self.deduplicator_skillcall.skillcalls.values())
+        if getattr(self, "enable_tool_deduplicator", True):
+            if self.deduplicator_toolcall.toolcalls:
+                recent_calls = list(self.deduplicator_toolcall.toolcalls.values())
                 if (
                     recent_calls
                     and max(recent_calls)
-                    >= DeduplicatorSkillCall.MAX_DUPLICATE_COUNT
+                    >= DeduplicatorToolCall.MAX_DUPLICATE_COUNT
                 ):
                     return False
 
@@ -714,8 +714,8 @@ class ExploreBlockV2(BasicCodeBlock):
 
         return True
 
-    def _process_skill_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
-        """Handle skill results using skillkit_hook
+    def _process_tool_result_with_hook(self, skill_name: str) -> tuple[str | None, dict]:
+        """Handle skill results using toolkit_hook
 
         Args:
             skill_name: Name of the skill
@@ -724,22 +724,22 @@ class ExploreBlockV2(BasicCodeBlock):
             tuple[str | None, dict]: (Processed result, metadata)
         """
         # Get skill object
-        skill = self.context.get_skill(skill_name)
+        skill = self.context.get_tool(skill_name)
         if not skill:
-            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
-            skill = SystemFunctions.getSkill(skill_name)
+            from dolphin.lib.toolkits.system_toolkit import SystemFunctions
+            skill = SystemFunctions.getTool(skill_name)
 
         # Get the last stage as reference
         last_stage = self.recorder.getProgress().get_last_stage()
         reference = last_stage.get_raw_output() if last_stage else None
-        # Handle results using skillkit_hook (handles dynamic tools automatically)
-        if reference and self.skillkit_hook and self.context.has_skillkit_hook():
+        # Handle results using toolkit_hook (handles dynamic tools automatically)
+        if reference and self.toolkit_hook and self.context.has_toolkit_hook():
             # Use new hook to get context-optimized content
-            content, metadata = self.skillkit_hook.on_before_send_to_context(
+            content, metadata = self.toolkit_hook.on_before_send_to_context(
                 reference_id=reference.reference_id,
-                skill=skill,
-                skillkit_name=type(skill.owner_skillkit).__name__ if skill.owner_skillkit else "",
-                resource_skill_path=getattr(skill, 'resource_skill_path', None),
+                tool=skill,
+                toolkit_name=type(skill.owner_toolkit).__name__ if skill.owner_toolkit else "",
+                resource_tool_path=getattr(skill, 'resource_tool_path', None),
             )
             return content, metadata
         

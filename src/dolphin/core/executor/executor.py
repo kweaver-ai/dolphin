@@ -168,7 +168,7 @@ class Executor:
             counter_key = f"{stage_name}_time"
             stage_index = status.get(counter_key, 0)
 
-            tools = self.context.skillkit.getSkillsSchema()
+            tools = self.context.toolkit.getToolsSchema()
 
             # Get model name from context (set by ExploreBlock during llm_chat_stream)
             # Returns None if no model has been used yet in this session

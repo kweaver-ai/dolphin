@@ -14,7 +14,7 @@ from dolphin.core.config.global_config import LLMInstanceConfig
 from dolphin.core.common.constants import (
     MSG_CONTINUOUS_CONTENT,
     TOOL_CALL_ID_PREFIX,
-    is_msg_duplicate_skill_call,
+    is_msg_duplicate_tool_call,
 )
 from dolphin.core.context.context import Context
 from dolphin.core.logging.logger import get_logger
@@ -227,7 +227,7 @@ class LLM:
         if continous_content:
             to_be_added = (
                 MSG_CONTINUOUS_CONTENT
-                if is_msg_duplicate_skill_call(continous_content)
+                if is_msg_duplicate_tool_call(continous_content)
                 else ""
             )
             if messages[-1].role == MessageRole.ASSISTANT:

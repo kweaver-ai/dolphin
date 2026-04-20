@@ -105,8 +105,8 @@ def validateArgs(args: Args) -> None:
         console(f"Error: Folder not found: {args.folder}")
         sys.exit(1)
     
-    if args.skillFolder and not os.path.exists(args.skillFolder):
-        console(f"Error: Skill folder not found: {args.skillFolder}")
+    if args.toolFolder and not os.path.exists(args.toolFolder):
+        console(f"Error: Tool folder not found: {args.toolFolder}")
         sys.exit(1)
 
 

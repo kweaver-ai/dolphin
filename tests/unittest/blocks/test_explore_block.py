@@ -18,9 +18,9 @@ from dolphin.core.code_block.explore_strategy import (
     ToolCallStrategy,
     ToolCall,
 )
-from dolphin.core.code_block.skill_call_deduplicator import (
-    DefaultSkillCallDeduplicator,
-    NoOpSkillCallDeduplicator,
+from dolphin.core.code_block.tool_call_deduplicator import (
+    DefaultToolCallDeduplicator,
+    NoOpToolCallDeduplicator,
 )
 from dolphin.core.common.enums import Messages, StreamItem, MessageRole
 from dolphin.core.common.exceptions import UserInterrupt
@@ -29,12 +29,12 @@ from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.context_engineer.core.context_manager import ContextManager
 from dolphin.core.config.global_config import GlobalConfig
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skillset import Skillset
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.toolset import ToolSet
 
 
 def _async_gen(fn):
-    """Wrap an async function into an async generator (for mocking skill_run)."""
+    """Wrap an async function into an async generator (for mocking tool_run)."""
     async def wrapper(*args, **kwargs):
         await fn(*args, **kwargs)
         return
@@ -64,8 +64,8 @@ def mock_execute_sql(sql: str, datasource: str):
     return f"Executing: {sql} on {datasource}"
 
 
-class MockSkillkit:
-    """模拟的 Skillkit 类"""
+class MockToolkit:
+    """模拟的 Toolkit 类"""
 
     def __init__(self, skills=None):
         self._skills = skills or {}
@@ -74,7 +74,7 @@ class MockSkillkit:
     def isEmpty(self):
         return len(self._skills) == 0
 
-    def getSkillNames(self):
+    def getToolNames(self):
         return self._skill_names
 
     def getSchemas(self):
@@ -83,7 +83,7 @@ class MockSkillkit:
     def getFormattedToolsDescription(self, format_type="medium"):
         return f"[{format_type}] mock_search: 搜索工具\nmock_execute_sql: SQL执行工具"
 
-    def getSkillsSchema(self):
+    def getToolsSchema(self):
         return [
             {
                 "type": "function",
@@ -118,7 +118,7 @@ class TestExploreBlockMode(unittest.TestCase):
         self.context = Context(
             config=self.global_config, context_manager=self.context_manager
         )
-        self.context._calc_all_skills()
+        self.context._calc_all_tools()
 
     def test_default_mode_is_tool_call(self):
         """测试默认模式为 tool_call"""
@@ -132,24 +132,24 @@ class TestExploreBlockMode(unittest.TestCase):
         self.assertEqual(block.tools_format, "full")
 
 
-class TestDefaultSkillCallDeduplicator(unittest.TestCase):
-    """DefaultSkillCallDeduplicator behavior tests."""
+class TestDefaultToolCallDeduplicator(unittest.TestCase):
+    """DefaultToolCallDeduplicator behavior tests."""
 
     def test_allows_repeated_check_progress_calls(self):
         """_check_progress is a polling tool and should not be treated as duplicate."""
-        dedup = DefaultSkillCallDeduplicator()
+        dedup = DefaultToolCallDeduplicator()
         call = ("_check_progress", {})
 
-        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 2):
+        for _ in range(DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT + 2):
             assert dedup.is_duplicate(call) is False
             dedup.add(call)
 
     def test_allows_repeated_wait_calls(self):
         """_wait is a polling tool and should not be treated as duplicate."""
-        dedup = DefaultSkillCallDeduplicator()
+        dedup = DefaultToolCallDeduplicator()
         call = ("_wait", {"seconds": 5})
 
-        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 2):
+        for _ in range(DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT + 2):
             assert dedup.is_duplicate(call) is False
             dedup.add(call)
 
@@ -162,19 +162,19 @@ class TestExploreBlockShouldContinueExplore(unittest.TestCase):
         context_manager = ContextManager()
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
-        context._calc_all_skills()
+        context._calc_all_tools()
 
         block = ExploreBlock(context=context)
         block.times = 0
         block.should_stop_exploration = False
 
         dedup = block.strategy.get_deduplicator()
-        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
+        for _ in range(DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
             dedup.add(("_check_progress", {}))
 
         assert asyncio.run(block._should_continue_explore()) is True
 
-        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
+        for _ in range(DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT + 1):
             dedup.add(("mock_search", {"query": "q"}))
 
         assert asyncio.run(block._should_continue_explore()) is False
@@ -189,7 +189,7 @@ class TestExploreBlockToolResponseOnce(unittest.TestCase):
         self.context = Context(
             config=self.global_config, context_manager=self.context_manager
         )
-        self.context._calc_all_skills()
+        self.context._calc_all_tools()
 
     def test_execute_tool_call_appends_tool_response_once_on_success(self):
         block = ExploreBlock(context=self.context)
@@ -199,15 +199,15 @@ class TestExploreBlockToolResponseOnce(unittest.TestCase):
         block.recorder.get_progress_answers.return_value = {}
         block.recorder.get_answer.return_value = "ok"
 
-        # 伪造 skill_run（必须是 async generator）
-        async def mock_skill_run(*args, **kwargs):
+        # 伪造 tool_run（必须是 async generator）
+        async def mock_tool_run(*args, **kwargs):
             if False:  # pragma: no cover
                 yield None
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
-        # 避免依赖 skillkit_hook / raw_output，直接返回固定 tool 输出
-        block._process_skill_result_with_hook = MagicMock(return_value=("hello", {}))
+        # 避免依赖 toolkit_hook / raw_output，直接返回固定 tool 输出
+        block._process_tool_result_with_hook = MagicMock(return_value=("hello", {}))
 
         # 截获追加行为，验证只追加一次
         block.strategy.get_deduplicator = MagicMock(return_value=MagicMock())
@@ -235,7 +235,7 @@ class TestPromptStrategy(unittest.TestCase):
 
     def setUp(self):
         self.strategy = PromptStrategy()
-        self.skillkit = MockSkillkit({"mock_search": True, "mock_execute_sql": True})
+        self.skillkit = MockToolkit({"mock_search": True, "mock_execute_sql": True})
 
     def test_make_system_message_with_skills(self):
         """测试有技能时的系统消息生成"""
@@ -250,9 +250,9 @@ class TestPromptStrategy(unittest.TestCase):
 
     def test_make_system_message_without_skills(self):
         """测试无技能时的系统消息生成"""
-        empty_skillkit = MockSkillkit()
+        empty_toolkit = MockToolkit()
         system_msg = self.strategy.make_system_message(
-            skillkit=empty_skillkit, system_prompt="用户提示", tools_format="medium"
+            skillkit=empty_toolkit, system_prompt="用户提示", tools_format="medium"
         )
         self.assertIn("用户提示", system_msg)
 
@@ -295,7 +295,7 @@ class TestPromptStrategy(unittest.TestCase):
         """测试有工具调用标记时的检测"""
         stream_item = self._create_stream_item('我来搜索一下 =>#mock_search: {"query": "test"}')
         context = MagicMock()
-        context.get_skillkit.return_value = self.skillkit
+        context.get_toolkit.return_value = self.skillkit
         result = self.strategy.detect_tool_call(stream_item, context)
         self.assertIsNotNone(result)
         self.assertIsInstance(result, ToolCall)
@@ -306,7 +306,7 @@ class TestPromptStrategy(unittest.TestCase):
         """测试工具名不存在时返回 None"""
         stream_item = self._create_stream_item('调用工具 =>#nonexistent_skill: {"param": "value"}')
         context = MagicMock()
-        context.get_skillkit.return_value = self.skillkit
+        context.get_toolkit.return_value = self.skillkit
         result = self.strategy.detect_tool_call(stream_item, context)
         self.assertIsNone(result)
 
@@ -314,7 +314,7 @@ class TestPromptStrategy(unittest.TestCase):
         """测试存在有效工具调用时返回 True"""
         stream_item = self._create_stream_item('=>#mock_search: {"query": "test"}')
         context = MagicMock()
-        context.get_skillkit.return_value = self.skillkit
+        context.get_toolkit.return_value = self.skillkit
         result = self.strategy.has_valid_tool_call(stream_item, context)
         self.assertTrue(result)
 
@@ -329,7 +329,7 @@ class TestPromptStrategy(unittest.TestCase):
         """测试技能无效时返回 False"""
         stream_item = self._create_stream_item('=>#invalid_skill: {"param": "value"}')
         context = MagicMock()
-        context.get_skillkit.return_value = self.skillkit
+        context.get_toolkit.return_value = self.skillkit
         result = self.strategy.has_valid_tool_call(stream_item, context)
         self.assertFalse(result)
 
@@ -353,7 +353,7 @@ class TestToolCallStrategy(unittest.TestCase):
 
     def setUp(self):
         self.strategy = ToolCallStrategy(tools_format="medium")
-        self.skillkit = MockSkillkit({"mock_search": True})
+        self.skillkit = MockToolkit({"mock_search": True})
 
     def test_make_system_message_with_skills(self):
         """测试有技能时的系统消息生成"""
@@ -408,14 +408,14 @@ class TestToolCallStrategy(unittest.TestCase):
         self.assertIn("tool_choice", params)
         self.assertEqual(params["tool_choice"], "auto")
 
-    def test_get_llm_params_empty_skillkit(self):
+    def test_get_llm_params_empty_toolkit(self):
         """测试空 skillkit 时 tools 为空列表"""
-        empty_skillkit = MockSkillkit()
+        empty_toolkit = MockToolkit()
         messages = Messages()
         params = self.strategy.get_llm_params(
             messages=messages,
             model="gpt-4",
-            skillkit=empty_skillkit,
+            skillkit=empty_toolkit,
         )
         self.assertEqual(params["tools"], [])
 
@@ -506,14 +506,14 @@ class TestExploreStrategyDeduplicator(unittest.TestCase):
         strategy = PromptStrategy()
         deduplicator = strategy.get_deduplicator()
         self.assertIsNotNone(deduplicator)
-        self.assertIsInstance(deduplicator, DefaultSkillCallDeduplicator)
+        self.assertIsInstance(deduplicator, DefaultToolCallDeduplicator)
 
     def test_tool_call_strategy_has_deduplicator(self):
         """测试 ToolCallStrategy 有重复检测器"""
         strategy = ToolCallStrategy()
         deduplicator = strategy.get_deduplicator()
         self.assertIsNotNone(deduplicator)
-        self.assertIsInstance(deduplicator, DefaultSkillCallDeduplicator)
+        self.assertIsInstance(deduplicator, DefaultToolCallDeduplicator)
 
     def test_deduplicator_toggle_switches_to_noop(self):
         """测试 set_deduplicator_enabled(False) 使用空实现去重器"""
@@ -521,12 +521,12 @@ class TestExploreStrategyDeduplicator(unittest.TestCase):
 
         # 默认使用默认去重器
         deduplicator_default = strategy.get_deduplicator()
-        self.assertIsInstance(deduplicator_default, DefaultSkillCallDeduplicator)
+        self.assertIsInstance(deduplicator_default, DefaultToolCallDeduplicator)
 
-        # 关闭去重器后应返回 NoOpSkillCallDeduplicator
+        # 关闭去重器后应返回 NoOpToolCallDeduplicator
         strategy.set_deduplicator_enabled(False)
         deduplicator_noop = strategy.get_deduplicator()
-        self.assertIsInstance(deduplicator_noop, NoOpSkillCallDeduplicator)
+        self.assertIsInstance(deduplicator_noop, NoOpToolCallDeduplicator)
 
         # NoOp 实现应永远不判定为重复
         skill_call = ("mock_search", {"query": "test"})
@@ -612,8 +612,8 @@ class TestPromptModeToolResponseFormat(unittest.TestCase):
         self.context = Context(
             config=self.global_config, context_manager=self.context_manager
         )
-        self.context._calc_all_skills()
-        self.skillkit = MockSkillkit({"_date": True, "_write_file": True})
+        self.context._calc_all_tools()
+        self.skillkit = MockToolkit({"_date": True, "_write_file": True})
 
     def test_prompt_mode_appends_tool_call_message_as_plain_text(self):
         """
@@ -761,7 +761,7 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
         context_manager = ContextManager()
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
-        context._calc_all_skills()
+        context._calc_all_tools()
 
         block = ExploreBlock(context=context)
         block.recorder = MagicMock()
@@ -769,18 +769,18 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
         block.recorder.get_answer.return_value = "ok"
         block.strategy.get_deduplicator = MagicMock(return_value=MagicMock())
         block.strategy.append_tool_response_message = MagicMock()
-        block._process_skill_result_with_hook = MagicMock(return_value=("result", {}))
+        block._process_tool_result_with_hook = MagicMock(return_value=("result", {}))
         return block
 
     def test_finally_block_adds_response_on_generic_exception(self):
-        """Generic exception in skill_run is caught and tool response is still added."""
+        """Generic exception in tool_run is caught and tool response is still added."""
         block = self._build_block()
 
         @_async_gen
-        async def mock_skill_run(*args, **kwargs):
+        async def mock_tool_run(*args, **kwargs):
             raise RuntimeError("network error")
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
         stream_item = StreamItem()
         stream_item.answer = "calling tool"
@@ -806,10 +806,10 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
         block = self._build_block()
 
         @_async_gen
-        async def mock_skill_run(*args, **kwargs):
+        async def mock_tool_run(*args, **kwargs):
             raise ToolInterrupt("silent rounds exceeded")
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
         stream_item = StreamItem()
         stream_item.answer = "calling tool"
@@ -864,13 +864,13 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         context_manager = ContextManager()
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
-        context._calc_all_skills()
+        context._calc_all_tools()
 
         block = ExploreBlock(context=context)
         block.recorder = MagicMock()
         block.recorder.get_progress_answers.return_value = {}
         block.recorder.get_answer.return_value = "ok"
-        block._process_skill_result_with_hook = MagicMock(return_value=("result", {}))
+        block._process_tool_result_with_hook = MagicMock(return_value=("result", {}))
         return block
 
     def test_all_tools_succeed(self):
@@ -880,10 +880,10 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         call_log = []
 
         @_async_gen
-        async def mock_skill_run(*args, **kwargs):
-            call_log.append(kwargs.get("skill_name"))
+        async def mock_tool_run(*args, **kwargs):
+            call_log.append(kwargs.get("tool_name"))
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
         stream_item = StreamItem()
         stream_item.answer = "call tools"
@@ -907,10 +907,10 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         call_log = []
 
         @_async_gen
-        async def mock_skill_run(*args, **kwargs):
-            call_log.append(kwargs.get("skill_name"))
+        async def mock_tool_run(*args, **kwargs):
+            call_log.append(kwargs.get("tool_name"))
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
         stream_item = StreamItem()
         stream_item.answer = "call tools"
@@ -942,15 +942,15 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         call_log = []
 
         @_async_gen
-        async def mock_skill_run(*args, **kwargs):
-            call_log.append(kwargs.get("skill_name"))
+        async def mock_tool_run(*args, **kwargs):
+            call_log.append(kwargs.get("tool_name"))
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
         # Pre-fill the deduplicator so the next identical call exceeds threshold
         dedup = block.strategy.get_deduplicator()
         skill_call_key = ("_search", {"q": "test"})
-        for _ in range(DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT):
+        for _ in range(DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT):
             dedup.add(skill_call_key)
 
         stream_item = StreamItem()
@@ -983,13 +983,13 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         call_count = 0
 
         @_async_gen
-        async def mock_skill_run(*args, **kwargs):
+        async def mock_tool_run(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            if kwargs.get("skill_name") == "_tool_a":
+            if kwargs.get("tool_name") == "_tool_a":
                 raise ToolInterrupt("limit reached")
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
         stream_item = StreamItem()
         stream_item.answer = "call tools"
@@ -1025,13 +1025,13 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         call_log = []
 
         @_async_gen
-        async def mock_skill_run(*args, **kwargs):
-            name = kwargs.get("skill_name")
+        async def mock_tool_run(*args, **kwargs):
+            name = kwargs.get("tool_name")
             call_log.append(name)
             if name == "_tool_a":
                 raise ValueError("non-critical error")
 
-        block.skill_run = mock_skill_run
+        block.tool_run = mock_tool_run
 
         stream_item = StreamItem()
         stream_item.answer = "call tools"
@@ -1069,7 +1069,7 @@ class TestExploreBlockModeFromDPHSyntax(unittest.TestCase):
         self.context = Context(
             config=self.global_config, context_manager=self.context_manager
         )
-        self.context._calc_all_skills()
+        self.context._calc_all_tools()
 
     def test_mode_tool_call_from_dph_syntax(self):
         """
@@ -1201,7 +1201,7 @@ class TestExploreBlockModeConsistency(unittest.TestCase):
         self.context = Context(
             config=self.global_config, context_manager=self.context_manager
         )
-        self.context._calc_all_skills()
+        self.context._calc_all_tools()
 
     def test_dph_mode_overrides_default(self):
         """
@@ -1237,7 +1237,7 @@ class TestExploreBlockModeConsistency(unittest.TestCase):
 
 
 class TestExploreBlockDeduplicatorParamParsing(unittest.TestCase):
-    """Test enable_skill_deduplicator param parsing."""
+    """Test enable_tool_deduplicator param parsing."""
 
     def setUp(self):
         from dolphin.core.common.enums import CategoryBlock
@@ -1248,16 +1248,16 @@ class TestExploreBlockDeduplicatorParamParsing(unittest.TestCase):
         self.context = Context(
             config=self.global_config, context_manager=self.context_manager
         )
-        self.context._calc_all_skills()
+        self.context._calc_all_tools()
 
-    def test_enable_skill_deduplicator_false_string_is_parsed_as_bool_false(self):
+    def test_enable_tool_deduplicator_false_string_is_parsed_as_bool_false(self):
         """DPH string 'false' should disable the deduplicator."""
         block = ExploreBlock(context=self.context)
-        content = "/explore/(enable_skill_deduplicator=false) 问题 -> result"
+        content = "/explore/(enable_tool_deduplicator=false) 问题 -> result"
         block.parse_block_content(
             content, category=self.CategoryBlock.EXPLORE, replace_variables=False
         )
-        self.assertIs(block.enable_skill_deduplicator, False)
+        self.assertIs(block.enable_tool_deduplicator, False)
 
 
 class TestExploreBlockExecModeParsing(unittest.TestCase):
@@ -1271,7 +1271,7 @@ class TestExploreBlockExecModeParsing(unittest.TestCase):
         self.context = Context(
             config=self.global_config, context_manager=self.context_manager
         )
-        self.context._calc_all_skills()
+        self.context._calc_all_tools()
 
     def test_exec_mode_seq_parsing(self):
         """Test 'seq' maps to 'sequential'."""
@@ -1305,7 +1305,7 @@ class TestContinueExplorationErrorRecovery(unittest.TestCase):
         """Create a minimal context for ExploreBlock unit tests."""
         context_manager = ContextManager()
         context = Context(config=GlobalConfig(), context_manager=context_manager)
-        context._calc_all_skills()
+        context._calc_all_tools()
         return context
 
     def _build_block_for_stream_error_test(self) -> ExploreBlock:
@@ -1317,7 +1317,7 @@ class TestContinueExplorationErrorRecovery(unittest.TestCase):
         block.recorder = MagicMock()
         block.recorder.get_progress_answers.return_value = {"_progress": []}
         block.recorder.get_answer.return_value = "final answer"
-        block.get_skillkit = MagicMock(return_value=None)
+        block.get_toolkit = MagicMock(return_value=None)
         block.strategy.has_valid_tool_call = MagicMock(return_value=False)
         return block
 
@@ -1604,7 +1604,7 @@ class TestExploreInitializationCompression(unittest.TestCase):
         """Initial execute should compress long-lived buckets before the first LLM call."""
         context_manager = ContextManager()
         context = Context(config=GlobalConfig(), context_manager=context_manager)
-        context._calc_all_skills()
+        context._calc_all_tools()
 
         block = ExploreBlock(context=context)
         block.history = True

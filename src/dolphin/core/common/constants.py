@@ -44,7 +44,7 @@ KEY_PENDING_TURN = "_pending_turn"
 # This is consumed by resume flow and should not be persisted as a user variable.
 KEY_USER_INTERRUPT_INPUT = "__user_interrupt_input__"
 
-MSG_DUPLICATE_SKILL_CALLS = [
+MSG_DUPLICATE_TOOL_CALLS = [
     "发现工具重复调用，请检查历史记录，重新思考问题、解决进展及下面计划，我的思考如下:",
     "我发现存在重复调用的情况，重新思考吧，我新的思考如下：",
     "duplicated skillcall, need to change my mind ...",
@@ -59,16 +59,16 @@ MSG_DUPLICATE_SKILL_CALLS = [
 ]
 
 
-def get_msg_duplicate_skill_call():
-    return MSG_DUPLICATE_SKILL_CALLS[
-        random.randint(0, len(MSG_DUPLICATE_SKILL_CALLS) - 1)
+def get_msg_duplicate_tool_call():
+    return MSG_DUPLICATE_TOOL_CALLS[
+        random.randint(0, len(MSG_DUPLICATE_TOOL_CALLS) - 1)
     ]
 
 
-def is_msg_duplicate_skill_call(msg: str):
+def is_msg_duplicate_tool_call(msg: str):
     return any(
-        msg in msg_duplicate_skill_call
-        for msg_duplicate_skill_call in MSG_DUPLICATE_SKILL_CALLS
+        msg in msg_duplicate_tool_call
+        for msg_duplicate_tool_call in MSG_DUPLICATE_TOOL_CALLS
     )
 
 
@@ -155,7 +155,7 @@ SEARCH_RETRY_COUNT = 2  # number of retries for failed search API calls
 # Upper bound for tool calls in a single exploration turn.
 # Production sessions rarely exceed 50; 300 provides ample headroom
 # while catching runaway loops before they exhaust context or tokens.
-MAX_SKILL_CALL_TIMES = 300
+MAX_TOOL_CALL_TIMES = 300
 
 # Plan orchestration tools (used for task management in plan mode)
 # These tools should be excluded from subtask contexts to prevent infinite recursion.

@@ -12,7 +12,7 @@ Dolphin Core - 核心运行时引擎（内核态）
 - 协程调度（Coroutine）
 - 代码块执行（Code Block）
 - LLM 调用抽象层
-- Skill 核心（Skillkit、skill_function、skill_matcher）
+- Tool 核心（Toolkit、tool_function、tool_matcher）
 - 轨迹记录（Trajectory）
 - Agent 核心定义（BaseAgent、AgentState）
 - Runtime 核心（RuntimeInstance、RuntimeGraph）
@@ -20,6 +20,7 @@ Dolphin Core - 核心运行时引擎（内核态）
 依赖规则：
 - dolphin.core 无内部依赖（仅依赖第三方库）
 """
+import warnings
 
 # Context
 from dolphin.core.context.context import Context
@@ -39,11 +40,59 @@ from dolphin.core.runtime.runtime_graph import RuntimeGraph
 from dolphin.core.agent.base_agent import BaseAgent
 from dolphin.core.agent.agent_state import AgentState
 
-# Skill
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skillset import Skillset
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skill_matcher import SkillMatcher
+# Tool
+from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.tool.toolset import ToolSet
+from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.tool.tool_matcher import ToolMatcher
+
+# Backward-compatibility aliases (deprecated)
+class Skillkit(Toolkit):
+    """Deprecated compatibility wrapper for Toolkit."""
+
+    def getSkills(self):
+        """Deprecated alias for getTools()."""
+        warnings.warn(
+            "Skillkit.getSkills() is deprecated, use Toolkit.getTools() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.getTools()
+
+
+class Skillset(ToolSet):
+    """Deprecated compatibility wrapper for ToolSet."""
+
+    def addSkill(self, skill: ToolFunction):
+        """Deprecated alias for addTool()."""
+        warnings.warn(
+            "Skillset.addSkill() is deprecated, use ToolSet.addTool() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.addTool(skill)
+
+    def addSkillkit(self, skillkit: Toolkit):
+        """Deprecated alias for addToolkit()."""
+        warnings.warn(
+            "Skillset.addSkillkit() is deprecated, use ToolSet.addToolkit() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.addToolkit(skillkit)
+
+    def getSkills(self):
+        """Deprecated alias for getTools()."""
+        warnings.warn(
+            "Skillset.getSkills() is deprecated, use ToolSet.getTools() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.getTools()
+
+
+SkillFunction = ToolFunction
+SkillMatcher = ToolMatcher
 
 # LLM
 from dolphin.core.llm.llm import LLM
@@ -53,7 +102,7 @@ from dolphin.core.llm.llm_client import LLMClient
 from dolphin.core.config.global_config import GlobalConfig
 
 # Common
-from dolphin.core.common.enums import MessageRole, SkillType
+from dolphin.core.common.enums import MessageRole, ToolType, SkillType
 from dolphin.core.common.exceptions import DolphinException
 
 # Logging
@@ -81,7 +130,12 @@ __all__ = [
     # Agent
     "BaseAgent",
     "AgentState",
-    # Skill
+    # Tool
+    "Toolkit",
+    "ToolSet",
+    "ToolFunction",
+    "ToolMatcher",
+    # Tool (deprecated aliases)
     "Skillkit",
     "Skillset",
     "SkillFunction",
@@ -93,6 +147,7 @@ __all__ = [
     "GlobalConfig",
     # Common
     "MessageRole",
+    "ToolType",
     "SkillType",
     "DolphinException",
     # Logging

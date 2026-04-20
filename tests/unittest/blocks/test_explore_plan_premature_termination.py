@@ -14,7 +14,7 @@ from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.code_block.explore_block import ExploreBlock
 from dolphin.core.task_registry import Task, TaskStatus, TaskRegistry
 from dolphin.core.common.enums import MessageRole
-from dolphin.lib.skillkits.plan_skillkit import PlanSkillkit
+from dolphin.lib.toolkits.plan_toolkit import PlanToolkit
 
 
 class TestExplorePlanPrematureTermination:

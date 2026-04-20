@@ -7,7 +7,7 @@ including loading, preparation, error recovery, and metadata extraction.
 Functions:
 - loadAndPrepareAgent: Load and prepare agent for execution
 - _recoverAgentFromError: Recover agent from ERROR state
-- _get_skillkit_info: Extract skillkit information from agent
+- _get_toolkit_info: Extract toolkit information from agent
 """
 
 import sys
@@ -84,7 +84,7 @@ async def _recoverAgentFromError(env, args: Args, agent):
             tempAgent = DolphinAgent(
                 file_path=filePath,
                 global_config=env.globalConfig,
-                global_skills=env.globalSkills,
+                global_toolkits=env.globalToolkits,
                 global_types=env.global_types,
             )
             if tempAgent.get_name() == args.agent:
@@ -97,7 +97,7 @@ async def _recoverAgentFromError(env, args: Args, agent):
         freshAgent = DolphinAgent(
             file_path=agentFilePath,
             global_config=env.globalConfig,
-            global_skills=env.globalSkills,
+            global_toolkits=env.globalToolkits,
             global_types=env.global_types,
         )
         env.agents[args.agent] = freshAgent
@@ -110,34 +110,34 @@ async def _recoverAgentFromError(env, args: Args, agent):
         return agent
 
 
-def _get_skillkit_info(agent) -> Optional[Dict[str, int]]:
-    """Extract skillkit information from agent for display.
+def _get_toolkit_info(agent) -> Optional[Dict[str, int]]:
+    """Extract toolkit information from agent for display.
 
     Args:
         agent: The DolphinAgent instance
 
     Returns:
-        Dict mapping skillkit name to tool count, or None if unavailable
+        Dict mapping toolkit name to tool count, or None if unavailable
     """
     try:
         context = agent.get_context()
         if context is None:
             return None
 
-        all_skills = context.all_skills.getSkills() if context.all_skills else []
-        if not all_skills:
+        all_tools = context.all_tools.getTools() if context.all_tools else []
+        if not all_tools:
             return None
 
-        # Group skills by owner skillkit name
-        skillkit_counts: Dict[str, int] = {}
-        for skill in all_skills:
-            owner_name = getattr(skill, 'owner_name', None)
+        # Group tools by owner toolkit name
+        toolkit_counts: Dict[str, int] = {}
+        for tool in all_tools:
+            owner_name = getattr(tool, 'owner_name', None)
             if owner_name:
-                skillkit_counts[owner_name] = skillkit_counts.get(owner_name, 0) + 1
+                toolkit_counts[owner_name] = toolkit_counts.get(owner_name, 0) + 1
             else:
-                # Skills without owner go to "builtin"
-                skillkit_counts["builtin"] = skillkit_counts.get("builtin", 0) + 1
+                # Tools without owner go to "builtin"
+                toolkit_counts["builtin"] = toolkit_counts.get("builtin", 0) + 1
 
-        return skillkit_counts if skillkit_counts else None
+        return toolkit_counts if toolkit_counts else None
     except Exception:
         return None

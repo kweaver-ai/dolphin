@@ -363,8 +363,8 @@ Test agent with tool interrupt and resume functionality
 """
     
     # Create a mock tool that triggers interrupt
-    from dolphin.core.skill.skillkit import Skillkit
-    from dolphin.core.skill.skill_function import SkillFunction
+    from dolphin.core.tool.toolkit import Toolkit
+    from dolphin.core.tool.tool_function import ToolFunction
     from dolphin.core.utils.tools import ToolInterrupt
     
     def manual_approval(request: str) -> str:
@@ -384,11 +384,11 @@ Test agent with tool interrupt and resume functionality
         )
     
     # Create skillkit with the mock tool
-    class InterruptSkillkit(Skillkit):
-        def getSkills(self):
-            return [SkillFunction(manual_approval)]
+    class InterruptToolkit(Toolkit):
+        def getTools(self):
+            return [ToolFunction(manual_approval)]
     
-    skillkit = InterruptSkillkit()
+    skillkit = InterruptToolkit()
     
     # Create agent
     agent = DolphinAgent(

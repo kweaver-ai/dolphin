@@ -13,7 +13,7 @@ def test_log_verbose_functions():
     try:
         from dolphin.core.logging.logger import (
             console,
-            console_skill_call,
+            console_tool_call,
             console_block_start,
         )
 
@@ -24,10 +24,10 @@ def test_log_verbose_functions():
         print("测试 console 函数 verbose=False:")
         console("这是 verbose=False 的消息", verbose=False)
 
-        # 测试 console_skill_call 函数
-        print("\n测试 console_skill_call:")
-        console_skill_call("test_skill", {"param": "value"}, verbose=True)
-        console_skill_call("test_skill", {"param": "value"}, verbose=False)
+        # 测试 console_tool_call 函数
+        print("\n测试 console_tool_call:")
+        console_tool_call("test_skill", {"param": "value"}, verbose=True)
+        console_tool_call("test_skill", {"param": "value"}, verbose=False)
 
         # 测试 console_block_start 函数
         print("\n测试 console_block_start:")

@@ -245,7 +245,7 @@ class SingleMessage:
     @staticmethod
     def _compress_cognitive(content: str) -> str:
         """
-        Compress cognitive skill call messages using CognitiveSkillkit.compress_msg
+        Compress cognitive skill call messages using CognitiveToolkit.compress_msg
 
         Args:
             content (str): The message content to compress
@@ -254,11 +254,11 @@ class SingleMessage:
             str: Compressed content
         """
         # Import here to avoid circular import
-        from dolphin.lib.skillkits.cognitive_skillkit import (
-            CognitiveSkillkit,
+        from dolphin.lib.toolkits.cognitive_toolkit import (
+            CognitiveToolkit,
         )
 
-        return CognitiveSkillkit.compress_msg(content)
+        return CognitiveToolkit.compress_msg(content)
 
     def has_tool_calls(self) -> bool:
         """Check if this message has tool calls"""
@@ -837,13 +837,13 @@ class CategoryBlock(Enum):
     ASSIGN = "assign"
 
 
-class SkillType(Enum):
+class ToolType(Enum):
     TOOL = "TOOL"
     AGENT = "AGENT"
     MCP = "MCP"
 
 
-class SkillArg:
+class ToolArg:
     def __init__(self, name: str, type: str, value: Any):
         self.name = name
         self.type = type
@@ -853,9 +853,9 @@ class SkillArg:
         return {"name": self.name, "type": self.type, "value": self.value}
 
 
-class SkillInfo:
+class ToolInfo:
     def __init__(
-        self, type: SkillType, name: str, args: list[SkillArg], checked: bool = True
+        self, type: ToolType, name: str, args: list[ToolArg], checked: bool = True
     ):
         self.type = type
         self.name = name
@@ -875,27 +875,33 @@ class SkillInfo:
 
     @staticmethod
     def build(
-        skill_type: SkillType,
-        skill_name: str,
-        skill_args: dict = {},
+        tool_type: ToolType,
+        tool_name: str,
+        tool_args: dict = {},
         checked: bool = True,
-    ) -> "SkillInfo":
-        args = [SkillArg(k, type(v).__name__, v) for k, v in skill_args.items()]
-        return SkillInfo(skill_type, skill_name, args, checked)
+    ) -> "ToolInfo":
+        args = [ToolArg(k, type(v).__name__, v) for k, v in tool_args.items()]
+        return ToolInfo(tool_type, tool_name, args, checked)
 
     @staticmethod
-    def from_dict(dict_data: dict) -> Optional["SkillInfo"]:
+    def from_dict(dict_data: dict) -> Optional["ToolInfo"]:
         if not dict_data:
             return None
-        return SkillInfo(
-            type=SkillType(dict_data["type"]),
+        return ToolInfo(
+            type=ToolType(dict_data["type"]),
             name=dict_data["name"],
             args=[
-                SkillArg(arg["name"], arg["type"], arg["value"])
+                ToolArg(arg["name"], arg["type"], arg["value"])
                 for arg in dict_data["args"]
             ],
             checked=dict_data["checked"],
         )
+
+
+# Backward-compatibility aliases (deprecated)
+SkillInfo = ToolInfo
+SkillType = ToolType
+SkillArg = ToolArg
 
 
 class Status(Enum):
@@ -1167,7 +1173,7 @@ class DolphinSDKEncoder(json.JSONEncoder):
         if isinstance(obj, Var):
             return obj.value
         # Handle any object with a to_dict() method (duck typing)
-        # This includes Messages, VarOutput, SkillInfo, SingleMessage, etc.
+        # This includes Messages, VarOutput, ToolInfo, SingleMessage, etc.
         if hasattr(obj, 'to_dict') and callable(getattr(obj, 'to_dict')):
             return obj.to_dict()
         # Let the base class default method raise the TypeError for other types

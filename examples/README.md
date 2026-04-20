@@ -201,7 +201,7 @@ Or manually:
 dolphin run --folder examples/tabular_analyst/ \
     --agent tabular_analyst \
     --config examples/tabular_analyst/config/global.yaml \
-    --skill_folder examples/tabular_analyst/skillkits/ \
+    --tool_folder examples/tabular_analyst/skillkits/ \
     --query "/path/to/your/data.csv"
 ```
 

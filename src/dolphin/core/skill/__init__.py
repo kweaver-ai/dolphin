@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Skill 模块 - Skill 核心"""
+"""Deprecated: dolphin.core.skill has been renamed to dolphin.core.tool.
 
-from dolphin.core.skill.skillkit import Skillkit
-from dolphin.core.skill.skillset import Skillset
-from dolphin.core.skill.skill_function import SkillFunction
-from dolphin.core.skill.skill_matcher import SkillMatcher
+This package is a backward-compatibility shim.
+"""
+import warnings
 
-__all__ = [
-    "Skillkit",
-    "Skillset",
-    "SkillFunction",
-    "SkillMatcher",
-]
+warnings.warn(
+    "The 'dolphin.core.skill' package is deprecated and will be removed in a "
+    "future release. Use 'dolphin.core.tool' instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+from dolphin.core import Skillkit, Skillset  # noqa: E402
+from dolphin.core.tool.tool_function import ToolFunction as SkillFunction  # noqa: E402
+from dolphin.core.tool.tool_matcher import ToolMatcher as SkillMatcher  # noqa: E402
+
+__all__ = ["Skillkit", "Skillset", "SkillFunction", "SkillMatcher"]

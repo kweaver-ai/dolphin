@@ -10,7 +10,7 @@ from typing import Dict, Optional, AsyncGenerator, Any
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.sdk.agent.dolphin_agent import DolphinAgent
 from dolphin.core.logging.logger import console
-from dolphin.sdk.skill.global_skills import GlobalSkills
+from dolphin.sdk.tool.global_toolkits import GlobalToolkits
 from dolphin.core.common.object_type import ObjectTypeFactory
 
 
@@ -23,11 +23,12 @@ class Env:
         self,
         globalConfig: GlobalConfig,
         agentFolderPath: str,
-        skillkitFolderPath: str | None = None,
+        toolkitFolderPath: str | None = None,
         verbose: bool = False,
         is_cli: bool = False,
         log_level: int = logging.INFO,
         output_variables: list[str] = [],
+        skillkitFolderPath: str | None = None,
     ):
         """
         Initialize environment with global config and folder path
@@ -35,14 +36,24 @@ class Env:
         Args:
             globalConfig (GlobalConfig): Global configuration object
             agentFolderPath (str): Directory path to scan for DPH files
-            skillkitFolderPath (str): Directory path to scan for custom skillkits
+            toolkitFolderPath (str): Directory path to scan for custom toolkits
 
         Raises:
             ValueError: If folder path doesn't exist
         """
+        # Backward-compatibility: skillkitFolderPath was renamed to toolkitFolderPath
+        if skillkitFolderPath is not None:
+            import warnings
+            warnings.warn(
+                "Env parameter 'skillkitFolderPath' is deprecated, use 'toolkitFolderPath' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if toolkitFolderPath is None:
+                toolkitFolderPath = skillkitFolderPath
         self.globalConfig = globalConfig
         self.agentFolderPath = agentFolderPath
-        self.skillkitFolderPath = skillkitFolderPath
+        self.toolkitFolderPath = toolkitFolderPath
         self.verbose = verbose
         self.is_cli = is_cli
         self.log_level = log_level
@@ -53,8 +64,8 @@ class Env:
         if not os.path.exists(agentFolderPath):
             raise ValueError(f"Agent folder path not found: {agentFolderPath}")
 
-        # Initialize global skills manager
-        self.globalSkills = GlobalSkills(globalConfig)
+        # Initialize global toolkits manager
+        self.globalToolkits = GlobalToolkits(globalConfig)
 
         # Initialize global types manager
         self.global_types = ObjectTypeFactory()
@@ -63,14 +74,14 @@ class Env:
         self._loadTypeFiles()
 
         # Load custom skillkits if specified
-        if skillkitFolderPath is not None:
-            self._loadCustomSkillkits()
+        if toolkitFolderPath is not None:
+            self._loadCustomToolkits()
 
         # Scan and load agents
         self._scanAndLoadAgents()
 
-        # Register agents as skills
-        self._registerAgentsAsSkills()
+        # Register agents as tools
+        self._registerAgentsAsTools()
 
     def _loadTypeFiles(self):
         """
@@ -89,14 +100,14 @@ class Env:
                 console(f"Failed to load type file {filePath}: {str(e)}")
                 continue
 
-    def _loadCustomSkillkits(self):
+    def _loadCustomToolkits(self):
         """
-        Load all skillkits from custom skillkit folder
+        Load all toolkits from custom toolkit folder
         """
-        if self.skillkitFolderPath is not None and not os.path.exists(
-            self.skillkitFolderPath
+        if self.toolkitFolderPath is not None and not os.path.exists(
+            self.toolkitFolderPath
         ):
-            console(f"Custom skillkit folder not found: {self.skillkitFolderPath}")
+            console(f"Custom toolkit folder not found: {self.toolkitFolderPath}")
             return
 
         # Initialize VM if needed
@@ -113,7 +124,7 @@ class Env:
                 console(f"Failed to create VM: {str(e)}")
 
         # Scan for Python files recursively
-        searchPattern = os.path.join(self.skillkitFolderPath, "**", "*.py")
+        searchPattern = os.path.join(self.toolkitFolderPath, "**", "*.py")
         pythonFiles = glob.glob(searchPattern, recursive=True)
 
         for filePath in pythonFiles:
@@ -123,7 +134,7 @@ class Env:
 
             try:
                 # Get module name from file path
-                relativePath = os.path.relpath(filePath, self.skillkitFolderPath)
+                relativePath = os.path.relpath(filePath, self.toolkitFolderPath)
                 moduleName = relativePath.replace(os.sep, ".").replace(".py", "")
 
                 # Load the module dynamically
@@ -131,33 +142,33 @@ class Env:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 
-                # Find all Skillkit classes in the module
+                # Find all Toolkit classes in the module
                 for name, obj in inspect.getmembers(module, inspect.isclass):
-                    # Check if it's a Skillkit subclass but not Skillkit itself
+                    # Check if it's a Toolkit subclass but not Toolkit itself
                     if (
                         hasattr(obj, "__bases__")
-                        and any(base.__name__ == "Skillkit" for base in obj.__bases__)
-                        and obj.__name__ != "Skillkit"
+                        and any(base.__name__ == "Toolkit" for base in obj.__bases__)
+                        and obj.__name__ != "Toolkit"
                     ):
-                        # Create an instance of the skillkit
-                        skillkit_instance = obj()
+                        # Create an instance of the toolkit
+                        toolkit_instance = obj()
 
-                        # Set VM if this is VMSkillkit and we have a VM configured
-                        if hasattr(skillkit_instance, "setVM") and vm is not None:
-                            skillkit_instance.setVM(vm)
+                        # Set VM if this is VMToolkit and we have a VM configured
+                        if hasattr(toolkit_instance, "setVM") and vm is not None:
+                            toolkit_instance.setVM(vm)
 
-                        # Add all skills from this skillkit to the installed skillset
-                        for skill in skillkit_instance.getSkills():
-                            self.globalSkills.installedSkillset.addSkill(skill)
+                        # Add all tools from this toolkit to the installed toolset
+                        for skill in toolkit_instance.getTools():
+                            self.globalToolkits.installedToolSet.addTool(skill)
 
                         if self.verbose:
                             console(
-                                f"Loaded custom skillkit: {obj.__name__} from {filePath}"
+                                f"Loaded custom toolkit: {obj.__name__} from {filePath}"
                             )
 
             except Exception as e:
                 # Log error but continue with other files
-                console(f"Failed to load custom skillkit from {filePath}: {str(e)}")
+                console(f"Failed to load custom toolkit from {filePath}: {str(e)}")
                 traceback.print_exc()
                 continue
 
@@ -170,11 +181,11 @@ class Env:
 
         for filePath in dolphinFiles:
             try:
-                # Pass the shared GlobalSkills instance and global_types to DolphinAgent
+                # Pass the shared GlobalToolkits instance and global_types to DolphinAgent
                 agent = DolphinAgent(
                     file_path=filePath,
                     global_config=self.globalConfig,
-                    global_skills=self.globalSkills,
+                    global_toolkits=self.globalToolkits,
                     global_types=self.global_types,
                     verbose=self.verbose,
                     is_cli=self.is_cli,
@@ -218,12 +229,12 @@ class Env:
 
         return dolphinFiles
 
-    def _registerAgentsAsSkills(self):
+    def _registerAgentsAsTools(self):
         """
-        Register all loaded agents as skills in the global skills manager
+        Register all loaded agents as tools in the global toolkits manager
         """
         for agentName, agent in self.agents.items():
-            self.globalSkills.registerAgentSkill(agentName, agent)
+            self.globalToolkits.registerAgentTool(agentName, agent)
 
     def getAgent(self, agentName: str) -> Optional[DolphinAgent]:
         """
@@ -257,15 +268,15 @@ class Env:
 
     def _setupAgentContext(self, agent):
         """
-        Setup agent context with all available agents and skills
+        Setup agent context with all available agents and tools
 
         Args:
             agent: Agent instance to setup
         """
-        # Set global skills (including agent skills) into the agent's executor context.
+        # Set global tools (including agent tools) into the agent's executor context.
         if hasattr(agent, "executor") and hasattr(agent.executor, "context"):
-            allSkills = self.globalSkills.getAllSkills()
-            agent.set_skills(allSkills)
+            allTools = self.globalToolkits.getAllTools()
+            agent.set_tools(allTools)
 
     async def arun(self, agentName: str, **kwargs) -> AsyncGenerator[Any, None]:
         """
@@ -291,14 +302,36 @@ class Env:
         async for result in agent.arun(**kwargs):
             yield result
 
-    def getGlobalSkills(self) -> GlobalSkills:
+    def getGlobalToolkits(self) -> GlobalToolkits:
         """
-        Get the global skills manager
+        Get the global toolkits manager
 
         Returns:
-            GlobalSkills instance
+            GlobalToolkits instance
         """
-        return self.globalSkills
+        return self.globalToolkits
+
+    def getGlobalSkills(self) -> GlobalToolkits:
+        """Deprecated: use getGlobalToolkits() instead."""
+        import warnings
+
+        warnings.warn(
+            "Env.getGlobalSkills() is deprecated, use Env.getGlobalToolkits() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.getGlobalToolkits()
+
+    @property
+    def globalSkills(self) -> GlobalToolkits:
+        """Deprecated: use :attr:`globalToolkits` instead."""
+        import warnings
+        warnings.warn(
+            "Env.globalSkills is deprecated, use Env.globalToolkits instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.globalToolkits
 
     def getGlobalTypes(self) -> ObjectTypeFactory:
         """
@@ -318,7 +351,7 @@ class Env:
             agent (DolphinAgent): DolphinAgent instance
         """
         self.agents[agentName] = agent
-        self.globalSkills.registerAgentSkill(agentName, agent)
+        self.globalToolkits.registerAgentTool(agentName, agent)
 
     async def ashutdown(self):
         """
@@ -360,4 +393,4 @@ class Env:
         Returns:
             Environment description string
         """
-        return f"Env(agentFolder={self.agentFolderPath}, skillkitFolder={self.skillkitFolderPath}, agents={len(self.agents)})"
+        return f"Env(agentFolder={self.agentFolderPath}, toolkitFolder={self.toolkitFolderPath}, agents={len(self.agents)})"

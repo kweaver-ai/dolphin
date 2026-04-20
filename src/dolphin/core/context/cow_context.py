@@ -16,7 +16,7 @@ from dolphin.core.common.types import SourceType, Var
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.core.context_manager import ContextManager
 from dolphin.core.logging.logger import get_logger
-from dolphin.core.skill.skillset import Skillset
+from dolphin.core.tool.toolset import ToolSet
 from dolphin.core.context.variable_pool import VariablePool
 
 logger = get_logger("cow_context")
@@ -41,9 +41,12 @@ class _TrackingVariablePool(VariablePool):
         self._owner.deletes.discard(name)
 
     def set_var_output(
-        self, name, value, source_type: SourceType = SourceType.OTHER, skill_info=None
+        self, name, value, source_type: SourceType = SourceType.OTHER, tool_info=None, skill_info=None
     ):
-        super().set_var_output(name, value, source_type=source_type, skill_info=skill_info)
+        super().set_var_output(
+            name, value, source_type=source_type,
+            tool_info=tool_info if tool_info is not None else skill_info,
+        )
         # Track the user-facing value for merging behavior consistency.
         self._owner.writes[name] = value
         self._owner.deletes.discard(name)
@@ -76,10 +79,10 @@ class COWContext(Context):
         # Subtask outputs are captured in task.answer and can be retrieved via _get_task_output().
         super().__init__(
             config=parent.config,
-            global_skills=parent.global_skills,
+            global_toolkits=parent.global_toolkits,
             memory_manager=parent.memory_manager,
             global_types=parent.global_types,
-            skillkit_hook=getattr(parent, "skillkit_hook", None),
+            toolkit_hook=getattr(parent, "toolkit_hook", None),
             context_manager=ContextManager(),
             # Subtasks should not stream raw output to stdout. Their outputs are
             # captured and surfaced via plan events (plan_task_output) instead.
@@ -116,34 +119,34 @@ class COWContext(Context):
         self._plan_id = parent.get_plan_id()
         self.task_registry = None
 
-        # Filter out orchestration-only tools (e.g., PlanSkillkit) from subtask toolset.
-        # Create a new isolated Skillset instead of referencing parent's skillkit directly
-        # to prevent permission escalation via context.skillkit.getSkills()
-        self._calc_all_skills()
-        self.all_skills = self._filter_subtask_skills(self.all_skills)
-        # Create a new Skillset that contains only filtered skills
-        # This ensures context.get_skill() and context.skillkit.getSkills() both respect filtering
-        filtered_skillkit = Skillset()
-        for skill in self.all_skills.getSkills():
-            filtered_skillkit.addSkill(skill)
-        self.skillkit = filtered_skillkit
+        # Filter out orchestration-only tools (e.g., PlanToolkit) from subtask toolset.
+        # Create a new isolated ToolSet instead of referencing parent's toolkit directly
+        # to prevent permission escalation via context.toolkit.getTools()
+        self._calc_all_tools()
+        self.all_tools = self._filter_subtask_tools(self.all_tools)
+        # Create a new ToolSet that contains only filtered tools
+        # This ensures context.get_tool() and context.toolkit.getTools() both respect filtering
+        filtered_toolkit = ToolSet()
+        for skill in self.all_tools.getTools():
+            filtered_toolkit.addTool(skill)
+        self.toolkit = filtered_toolkit
 
         # Inherit last-session configs where safe.
         self._last_model_name = getattr(parent, "_last_model_name", None)
         self._last_explore_mode = getattr(parent, "_last_explore_mode", None)
         self._last_system_prompt = getattr(parent, "_last_system_prompt", None)
-        self._last_skills = None
+        self._last_tools = None
 
         logger.debug(f"COWContext initialized for task: {task_id}")
 
     @staticmethod
-    def _filter_subtask_skills(skillset: Skillset) -> Skillset:
-        """Filter out skillkits that should not be exposed to subtasks."""
-        filtered = Skillset()
-        for skill in skillset.getSkills():
+    def _filter_subtask_tools(toolset: ToolSet) -> ToolSet:
+        """Filter out toolkits that should not be exposed to subtasks."""
+        filtered = ToolSet()
+        for tool in toolset.getTools():
             owner = None
-            if hasattr(skill, "get_owner_skillkit"):
-                owner = skill.get_owner_skillkit()
+            if hasattr(tool, "get_owner_toolkit"):
+                owner = tool.get_owner_toolkit()
             if owner is not None:
                 should_exclude = getattr(owner, "should_exclude_from_subtask", None)
                 if callable(should_exclude):
@@ -153,7 +156,7 @@ class COWContext(Context):
                     except Exception:
                         # Fail-open: do not exclude if the hook misbehaves.
                         pass
-            filtered.addSkill(skill)
+            filtered.addTool(tool)
         return filtered
 
     def get_variable(self, key: str, default_value: Any = None) -> Any:
@@ -371,26 +374,26 @@ class COWContext(Context):
         )
 
     def __getattr__(self, name: str):
-        """Delegate unknown attributes to parent with special handling for skillkit.
+        """Delegate unknown attributes to parent with special handling for toolkit.
 
         Args:
             name: Attribute name
 
         Returns:
-            Attribute value from parent, or filtered skillkit for security
+            Attribute value from parent, or filtered toolkit for security
 
         Raises:
             AttributeError: If attribute not found in parent
 
         Note:
-            Special handling for 'skillkit' attribute to prevent subtasks from
+            Special handling for 'toolkit' attribute to prevent subtasks from
             bypassing PLAN_ORCHESTRATION_TOOLS filtering by directly accessing
-            parent's skillkit via attribute delegation.
+            parent's toolkit via attribute delegation.
         """
-        # Intercept skillkit access to return filtered version
-        if name == "skillkit":
-            # Return the filtered skillkit stored in __init__
-            # This prevents subtasks from accessing parent's unfiltered skillkit
+        # Intercept toolkit access to return filtered version
+        if name == "toolkit":
+            # Return the filtered toolkit stored in __init__
+            # This prevents subtasks from accessing parent's unfiltered toolkit
             return object.__getattribute__(self, name)
 
         # Delegate all other attributes to parent

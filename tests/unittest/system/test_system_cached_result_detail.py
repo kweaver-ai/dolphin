@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from dolphin.core.common.enums import MessageRole, Messages
 from dolphin.core.context.context import Context
-from dolphin.lib.skillkits.system_skillkit import SystemFunctionsSkillKit
+from dolphin.lib.toolkits.system_toolkit import SystemFunctionsToolkit
 
 
 def _build_context_with_reference_hint(valid_reference_id: str):
@@ -20,13 +20,13 @@ def _build_context_with_reference_hint(valid_reference_id: str):
     )
 
     hook = Mock()
-    context.set_skillkit_hook(hook)
+    context.set_toolkit_hook(hook)
     return context, hook
 
 
 @pytest.mark.asyncio
 async def test_get_cached_result_detail_rejects_invalid_skill_reference_id():
-    skillkit = SystemFunctionsSkillKit()
+    skillkit = SystemFunctionsToolkit()
     context, hook = _build_context_with_reference_hint("ref_valid_123")
 
     result = await skillkit._get_cached_result_detail(
@@ -42,7 +42,7 @@ async def test_get_cached_result_detail_rejects_invalid_skill_reference_id():
 
 @pytest.mark.asyncio
 async def test_get_cached_result_detail_accepts_reference_id_in_session_allowlist():
-    skillkit = SystemFunctionsSkillKit()
+    skillkit = SystemFunctionsToolkit()
     context, hook = _build_context_with_reference_hint("ref_valid_123")
     hook.get_raw_result.return_value = "full-result"
 

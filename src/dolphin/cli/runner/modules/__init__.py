@@ -16,7 +16,7 @@ from dolphin.cli.runner.modules.environment import (
 from dolphin.cli.runner.modules.agent_lifecycle import (
     loadAndPrepareAgent,
     _recoverAgentFromError,
-    _get_skillkit_info,
+    _get_toolkit_info,
 )
 
 # Execution control
@@ -49,7 +49,7 @@ from dolphin.cli.runner.modules.conversation import (
 from dolphin.cli.runner.modules.errors import (
     handle_execution_error,
     extract_root_cause,
-    extract_skill_error_message,
+    extract_tool_error_message,
 )
 
 __all__ = [
@@ -60,7 +60,7 @@ __all__ = [
     # Agent lifecycle
     'loadAndPrepareAgent',
     '_recoverAgentFromError',
-    '_get_skillkit_info',
+    '_get_toolkit_info',
     # Conversation
     'runConversationLoop',
     '_handle_user_interrupt',
@@ -78,5 +78,5 @@ __all__ = [
     # Errors
     'handle_execution_error',
     'extract_root_cause',
-    'extract_skill_error_message',
+    'extract_tool_error_message',
 ]

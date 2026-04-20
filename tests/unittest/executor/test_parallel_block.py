@@ -59,7 +59,7 @@ async def test_parallel_tool_calls_assign_to_correct_variables():
     fast_skill = _make_skill("FastTool", delay=0.01, return_value="fast_result")
 
     # Inject skills into the skillkit's cache so get_skill() finds them.
-    ctx.skillkit._skills_cache = [slow_skill, fast_skill]
+    ctx.toolkit._tools_cache = [slow_skill, fast_skill]
 
     # Pre-set the input variable used by the DPH script.
     ctx.set_var_output("q", "hello")
@@ -122,7 +122,7 @@ async def test_parallel_many_concurrent_branches():
         _make_skill(f"Tool{i}", delay=0.01 * i, return_value=f"value_{i}")
         for i in range(5)
     ]
-    ctx.skillkit._skills_cache = list(skills)
+    ctx.toolkit._tools_cache = list(skills)
     ctx.set_var_output("q", "hello")
 
     lines = [f"@Tool{i}(input=$q) -> result_{i}" for i in range(5)]
@@ -159,7 +159,7 @@ async def test_sequential_tool_calls_unaffected():
 
     skill_a = _make_skill("ToolA", delay=0.01, return_value="alpha")
     skill_b = _make_skill("ToolB", delay=0.01, return_value="beta")
-    ctx.skillkit._skills_cache = [skill_a, skill_b]
+    ctx.toolkit._tools_cache = [skill_a, skill_b]
     ctx.set_var_output("q", "hello")
 
     dph_script = (
@@ -195,7 +195,7 @@ async def test_parallel_variable_isolation_no_cross_write():
 
     slow_skill = _make_skill("SlowOne", delay=0.1, return_value="slow_val")
     fast_skill = _make_skill("FastOne", delay=0.01, return_value="fast_val")
-    ctx.skillkit._skills_cache = [slow_skill, fast_skill]
+    ctx.toolkit._tools_cache = [slow_skill, fast_skill]
     ctx.set_var_output("q", "hello")
 
     dph_script = (
@@ -234,7 +234,7 @@ async def test_parallel_rejects_assign_block():
     ctx = Context(verbose=False)
 
     skill = _make_skill("MyTool", delay=0.05, return_value="tool_val")
-    ctx.skillkit._skills_cache = [skill]
+    ctx.toolkit._tools_cache = [skill]
     ctx.set_var_output("q", "hello")
     ctx.set_var_output("x", "assign_val")
 
@@ -270,7 +270,7 @@ async def test_parallel_rejects_if_block():
     ctx = Context(verbose=False)
 
     skill = _make_skill("MyTool", delay=0.05, return_value="tool_val")
-    ctx.skillkit._skills_cache = [skill]
+    ctx.toolkit._tools_cache = [skill]
     ctx.set_var_output("q", "hello")
     ctx.set_var_output("cond", True)
 
@@ -306,7 +306,7 @@ async def test_parallel_rejects_for_block():
     ctx = Context(verbose=False)
 
     skill = _make_skill("MyTool", delay=0.05, return_value="tool_val")
-    ctx.skillkit._skills_cache = [skill]
+    ctx.toolkit._tools_cache = [skill]
     ctx.set_var_output("q", "hello")
     ctx.set_var_output("items", ["a", "b"])
 

@@ -32,13 +32,13 @@ class ModelException(DolphinException):
         return f"ModelException: {self.code}, {self.message}"
 
 
-class SkillException(DolphinException):
-    """Exception raised when the skill is interrupted."""
+class ToolException(DolphinException):
+    """Exception raised when the tool is interrupted."""
 
     def __init__(
         self,
         code: str,
-        message="The skill was interrupted.",
+        message="The tool was interrupted.",
         *args,
         **kwargs,
     ):
@@ -47,8 +47,8 @@ class SkillException(DolphinException):
     def __str__(self):
         # If message contains multiple lines, format it nicely
         if '\n' in self.message:
-            return f"SkillException [{self.code}]:\n{self.message}"
-        return f"SkillException: {self.code}, {self.message}"
+            return f"ToolException [{self.code}]:\n{self.message}"
+        return f"ToolException: {self.code}, {self.message}"
 
 
 class ContextEngineerException(DolphinException):
@@ -131,3 +131,12 @@ class UserInterrupt(DolphinException):
 
     def __str__(self):
         return f"UserInterrupt: {self.message}"
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility alias (deprecated)
+# ---------------------------------------------------------------------------
+
+#: .. deprecated::
+#:    Use :class:`ToolException` instead.
+SkillException = ToolException
