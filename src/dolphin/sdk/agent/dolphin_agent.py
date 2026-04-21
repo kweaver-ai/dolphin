@@ -825,6 +825,17 @@ class DolphinAgent(BaseAgent):
                     # Check if it is an interruption (unified status, type in interrupt_type field)
                     if isinstance(item, dict) and item.get("status") == "interrupted":
                         interrupt_info = item
+                        # FIX: Immediately notify main loop to avoid timeout delay
+                        # Push a sentinel value to wake up the queue.get() without yielding it
+                        try:
+                            queue.put_nowait({"_internal_interrupt_signal": True})
+                        except asyncio.QueueFull:
+                            # If queue is full, try to make space
+                            try:
+                                queue.get_nowait()
+                                queue.put_nowait({"_internal_interrupt_signal": True})
+                            except (asyncio.QueueEmpty, asyncio.QueueFull):
+                                pass  # Best effort
                         # Do not push to the queue, output uniformly by the outer layer (to avoid duplication)
                         return  # Stop execution and let the outer layer pass interrupt information
             finally:
@@ -840,8 +851,15 @@ class DolphinAgent(BaseAgent):
             while True:
                 try:
                     # 优先从队列Get数据，使用较短的超时避免runner完成后检测延迟过大
-                    # Timeout values balance responsiveness and CPU efficiency: even if the item interval > 0.1s, it will still be fetched in the next loop iteration.
-                    item = await asyncio.wait_for(queue.get(), timeout=0.1)
+                    # FIX: Reduce timeout from 0.1s to 0.01s for better responsiveness
+                    item = await asyncio.wait_for(queue.get(), timeout=0.01)
+                    
+                    # FIX: Check for internal interrupt signal
+                    if isinstance(item, dict) and item.get("_internal_interrupt_signal"):
+                        # Interrupt detected, break immediately without yielding the signal
+                        self._logger.debug("Interrupt signal received, breaking queue loop")
+                        break
+                    
                     yield item
                 except asyncio.TimeoutError:
                     # Check runner status only after timeout to avoid race conditions
@@ -849,7 +867,10 @@ class DolphinAgent(BaseAgent):
                         # Clear the remaining data in the queue, using exception handling instead of empty() checks
                         while True:
                             try:
-                                yield queue.get_nowait()
+                                remaining_item = queue.get_nowait()
+                                # Skip internal signals when clearing queue
+                                if not (isinstance(remaining_item, dict) and remaining_item.get("_internal_interrupt_signal")):
+                                    yield remaining_item
                             except asyncio.QueueEmpty:
                                 break
                         break
