@@ -162,12 +162,26 @@ class ToolBlock(BasicCodeBlock):
                 interventions += [intervention_vars]
                 self.context.set_variable("interventions", interventions)
 
+                resp_item = None
                 async for resp_item in self.tool_run(
                     source_type=SourceType.SKILL,
                     tool_name=tool_name,
                     skill_params_json=tool_call_info["args"],
                 ):
                     yield resp_item
+
+                # ✅ FIX: Mark tool call as completed and output final result
+                if self.recorder is not None:
+                    self.recorder.update(
+                        stage=TypeStage.SKILL,
+                        item=resp_item,
+                        tool_name=tool_name,
+                        tool_args=tool_call_info["args"],
+                        tool_type=self.context.get_tool_type(tool_name),
+                        source_type=SourceType.SKILL,
+                        is_completed=True,
+                    )
+                yield {"data": resp_item}
 
             console("\n", verbose=self.context.is_verbose())
         except ToolInterrupt as e:
