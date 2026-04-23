@@ -911,7 +911,7 @@ class GlobalConfig:
         ontology_config: OntologyConfig = None,
         retrieval_model_config: RetrievalModelConfig = None,
         base_dir: Optional[str] = None,
-        add_skill_usage_rules_in_system_prompt: bool = False,  # Whether to show tool usage guidelines in system prompt
+        skill_enabled: bool = True,  # Whether to enable skill functionality
     ):
         self.default_llm = default_llm
         self.fast_llm = fast_llm if fast_llm else default_llm
@@ -931,8 +931,8 @@ class GlobalConfig:
         self._ontology_config = ontology_config
         self._retrieval_model_config = retrieval_model_config
         self._base_dir = base_dir
-        # Whether to show tool usage guidelines in system prompt (default: False for backward compatibility)
-        self.add_skill_usage_rules_in_system_prompt = add_skill_usage_rules_in_system_prompt
+        # Whether to enable skill functionality (default: False for backward compatibility)
+        self.skill_enabled = skill_enabled
 
     @property
     def base_dir(self) -> Optional[str]:
@@ -1089,10 +1089,10 @@ class GlobalConfig:
                 else None
             )
 
-            # Parse add_skill_usage_rules_in_system_prompt configuration
+            # Parse skill_enabled configuration
             # Default to False for backward compatibility (opt-in feature)
             add_skill_usage_rules = config_dict.get(
-                "add_skill_usage_rules_in_system_prompt", False
+                "skill_enabled", False
             )
 
             return GlobalConfig(
@@ -1109,7 +1109,7 @@ class GlobalConfig:
                 ontology_config=ontology_config,
                 retrieval_model_config=retrieval_model_config,
                 base_dir=base_dir,
-                add_skill_usage_rules_in_system_prompt=add_skill_usage_rules,
+                skill_enabled=add_skill_usage_rules,
             )
         else:
             model_name = config_dict.get("model_name")
@@ -1147,15 +1147,15 @@ class GlobalConfig:
                 else None
             )
 
-            # Parse add_skill_usage_rules_in_system_prompt configuration
+            # Parse skill_enabled configuration
             add_skill_usage_rules = config_dict.get(
-                "add_skill_usage_rules_in_system_prompt", True
+                "skill_enabled", True
             )
 
-            # Parse add_skill_usage_rules_in_system_prompt configuration
+            # Parse skill_enabled configuration
             # Default to False for backward compatibility (opt-in feature)
             add_skill_usage_rules = config_dict.get(
-                "add_skill_usage_rules_in_system_prompt", False
+                "skill_enabled", False
             )
 
             llmInstanceConfigs = {model_name: llm_instance_config}
@@ -1171,7 +1171,7 @@ class GlobalConfig:
                 resource_skills=resource_skills,
                 ontology_config=ontology_config,
                 retrieval_model_config=retrieval_model_config,
-                add_skill_usage_rules_in_system_prompt=add_skill_usage_rules,
+                skill_enabled=add_skill_usage_rules,
             )
 
     @staticmethod
@@ -1344,9 +1344,9 @@ class GlobalConfig:
             result["retrieval_model_config"] = self._retrieval_model_config.to_dict()
 
         # Add custom configuration
-        if hasattr(self, "add_skill_usage_rules_in_system_prompt"):
-            result["add_skill_usage_rules_in_system_prompt"] = (
-                self.add_skill_usage_rules_in_system_prompt
+        if hasattr(self, "skill_enabled"):
+            result["skill_enabled"] = (
+                self.skill_enabled
             )
 
         return result

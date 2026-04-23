@@ -685,6 +685,15 @@ class BasicCodeBlock:
             # 处理输出格式参数
             return {"type": "output_format", "value": original_value}
         elif key in ["model", "system_prompt", "ttc_mode", "tool_choice", "mode"]:
+            # For system_prompt, if it's an explicit quoted string with escape sequences, unescape them
+            if key == "system_prompt" and is_explicit_string and isinstance(original_value, str):
+                try:
+                    # Use json.loads to properly unescape JSON escape sequences (\\n -> \n)
+                    # Wrap in quotes to make it a valid JSON string for parsing
+                    original_value = json.loads(f'"{original_value}"')
+                except (json.JSONDecodeError, ValueError):
+                    # If unescape fails, keep the original value
+                    pass
             return original_value
 
         if type(original_value) != str:
