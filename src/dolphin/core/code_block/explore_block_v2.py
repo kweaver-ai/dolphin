@@ -180,7 +180,34 @@ class ExploreBlockV2(BasicCodeBlock):
         - Goals and tool descriptions
         - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
         - User-provided system prompt
+        
+        Note: The system_prompt may contain a special marker {__BUILTIN_SKILL_RULES__}
+        which will be replaced with the builtin skill detailed rules from executor.
+        The order is: Goals -> Tools -> {__BUILTIN_SKILL_RULES__} -> Guidelines -> User prompt
         """
+        # Handle system_prompt with builtin skill rules marker
+        tools_usage_guidelines = """
+### Tools Usage Guidelines：
+- 仔细阅读每个工具的描述和参数要求
+- 根据问题的具体需求选择最合适的工具
+- 在调用工具前确保参数完整和正确
+- 如果不确定工具用法，可以先尝试简单的调用来了解
+"""
+        
+        # Replace the marker with Tools Usage Guidelines
+        if self.system_prompt and "{__BUILTIN_SKILL_RULES__}" in self.system_prompt:
+            # Executor has placed builtin rules before the marker
+            system_prompt_with_guidelines = self.system_prompt.replace(
+                "{__BUILTIN_SKILL_RULES__}", 
+                "\n" + tools_usage_guidelines
+            )
+        else:
+            # No marker, just add Tools Usage Guidelines before system prompt
+            if self.system_prompt and self.system_prompt.strip():
+                system_prompt_with_guidelines = tools_usage_guidelines + "\n" + self.system_prompt
+            else:
+                system_prompt_with_guidelines = tools_usage_guidelines
+
         role_format = """
 ## Goals：
 - 你需要：先仔细思考和分析用户的问题，然后决定由自己回答问题还是使用工具来处理问题，务必在调用工具前仔细思考。tools中的工具就是你可以使用的全部工具。
@@ -188,16 +215,11 @@ class ExploreBlockV2(BasicCodeBlock):
 ## Available Tools:
 {tools}
 
-### Tools Usage Guidelines：
-- 仔细阅读每个工具的描述和参数要求
-- 根据问题的具体需求选择最合适的工具
-- 在调用工具前确保参数完整和正确
-- 如果不确定工具用法，可以先尝试简单的调用来了解
-
+{system_prompt_with_guidelines}
 {metadata_prompt}
-{system_prompt}
         """
 
+        # Replace tools description
         skillkit = self.get_skillkit()
         if skillkit is not None and not skillkit.isEmpty():
             # Use the configured tools format (concise/medium/detailed)
@@ -208,16 +230,12 @@ class ExploreBlockV2(BasicCodeBlock):
                 r"{tools}", "用户没有配置工具，你只能自己回答问题！"
             )
 
+        role_format = role_format.replace(r"{system_prompt_with_guidelines}", system_prompt_with_guidelines)
+
         # Inject metadata prompt from skillkits via skill.owner_skillkit
         from dolphin.core.skill.skillkit import Skillkit
         metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
         role_format = role_format.replace(r"{metadata_prompt}", metadata_prompt)
-
-        # Replace user system prompt
-        if not self.system_prompt or len(self.system_prompt.strip()) == 0:
-            role_format = role_format.replace(r"{system_prompt}", "")
-        else:
-            role_format = role_format.replace(r"{system_prompt}", self.system_prompt)
 
         return role_format
 
