@@ -25,6 +25,35 @@ from dolphin.core.common.types import SourceType
 
 logger = get_logger("code_block.explore_block_v2")
 
+# Built-in skill usage rules that will be automatically added to system prompt
+# when global_config.skill_enabled is True and builtin skill tools are detected
+_BUILTIN_SKILL_USAGE_RULES = """## Built-in Skill Capabilities
+
+You have access to three built-in tools for working with skills:
+
+### 1. builtin_skill_load(skill_id)
+- **Purpose**: Load a skill package and get its documentation
+- **When to use**: Always call this first when you have a skill_id
+- **Returns**: The full SKILL.md content plus lists of available scripts and reference files
+
+### 2. builtin_skill_read_file(skill_id, file_path)
+- **Purpose**: Read a specific file inside the skill package
+- **When to use**: Optional. Only call after you have obtained a file path from builtin_skill_load or from SKILL.md
+- **Note**: One file per call; cannot batch
+
+### 3. builtin_skill_execute_script(skill_id, script_path)
+- **Purpose**: Execute a script from the skill package
+- **When to use**: Optional. Only call after reading SKILL.md and deciding that script execution is needed
+- **Note**: Not all skills require script execution
+
+### Usage Guidelines
+1. If you have a skill_id, **always start with** `builtin_skill_load(skill_id)`
+2. After reading SKILL.md, decide independently whether to call `read_file`, `execute_script`, both, or neither
+3. Both `builtin_skill_read_file` and `builtin_skill_execute_script` are **optional steps**
+
+---
+"""
+
 
 class DeduplicatorSkillCall:
     MAX_DUPLICATE_COUNT = 5
@@ -179,12 +208,28 @@ class ExploreBlockV2(BasicCodeBlock):
         Includes:
         - Goals and tool descriptions
         - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
+        - Built-in Skill Capabilities (if skill_enabled=true and builtin tools detected)
         - User-provided system prompt
         
         Note: The system_prompt may contain a special marker {__BUILTIN_SKILL_RULES__}
         which will be replaced with the builtin skill detailed rules from executor.
-        The order is: Goals -> Tools -> {__BUILTIN_SKILL_RULES__} -> Guidelines -> User prompt
+        The order is: Goals -> Tools -> Built-in Skills -> {__BUILTIN_SKILL_RULES__} -> Guidelines -> User prompt
         """
+        # Check if builtin skill tools are available and skill_enabled is true
+        should_add_builtin_skill_rules = False
+        if self.context.config and hasattr(self.context.config, 'skill_enabled') and self.context.config.skill_enabled:
+            skillkit = self.get_skillkit()
+            if skillkit and not skillkit.isEmpty():
+                # Check if any builtin skill tools are registered
+                builtin_skill_names = ['builtin_skill_load', 'builtin_skill_read_file', 'builtin_skill_execute_script']
+                for tool_name in builtin_skill_names:
+                    if skillkit.getSkill(tool_name) is not None:
+                        should_add_builtin_skill_rules = True
+                        break
+        
+        # Build system prompt with optional builtin skill rules
+        base_system_prompt = self.system_prompt or ""
+        
         # Handle system_prompt with builtin skill rules marker
         tools_usage_guidelines = """
 ### Tools Usage Guidelines：
@@ -195,18 +240,32 @@ class ExploreBlockV2(BasicCodeBlock):
 """
         
         # Replace the marker with Tools Usage Guidelines
-        if self.system_prompt and "{__BUILTIN_SKILL_RULES__}" in self.system_prompt:
+        if base_system_prompt and "{__BUILTIN_SKILL_RULES__}" in base_system_prompt:
             # Executor has placed builtin rules before the marker
-            system_prompt_with_guidelines = self.system_prompt.replace(
+            system_prompt_with_guidelines = base_system_prompt.replace(
                 "{__BUILTIN_SKILL_RULES__}", 
                 "\n" + tools_usage_guidelines
             )
         else:
-            # No marker, just add Tools Usage Guidelines before system prompt
-            if self.system_prompt and self.system_prompt.strip():
-                system_prompt_with_guidelines = tools_usage_guidelines + "\n" + self.system_prompt
+            # Add builtin skill rules if needed (for dolphin_mode where executor doesn't inject)
+            if should_add_builtin_skill_rules:
+                if base_system_prompt.strip():
+                    system_prompt_with_guidelines = (
+                        _BUILTIN_SKILL_USAGE_RULES + "\n" +
+                        tools_usage_guidelines + "\n" +
+                        base_system_prompt
+                    )
+                else:
+                    system_prompt_with_guidelines = (
+                        _BUILTIN_SKILL_USAGE_RULES + "\n" +
+                        tools_usage_guidelines
+                    )
             else:
-                system_prompt_with_guidelines = tools_usage_guidelines
+                # No builtin skill tools, just add general guidelines
+                if base_system_prompt.strip():
+                    system_prompt_with_guidelines = tools_usage_guidelines + "\n" + base_system_prompt
+                else:
+                    system_prompt_with_guidelines = tools_usage_guidelines
 
         role_format = """
 ## Goals：
