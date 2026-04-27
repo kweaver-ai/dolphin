@@ -981,6 +981,7 @@ class GlobalConfig:
         ontology_config: OntologyConfig = None,
         retrieval_model_config: RetrievalModelConfig = None,
         base_dir: Optional[str] = None,
+        skill_enabled: bool = True,  # Whether to enable skill functionality
         skill_config: ToolConfig = None,
         resource_skills: Optional[Dict[str, Any]] = None,
     ):
@@ -1022,6 +1023,8 @@ class GlobalConfig:
         self._ontology_config = ontology_config
         self._retrieval_model_config = retrieval_model_config
         self._base_dir = base_dir
+        # Whether to enable skill functionality (default: False for backward compatibility)
+        self.skill_enabled = skill_enabled
 
     @property
     def base_dir(self) -> Optional[str]:
@@ -1208,6 +1211,12 @@ class GlobalConfig:
                 else None
             )
 
+            # Parse skill_enabled configuration
+            # Default to False for backward compatibility (opt-in feature)
+            add_skill_usage_rules = config_dict.get(
+                "skill_enabled", False
+            )
+
             return GlobalConfig(
                 default_llm=default_llm,
                 fast_llm=fast_llm,
@@ -1222,6 +1231,7 @@ class GlobalConfig:
                 ontology_config=ontology_config,
                 retrieval_model_config=retrieval_model_config,
                 base_dir=base_dir,
+                skill_enabled=add_skill_usage_rules,
             )
         else:
             model_name = config_dict.get("model_name")
@@ -1267,6 +1277,17 @@ class GlobalConfig:
                 else None
             )
 
+            # Parse skill_enabled configuration
+            add_skill_usage_rules = config_dict.get(
+                "skill_enabled", True
+            )
+
+            # Parse skill_enabled configuration
+            # Default to False for backward compatibility (opt-in feature)
+            add_skill_usage_rules = config_dict.get(
+                "skill_enabled", False
+            )
+
             llmInstanceConfigs = {model_name: llm_instance_config}
             if "name" in config_dict:
                 llmInstanceConfigs[config_dict["name"]] = llm_instance_config
@@ -1280,6 +1301,7 @@ class GlobalConfig:
                 resource_tools=resource_tools,
                 ontology_config=ontology_config,
                 retrieval_model_config=retrieval_model_config,
+                skill_enabled=add_skill_usage_rules,
             )
 
     @staticmethod
@@ -1452,5 +1474,11 @@ class GlobalConfig:
 
         if self._retrieval_model_config:
             result["retrieval_model_config"] = self._retrieval_model_config.to_dict()
+
+        # Add custom configuration
+        if hasattr(self, "skill_enabled"):
+            result["skill_enabled"] = (
+                self.skill_enabled
+            )
 
         return result
