@@ -323,7 +323,32 @@ class PromptStrategy(ExploreStrategy):
         - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
         - User-provided system prompt
         - Auto-injected context variables
+        
+        Note: The system_prompt may contain a special marker {__BUILTIN_SKILL_RULES__}
+        which will be replaced with the builtin skill detailed rules from executor.
+        The order is: Goals -> Tools -> {__BUILTIN_SKILL_RULES__} -> Guidelines -> User prompt
         """
+        # Handle system_prompt with builtin skill rules marker
+        tools_usage_guidelines = """
+### tools use Constraints：
+- 你必须清晰的理解问题和熟练使用工具，优先使用工具回答。
+- 当需要调用工具的时候，你需要使用"=>#tool_name: {{key:value}}"的格式来调用工具,其中参数为严格的json格式，例如"=>#someskill: {"key1": "value1", "key2": "value2"}"。
+"""
+        
+        # Replace the marker with Tools Usage Guidelines
+        if system_prompt and "{__BUILTIN_SKILL_RULES__}" in system_prompt:
+            # Executor has placed builtin rules before the marker
+            system_prompt_with_guidelines = system_prompt.replace(
+                "{__BUILTIN_SKILL_RULES__}", 
+                "\n" + tools_usage_guidelines
+            )
+        else:
+            # No marker, just add Tools Usage Guidelines before system prompt
+            if system_prompt and system_prompt.strip():
+                system_prompt_with_guidelines = tools_usage_guidelines + "\n## User Demands:\n" + system_prompt.strip()
+            else:
+                system_prompt_with_guidelines = tools_usage_guidelines
+
         role_format = """
 ## Goals：
 - 你需要分析用户的问题，决定由自己回答问题还是使用工具来处理问题。tools中的工具就是你可以使用的全部工具。
@@ -331,22 +356,21 @@ class PromptStrategy(ExploreStrategy):
 ## tools:
 {tools}
 
-### tools use Constraints：
-- 你必须清晰的理解问题和熟练使用工具，优先使用工具回答。
-- 当需要调用工具的时候，你需要使用"=>#tool_name: {{key:value}}"的格式来调用工具,其中参数为严格的json格式，例如"=>#someskill: {"key1": "value1", "key2": "value2"}"。
-
+{system_prompt_with_guidelines}
 {metadata_prompt}
 {context_variables}
-{system_prompt}
 """
         if skillkit is not None and not skillkit.isEmpty():
             # Use getFormattedToolsDescription instead of getSchemas for better readability
             role = role_format.replace(r"{tools}", skillkit.getFormattedToolsDescription(tools_format))
         else:
-            role_format = """{metadata_prompt}
-{context_variables}
-{system_prompt}"""
+            # Empty skillkit case - still need to handle guidelines
+            role_format = """{system_prompt_with_guidelines}
+{metadata_prompt}
+{context_variables}"""
             role = role_format
+
+        role = role.replace(r"{system_prompt_with_guidelines}", system_prompt_with_guidelines)
 
         # Inject metadata prompt from skillkits via skill.owner_skillkit
         metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
@@ -356,13 +380,6 @@ class PromptStrategy(ExploreStrategy):
         context_variables_str = self._format_context_variables(context)
         role = role.replace(r"{context_variables}", context_variables_str)
 
-        # Replace user system prompt
-        if len(system_prompt.strip()) == 0:
-            role = role.replace(r"{system_prompt}", "")
-        else:
-            role = role.replace(
-                r"{system_prompt}", "## User Demands:\n" + system_prompt.strip()
-            )
         return role
     
     def _format_context_variables(self, context: Optional[Context]) -> str:
@@ -559,6 +576,10 @@ class ToolCallStrategy(ExploreStrategy):
         - Metadata prompt from skillkits (e.g., ResourceSkillkit Level 1)
         - User-provided system prompt
         - Auto-injected context variables
+        
+        Note: The system_prompt may contain a special marker {__BUILTIN_SKILL_RULES__}
+        which will be replaced with the builtin skill detailed rules from executor.
+        The order is: Goals -> Tools -> {__BUILTIN_SKILL_RULES__} -> Guidelines -> User prompt
         """
         role_format = """
 ## Goals：
@@ -567,15 +588,9 @@ class ToolCallStrategy(ExploreStrategy):
 ## Available Tools:
 {tools}
 
-### Tools Usage Guidelines：
-- 仔细阅读每个工具的描述和参数要求
-- 根据问题的具体需求选择最合适的工具
-- 在调用工具前确保参数完整和正确
-- 如果不确定工具用法，可以先尝试简单的调用来了解
-
+{system_prompt_with_guidelines}
 {metadata_prompt}
 {context_variables}
-{system_prompt}
         """
 
         # Replace tools description
@@ -587,6 +602,34 @@ class ToolCallStrategy(ExploreStrategy):
                 r"{tools}", "用户没有配置工具，你只能自己回答问题！"
             )
 
+        # Handle system_prompt with builtin skill rules marker
+        # The marker {__BUILTIN_SKILL_RULES__} is replaced with empty string here
+        # because executor already placed the rules in the correct position
+        tools_usage_guidelines = """
+### Tools Usage Guidelines：
+- 仔细阅读每个工具的描述和参数要求
+- 根据问题的具体需求选择最合适的工具
+- 在调用工具前确保参数完整和正确
+- 如果不确定工具用法，可以先尝试简单的调用来了解
+"""
+        
+        # Replace the marker with Tools Usage Guidelines
+        if system_prompt and "{__BUILTIN_SKILL_RULES__}" in system_prompt:
+            # Executor has placed builtin rules before the marker
+            # We replace the marker with Tools Usage Guidelines
+            system_prompt_with_guidelines = system_prompt.replace(
+                "{__BUILTIN_SKILL_RULES__}", 
+                "\n" + tools_usage_guidelines
+            )
+        else:
+            # No marker, just add Tools Usage Guidelines before system prompt
+            if system_prompt and system_prompt.strip():
+                system_prompt_with_guidelines = tools_usage_guidelines + "\n" + system_prompt
+            else:
+                system_prompt_with_guidelines = tools_usage_guidelines
+
+        role_format = role_format.replace(r"{system_prompt_with_guidelines}", system_prompt_with_guidelines)
+
         # Inject metadata prompt from skillkits via skill.owner_skillkit
         metadata_prompt = Skillkit.collect_metadata_from_skills(skillkit)
         role_format = role_format.replace(r"{metadata_prompt}", metadata_prompt)
@@ -594,12 +637,6 @@ class ToolCallStrategy(ExploreStrategy):
         # Auto-inject context_variables
         context_variables_str = self._format_context_variables(context)
         role_format = role_format.replace(r"{context_variables}", context_variables_str)
-
-        # Replace user system prompt
-        if not system_prompt or len(system_prompt.strip()) == 0:
-            role_format = role_format.replace(r"{system_prompt}", "")
-        else:
-            role_format = role_format.replace(r"{system_prompt}", system_prompt)
 
         return role_format
     
