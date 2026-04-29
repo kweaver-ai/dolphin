@@ -1305,12 +1305,12 @@ class BasicCodeBlock:
             self.context.warn(f"toolkit is None, tool_name[{tool_name}]")
             return
 
-        tool = self.context.get_tool(tool_name)
-        if not tool:
+        skill = self.context.get_tool(tool_name)
+        if not skill:
             from dolphin.lib.toolkits.system_toolkit import SystemFunctions
-            tool = SystemFunctions.getTool(tool_name)
+            skill = SystemFunctions.getTool(tool_name)
 
-        if tool is None:
+        if skill is None:
             async for result in self.yield_message(
                 f"没有{tool_name}工具可以调用！", ""
             ):
@@ -1392,7 +1392,7 @@ class BasicCodeBlock:
             # NOTE: Do NOT call yield_message() in resume branch!
             # The resumed tool execution will create the stage naturally through recorder.update()
 
-        agent_as_tool = self.context.get_agent_tool(tool)
+        agent_as_tool = self.context.get_agent_tool(skill)
         if agent_as_tool is not None:
             cur_agent = self.context.get_cur_agent()
             if (
@@ -1427,7 +1427,7 @@ class BasicCodeBlock:
             # Default: all tool calls support interrupt if tool has interrupt_config
             # Skip interrupt check if this is a resumed tool call (intervention=False)
             if props.get('intervention', True):
-                interrupt_config = getattr(tool, 'interrupt_config', None)
+                interrupt_config = getattr(skill, 'interrupt_config', None)
                 
                 if interrupt_config and interrupt_config.get('requires_confirmation'):
                     # Format confirmation message (support parameter interpolation)
@@ -1454,7 +1454,7 @@ class BasicCodeBlock:
                     )
             
             console_tool_call(
-                tool_name, skill_params_json, verbose=self.context.verbose, skill=tool, is_cli=self.context.is_cli_mode()
+                tool_name, skill_params_json, verbose=self.context.verbose, skill=skill, is_cli=self.context.is_cli_mode()
             )
             if agent_as_tool is not None:
                 console_agent_tool_enter(tool_name, verbose=self.context.verbose, is_cli=self.context.is_cli_mode())
@@ -1463,7 +1463,7 @@ class BasicCodeBlock:
             import time
             tool_start_time = time.time()
             trace_listener = getattr(self.context, 'trace_listener', None)
-            tool_type = getattr(tool, 'skill_type', 'function') if hasattr(tool, 'skill_type') else 'function'
+            tool_type = getattr(skill, 'skill_type', 'function') if hasattr(skill, 'skill_type') else 'function'
             trace_context_kwargs = self._build_trace_context_kwargs()
             
             if trace_listener:
@@ -1482,7 +1482,7 @@ class BasicCodeBlock:
             result = None
             try:
                 async for result in Toolkit.arun(
-                    tool=tool,
+                    tool=skill,
                     tool_params=skill_params_json if skill_params_json is not None else {},
                     props=props,
                 ):
@@ -1530,7 +1530,7 @@ class BasicCodeBlock:
                     # Process the response data to return to frontend
                     try:
                         result = self.toolkit_hook.on_before_reply_app(
-                            reference_id=ref.reference_id, tool=tool
+                            reference_id=ref.reference_id, skill=skill
                         )
                     except Exception as e:
                         raise e
@@ -1635,7 +1635,7 @@ class BasicCodeBlock:
                 response=answer,
                 max_length=1024,
                 verbose=self.context.verbose,
-                skill=tool,
+                skill=skill,
                 params=skill_params_json,
                 is_cli=self.context.is_cli_mode(),
             )
