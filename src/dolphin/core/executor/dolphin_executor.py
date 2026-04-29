@@ -25,8 +25,8 @@ from dolphin.core.common.enums import MessageRole
 # Import sdk/lib modules under TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
     from dolphin.lib.memory.manager import MemoryManager
-    from dolphin.sdk.tool.global_toolkits import GlobalToolkits
-    from dolphin.sdk.tool.traditional_toolkit import TriditionalToolkit
+    from dolphin.sdk.skill.global_skills import GlobalSkills
+    from dolphin.sdk.skill.traditional_toolkit import TriditionalToolkit
     from dolphin.lib.vm.vm import VM, VMFactory
 
 logger = get_logger()
@@ -37,26 +37,15 @@ class DolphinExecutor:
         self,
         global_config: GlobalConfig | None = None,
         global_configpath="./config/global.yaml",
-        global_toolkits=None,
+        global_skills=None,
         global_types=None,
         type_folders=None,
         context_manager: Optional[ContextManager] = None,
         verbose: bool = False,
         is_cli: bool = False,
-        global_skills=None,
     ):
-        # Backward-compatibility: global_skills was renamed to global_toolkits
-        if global_skills is not None:
-            import warnings
-            warnings.warn(
-                "DolphinExecutor parameter 'global_skills' is deprecated, use 'global_toolkits' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if global_toolkits is None:
-                global_toolkits = global_skills
         # Lazy imports to avoid circular dependencies
-        from dolphin.sdk.tool.global_toolkits import GlobalToolkits
+        from dolphin.sdk.skill.global_skills import GlobalSkills
         from dolphin.lib.memory.manager import MemoryManager
         from dolphin.lib.vm.vm import VM, VMFactory
         
@@ -67,8 +56,8 @@ class DolphinExecutor:
             self.config = GlobalConfig.from_yaml(global_configpath)
         else:
             self.config = GlobalConfig()
-        self.global_toolkits = (
-            global_toolkits if global_toolkits is not None else GlobalToolkits(self.config)
+        self.global_skills = (
+            global_skills if global_skills is not None else GlobalSkills(self.config)
         )
         self.global_types = (
             global_types if global_types is not None else ObjectTypeFactory()
@@ -91,7 +80,7 @@ class DolphinExecutor:
  
         self.context = Context(
             config=self.config,
-            global_toolkits=self.global_toolkits,
+            global_skills=self.global_skills,
             memory_manager=self.memory_manager,
             global_types=self.global_types,
             context_manager=self.context_manager,
@@ -109,17 +98,6 @@ class DolphinExecutor:
         self._init_coroutine_components()
         # Debug controller reference (for CLI post-mortem access)
         self._debug_controller = None
-
-    @property
-    def global_skills(self):
-        """Deprecated: use :attr:`global_toolkits` instead."""
-        import warnings
-        warnings.warn(
-            "DolphinExecutor.global_skills is deprecated, use global_toolkits instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.global_toolkits
 
     def _init_coroutine_components(self):
         """Initialize coroutine execution component"""
@@ -211,8 +189,8 @@ class DolphinExecutor:
                 await self.context_initialize(tool_dict=value)
             elif key == "skillkit":
                 await self.context_initialize(skillkit=value)
-            elif key == "toolkit_hook":
-                await self.context_initialize(toolkit_hook=value)
+            elif key == "skillkit_hook":
+                await self.context_initialize(skillkit_hook=value)
             else:
                 pass
 
@@ -236,7 +214,7 @@ class DolphinExecutor:
         )
         self.context = Context(
             config=self.config,
-            global_toolkits=self.global_toolkits,
+            global_skills=self.global_skills,
             memory_manager=self.memory_manager,
             global_types=self.global_types,
             verbose=current_verbose,
@@ -252,7 +230,7 @@ class DolphinExecutor:
         param_dict=None,
         tool_dict=None,
         skillkit=None,
-        toolkit_hook=None,
+        skillkit_hook=None,
     ):
         if param_dict is not None:
             for name, value in param_dict.items():
@@ -261,13 +239,13 @@ class DolphinExecutor:
                 self.context.set_variable(name=name, value=value)
 
         if tool_dict is not None:
-            from dolphin.sdk.tool.traditional_toolkit import TriditionalToolkit
+            from dolphin.sdk.skill.traditional_toolkit import TriditionalToolkit
             triditional_toolkit = TriditionalToolkit.buildFromTooldict(tool_dict)
-            self.context.set_tools(triditional_toolkit)
+            self.context.set_skills(triditional_toolkit)
         elif skillkit is not None:
-            self.context.set_tools(skillkit)
-        elif toolkit_hook is not None:
-            self.context.set_toolkit_hook(toolkit_hook)
+            self.context.set_skills(skillkit)
+        elif skillkit_hook is not None:
+            self.context.set_skillkit_hook(skillkit_hook)
 
     def set_context(self, context: Context):
         self.context = context
@@ -282,14 +260,14 @@ class DolphinExecutor:
             model: Model name; if empty, the model used in the previous session from context will be used
             use_history: Whether to use historical messages, default is True
             mode: Exploration mode ("prompt" or "tool_call"); if empty, the mode used in the previous session from context will be used
-            skills: List of tools; if empty, the tool configuration used in the previous session from context will be used
+            skills: List of skills; if empty, the skill configuration used in the previous session from context will be used
             tools: Alias for skills
             content: User input content (optional)
             output_var: Name of the output variable, default is "result"
             **kwargs: Additional parameters
 
         Note:
-            The mode and tools parameters will automatically inherit the configuration from the previous round in context.
+            The mode and skills parameters will automatically inherit the configuration from the previous round in context.
             To override, explicitly pass them via kwargs.
 
         Yields:
@@ -301,7 +279,7 @@ class DolphinExecutor:
                 "请使用 flags.set_flag(flags.EXPLORE_BLOCK_V2, False) 禁用后再调用"
             )
 
-        # Initialize context.all_tools from global_toolkits if not already set
+        # Initialize context.all_skills from global_skills if not already set
         # This ensures tools are available for the exploration session
         self._prepare_for_run(**kwargs)
 
@@ -353,8 +331,8 @@ class DolphinExecutor:
     async def run(self, content, output_variables: Optional[list] = None, **kwargs):
         start_time = time.perf_counter()
 
-        # Populate context.toolkit from global_toolkits if not already set.
-        # This ensures agent tools (registered via GlobalToolkits) are
+        # Populate context.skillkit from global_skills if not already set.
+        # This ensures agent skills (registered via GlobalSkills) are
         # available for @agent_name() calls in DPH scripts.
         self._prepare_for_run(**kwargs)
 
@@ -411,18 +389,18 @@ class DolphinExecutor:
         self.context.debug(f"Time taken: {end_time - start_time} seconds")
 
     def _prepare_for_run(self, **kwargs):
-        # Only set tools if not already set (to preserve agent tools set by Environment)
-        if self.context.is_toolkit_empty():
-            # Try to get all tools including custom tools from global toolkits
-            # If global_toolkits has getAllTools method, use it; otherwise fall back to installed tools
-            if hasattr(self.global_toolkits, "getAllTools") and callable(
-                getattr(self.global_toolkits, "getAllTools")
+        # Only set skills if not already set (to preserve agent skills set by Environment)
+        if self.context.is_skillkit_empty():
+            # Try to get all skills including custom skills from global skills
+            # If global_skills has getAllSkills method, use it; otherwise fall back to installed skills
+            if hasattr(self.global_skills, "getAllSkills") and callable(
+                getattr(self.global_skills, "getAllSkills")
             ):
-                all_tools = self.global_toolkits.getAllTools()
-                self.context.set_tools(all_tools)
+                all_skills = self.global_skills.getAllSkills()
+                self.context.set_skills(all_skills)
             else:
-                installed_tools = self.global_toolkits.getInstalledTools()
-                self.context.set_tools(installed_tools)
+                installed_skills = self.global_skills.getInstalledSkills()
+                self.context.set_skills(installed_skills)
 
         if KEY_USER_ID in kwargs:
             self.context.set_variable(name=KEY_USER_ID, value=kwargs.get(KEY_USER_ID))

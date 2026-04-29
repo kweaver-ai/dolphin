@@ -89,7 +89,7 @@ class SnapshotProfile:
 
     # Status Information
     runtime_state_size_bytes: int = 0
-    toolkit_state_size_bytes: int = 0
+    skillkit_state_size_bytes: int = 0
     estimated_memory_mb: float = 0.0
     optimization_suggestions: List[str] = field(default_factory=list)
 
@@ -166,7 +166,7 @@ class SnapshotProfileAnalyzer:
 
         # State size
         runtime_size = self._calc_component_size(self.snapshot.runtime_state)
-        toolkit_size = self._calc_component_size(self.snapshot.toolkit_state)
+        skillkit_size = self._calc_component_size(self.snapshot.skillkit_state)
 
         # Memory Estimation
         estimated_memory = self._estimate_memory(original_bytes)
@@ -191,7 +191,7 @@ class SnapshotProfileAnalyzer:
             space_saved_ratio=space_saved_ratio,
             compression_buckets=compression_buckets,
             runtime_state_size_bytes=runtime_size,
-            toolkit_state_size_bytes=toolkit_size,
+            skillkit_state_size_bytes=skillkit_size,
             estimated_memory_mb=estimated_memory,
             optimization_suggestions=suggestions,
         )
@@ -397,7 +397,7 @@ class SnapshotProfileAnalyzer:
             'messages': self.snapshot.messages,
             'variables': self.snapshot.variables,
             'runtime_state': self.snapshot.runtime_state,
-            'toolkit_state': self.snapshot.toolkit_state,
+            'skillkit_state': self.snapshot.skillkit_state,
             'context_manager_state': self.snapshot.context_manager_state,
         }
 
@@ -488,7 +488,7 @@ class MarkdownFormatter:
             self._format_messages(),
             self._format_variables(),
             self._format_compression(),
-            self._format_runtime_toolkit(),
+            self._format_runtime_skillkit(),
             self._format_summary(),
         ]
         return '\n\n'.join(sections)
@@ -639,29 +639,29 @@ Timestamp: {timestamp_str} | Schema Version: {self.profile.schema_version}
 
         return '\n'.join(sections) + "\n\n---"
 
-    def _format_runtime_toolkit(self) -> str:
-        """Formatting runtime and Toolkit status"""
+    def _format_runtime_skillkit(self) -> str:
+        """Formatting runtime and Skillkit status"""
         p = self.profile
         b = p.compression_buckets
 
         runtime_comp = b.components.get('runtime_state') if b else None
-        toolkit_comp = b.components.get('toolkit_state') if b else None
+        skillkit_comp = b.components.get('skillkit_state') if b else None
 
-        lines = ["## Runtime & Toolkit", ""]
+        lines = ["## Runtime & Skillkit", ""]
 
         if runtime_comp:
             lines.append(f"- Runtime State: {self._format_bytes(runtime_comp.original_bytes)} → "
                         f"{self._format_bytes(runtime_comp.compressed_bytes)} "
                         f"(compression_ratio {runtime_comp.compression_ratio:.1%}, {runtime_comp.compressibility})")
 
-        if toolkit_comp:
-            if toolkit_comp.compression_ratio >= 0.99:
-                lines.append(f"- Toolkit State: {self._format_bytes(toolkit_comp.original_bytes)} "
-                           f"(uncompressed, {toolkit_comp.compressibility} compressibility)")
+        if skillkit_comp:
+            if skillkit_comp.compression_ratio >= 0.99:
+                lines.append(f"- Skillkit State: {self._format_bytes(skillkit_comp.original_bytes)} "
+                           f"(uncompressed, {skillkit_comp.compressibility} compressibility)")
             else:
-                lines.append(f"- Toolkit State: {self._format_bytes(toolkit_comp.original_bytes)} → "
-                           f"{self._format_bytes(toolkit_comp.compressed_bytes)} "
-                           f"(compression_ratio {toolkit_comp.compression_ratio:.1%}, {toolkit_comp.compressibility})")
+                lines.append(f"- Skillkit State: {self._format_bytes(skillkit_comp.original_bytes)} → "
+                           f"{self._format_bytes(skillkit_comp.compressed_bytes)} "
+                           f"(compression_ratio {skillkit_comp.compression_ratio:.1%}, {skillkit_comp.compressibility})")
 
         return '\n'.join(lines) + "\n\n---"
 
@@ -892,7 +892,7 @@ Timestamp: {timestamp_str} | Schema Version: {self.profile.schema_version}
     def _build_compression_rows(self, buckets: CompressionBuckets) -> List[List[str]]:
         """Build compressed component table row"""
         rows = []
-        order = ['messages', 'variables', 'runtime_state', 'toolkit_state', 'context_manager_state']
+        order = ['messages', 'variables', 'runtime_state', 'skillkit_state', 'context_manager_state']
 
         for name in order:
             if name not in buckets.components:

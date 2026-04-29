@@ -23,30 +23,8 @@ class Args:
     # Agent related
     agent: Optional[str] = None
     folder: Optional[str] = None
-    toolFolder: Optional[str] = None
+    skillFolder: Optional[str] = None
     query: Optional[str] = None
-
-    @property
-    def skillFolder(self) -> Optional[str]:
-        """Deprecated: use ``toolFolder`` instead."""
-        import warnings
-        warnings.warn(
-            "Args.skillFolder is deprecated, use Args.toolFolder instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.toolFolder
-
-    @skillFolder.setter
-    def skillFolder(self, value: Optional[str]) -> None:
-        """Deprecated: use ``toolFolder`` instead."""
-        import warnings
-        warnings.warn(
-            "Args.skillFolder is deprecated, use Args.toolFolder instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.toolFolder = value
     
     # Builtin agent mode
     useBuiltinAgent: bool = False  # True if using builtin explore agent
@@ -117,9 +95,8 @@ def _addAgentArguments(parser: argparse.ArgumentParser, required: bool = True) -
         help="Directory containing agent definitions"
     )
     parser.add_argument(
-        "--tool-folder", "--tool_folder", "--skill-folder", "--skill_folder",
-        type=str, dest="tool_folder",
-        help="Custom toolkit directory"
+        "--skill-folder", "--skill_folder", type=str, dest="skill_folder",
+        help="Custom skillkit directory"
     )
     parser.add_argument(
         "--query", "-q", type=str,
@@ -392,7 +369,7 @@ def _convertToArgs(argsDict: Dict[str, Any]) -> Args:
     """Convert parsed args dict to Args dataclass with field name mapping"""
     # Map CLI argument names to Args field names
     fieldMapping = {
-        'tool_folder': 'toolFolder',
+        'skill_folder': 'skillFolder',
         'model_name': 'modelName',
         'api_key': 'apiKey',
         'type_api': 'typeApi',

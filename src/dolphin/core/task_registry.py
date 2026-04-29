@@ -139,7 +139,7 @@ class TaskRegistry:
         self.tasks: Dict[str, Task] = {}
         self._lock = asyncio.Lock()
 
-        # Config fields (set by PlanToolkit._plan_tasks)
+        # Config fields (set by PlanSkillkit._plan_tasks)
         self.exec_mode: PlanExecMode = PlanExecMode.PARALLEL
         self.max_concurrency: int = 5
 

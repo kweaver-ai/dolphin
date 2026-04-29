@@ -15,7 +15,7 @@ class ContextSnapshot:
     variables: Dict[str, Any] = None
     messages: List[Dict] = None
     runtime_state: Dict = None
-    toolkit_state: Dict = None
+    skillkit_state: Dict = None
     context_manager_state: Dict = None  # Added: Save the complete bucket structure
 
     def __post_init__(self):
@@ -25,8 +25,8 @@ class ContextSnapshot:
             self.messages = []
         if self.runtime_state is None:
             self.runtime_state = {}
-        if self.toolkit_state is None:
-            self.toolkit_state = {}
+        if self.skillkit_state is None:
+            self.skillkit_state = {}
         if self.context_manager_state is None:
             self.context_manager_state = {}
 
@@ -37,7 +37,7 @@ class ContextSnapshot:
         variables: Dict = None,
         messages: List = None,
         runtime_state: Dict = None,
-        toolkit_state: Dict = None,
+        skillkit_state: Dict = None,
         context_manager_state: Dict = None,
     ) -> "ContextSnapshot":
         """Create Snapshot"""
@@ -48,7 +48,7 @@ class ContextSnapshot:
             variables=variables or {},
             messages=messages or [],
             runtime_state=runtime_state or {},
-            toolkit_state=toolkit_state or {},
+            skillkit_state=skillkit_state or {},
             context_manager_state=context_manager_state or {},
         )
 

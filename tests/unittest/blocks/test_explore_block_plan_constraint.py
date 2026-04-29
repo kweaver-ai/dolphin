@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch
 from dolphin.core.context.context import Context
 from dolphin.core.config.global_config import GlobalConfig
 from dolphin.core.code_block.explore_block import ExploreBlock
-from dolphin.core.code_block.tool_call_deduplicator import DefaultToolCallDeduplicator
+from dolphin.core.code_block.skill_call_deduplicator import DefaultSkillCallDeduplicator
 from dolphin.core.task_registry import Task, TaskStatus
 from dolphin.core.utils.tools import ToolInterrupt
-from dolphin.core.common.constants import MAX_TOOL_CALL_TIMES
+from dolphin.core.common.constants import MAX_SKILL_CALL_TIMES
 from dolphin.core.common.enums import StreamItem
 
 
@@ -93,7 +93,7 @@ class TestExploreBlockPlanConstraint:
         await context.task_registry.add_task(task)
         
         block = ExploreBlock(context=context)
-        block.times = MAX_TOOL_CALL_TIMES
+        block.times = MAX_SKILL_CALL_TIMES
         
         # Plan mode must still be bounded to prevent infinite loops
         assert await block._should_continue_explore() is False
@@ -114,8 +114,8 @@ class TestExploreBlockPlanConstraint:
         # Mock repeated calls detection
         mock_deduplicator = MagicMock()
         # Exceeds MAX_DUPLICATE_COUNT to trigger repeated calls detection
-        excessive_call_count = DefaultToolCallDeduplicator.MAX_DUPLICATE_COUNT + 1
-        mock_deduplicator.toolcalls = {"tool1": excessive_call_count}
+        excessive_call_count = DefaultSkillCallDeduplicator.MAX_DUPLICATE_COUNT + 1
+        mock_deduplicator.skillcalls = {"tool1": excessive_call_count}
         block.strategy = MagicMock()
         block.strategy.get_deduplicator.return_value = mock_deduplicator
         

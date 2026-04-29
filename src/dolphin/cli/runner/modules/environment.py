@@ -50,7 +50,7 @@ async def initializeEnvironment(args: Args):
     env = Env(
         globalConfig=globalConfig,
         agentFolderPath=args.folder,
-        toolkitFolderPath=args.toolFolder,
+        skillkitFolderPath=args.skillFolder,
         output_variables=[],
         verbose=args.saveHistory,
         is_cli=True,  # CLI mode: enable Rich/terminal beautification

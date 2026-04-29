@@ -1,5 +1,736 @@
-"""Deprecated: use dolphin.lib.toolkits.system_toolkit instead."""
-import warnings
-warnings.warn("dolphin.lib.skillkits.system_skillkit is deprecated. Use dolphin.lib.toolkits.system_toolkit instead.", DeprecationWarning, stacklevel=2)
-from dolphin.lib.toolkits.system_toolkit import SystemFunctionsToolkit as SystemFunctionsSkillKit
-__all__ = ["SystemFunctionsSkillKit"]
+from __future__ import annotations
+import ast
+from datetime import datetime
+import json
+import os
+import glob
+import re
+import time
+from typing import Any, List, Union, Optional, Set
+
+from dolphin.core.skill.context_retention import context_retention, DEFAULT_SUMMARY_MAX_LENGTH
+from dolphin.core.skill.skillkit import SkillFunction, Skillkit
+
+"""System function configuration mapping:
+
+Configuration Name                Actual Function
+system_functions._date          -> _date
+system_functions._write_file    -> _write_file
+system_functions._read_file     -> _read_file
+system_functions._read_folder   -> _read_folder
+system_functions._grep          -> _grep
+system_functions._extract_code  -> _extract_code
+system_functions._write_jsonl   -> _write_jsonl
+system_functions._sleep         -> _sleep
+system_functions._get_cached_result_detail -> _get_cached_result_detail
+
+Usage example:
+skill:
+  enabled_skills:
+    - "system_functions.*"        # Load all system functions (recommended)
+    - "system_functions._date"    # Or load specific functions
+    - "system_functions._write_file"
+    - "system_functions._read_file"
+    - "vm_skillkit"  # Other skills configured normally
+
+Notes:
+- Function names include an underscore prefix (e.g., _date)
+- Use wildcard "system_functions.*" to load all functions
+- When configuring specific functions, use the full system_functions._date format
+- If enabled_skills is None, all system functions will be loaded (backward compatibility)
+- If enabled_skills is an empty list [], no system functions will be loaded
+- If enabled_skills includes other skills but not system_functions.*, system functions will not be loaded
+"""
+
+
+def _normalize_path(value: Any) -> str:
+    """Normalize a user-provided path string.
+
+    This function makes path-based tools resilient to common LLM formatting
+    artifacts such as surrounding whitespace, quotes, or markdown backticks.
+    It also expands environment variables and the user home directory.
+    """
+    path = "" if value is None else str(value)
+    path = path.strip()
+    while len(path) >= 2 and path[0] == path[-1] and path[0] in {"'", '"', "`"}:
+        path = path[1:-1].strip()
+    path = os.path.expandvars(path)
+    path = os.path.expanduser(path)
+    return os.path.normpath(path)
+
+
+
+# Maximum file size (in bytes) that file-reading tools will process.
+_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# Directories that os.walk should never descend into.
+_SKIP_DIRS = frozenset({
+    ".colima", ".docker", ".lima", ".vagrant",
+    "node_modules", ".git", "__pycache__",
+    ".venv", "venv", ".tox",
+})
+
+
+def _check_file_size(file_path: str) -> str | None:
+    """Return an error string if *file_path* exceeds the size limit, else ``None``."""
+    try:
+        size = os.path.getsize(file_path)
+    except OSError:
+        return None
+    if size > _MAX_FILE_SIZE:
+        size_mb = size / (1024 * 1024)
+        return f"[SKIPPED] File too large ({size_mb:.1f} MB, limit {_MAX_FILE_SIZE // (1024 * 1024)} MB): {file_path}"
+    return None
+
+
+class SystemFunctionsSkillKit(Skillkit):
+    _DEFAULT_CACHED_RESULT_LIMIT = 2000
+    _MAX_CACHED_RESULT_LIMIT = 20000
+    _MAX_REFERENCE_ID_CANDIDATES = 10
+    _SKILL_REFERENCE_HINT_PATTERN = re.compile(
+        r"_get_cached_result_detail\(\s*['\"](?P<id>[^'\"]+)['\"]\s*,\s*scope\s*=\s*['\"]skill['\"]"
+    )
+
+    def __init__(self, enabled_functions: List[str] | None = None):
+        """Initialize system function toolkit
+
+        Args:
+            enabled_functions: List of enabled functions
+                                     - None: Load all functions (backward compatibility)
+                                     - []: Load no functions
+                                     - ["date", "write_file"]: Load only specified functions
+        """
+        super().__init__()
+        self.enabled_functions = enabled_functions
+
+    def getName(self) -> str:
+        return "system_functions"
+
+    def _date(self, **kwargs) -> str:
+        """Get current date"""
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def _extract_code(self, content: str, **kwargs) -> str:
+        """Extract code from markdown block, removing language specifier if present.
+
+        Args:
+            content (str): content
+
+        Returns:
+            str: code
+        """
+        # Split the content by triple backticks
+        parts = content.split("```")
+        if len(parts) < 3:
+            return ""  # No code block found
+
+        code_section = parts[1].strip()
+
+        # Split into lines
+        lines = code_section.splitlines()
+
+        # Check if first line is likely a language identifier
+        if lines and lines[0].strip() and lines[0].strip().isidentifier():
+            # Remove the first line (language) and join the rest
+            code = "\n".join(lines[1:]).strip()
+        else:
+            code = code_section
+
+        return code
+
+    def _write_file(self, file_path: str, content: str, **kwargs) -> str:
+        """Write content to file, create file if it does not exist
+
+        Args:
+            file_path (str): File path
+            content (str): File content
+
+        Returns:
+            str: File path
+        """
+        file_path = _normalize_path(file_path)
+        file_dir = os.path.dirname(file_path)
+        # Only create directory if there is a directory component
+        if file_dir and not os.path.exists(file_dir):
+            os.makedirs(file_dir, exist_ok=True)
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(str(content))
+        return file_path
+
+    def _write_jsonl(self, file_path: str, content: Any) -> str:
+        """Write content to a JSONL file, creating the file if it does not exist
+
+        Args:
+            file_path (str): File path
+            content (List[Dict[str, Any]]): Content
+
+        Returns:
+            str: File path
+        """
+        file_path = _normalize_path(file_path)
+        file_dir = os.path.dirname(file_path)
+        if file_dir and not os.path.exists(file_dir):
+            os.makedirs(file_dir, exist_ok=True)
+
+        if isinstance(content, str):
+            try:
+                content = ast.literal_eval(content)
+            except Exception:
+                try:
+                    content = json.loads(content, strict=False)
+                except Exception:
+                    raise ValueError(f"Invalid content: {content}")
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            for item in content:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        return file_path
+
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
+    def _read_file(self, file_path: str, **kwargs) -> str:
+        """Read file
+
+        Args:
+            file_path (str): File path
+
+        Returns:
+            str: File content
+        """
+        file_path = _normalize_path(file_path)
+        if not os.path.exists(file_path):
+            return f"[ERROR] File not found: {file_path}"
+        if os.path.isdir(file_path):
+            return f"[ERROR] Path is a directory, not a file: {file_path}"
+        size_err = _check_file_size(file_path)
+        if size_err:
+            return size_err
+        try:
+            with open(file_path, "rb") as f:
+                data = f.read()
+
+            try:
+                return data.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                text = data.decode("utf-8", errors="replace")
+                return (
+                    "[WARNING] File is not valid UTF-8; decoded with replacement characters.\n"
+                    + text
+                )
+        except Exception as e:
+            raise RuntimeError(f"Failed to read file: {file_path}: {e}") from e
+
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
+    def _read_folder(
+        self,
+        folder_path: str,
+        extensions: Union[str, List[str]] = None,
+        start_symbol: str = None,
+        end_symbol: str = None,
+        **kwargs,
+    ) -> str:
+        """Read the content of files with specific extensions in a folder.
+
+        Args:
+            folder_path (str): Folder path
+            extensions (str or List[str], optional): File extensions, can be a single extension or a list of extensions
+                                                    e.g., "txt" or ["txt", "md", "py"]
+            start_symbol (str, optional): Start symbol, only read content after start_symbol
+            end_symbol (str, optional): End symbol, only read content before end_symbol
+                                               Used together with start_symbol to read content between the two symbols
+
+        Returns:
+            str: Content of all matching files, sorted by filename, with each file's content prefixed by its filename
+        """
+        folder_path = _normalize_path(folder_path)
+        if not os.path.exists(folder_path):
+            return f"Error: Folder not found: {folder_path}"
+
+        if not os.path.isdir(folder_path):
+            return f"Error: Path is not a directory: {folder_path}"
+
+        # Handling the extension parameter
+        if extensions is None:
+            # If no extension is specified, read all files
+            pattern = "*"
+            search_pattern = os.path.join(folder_path, pattern)
+            files = glob.glob(search_pattern)
+        elif isinstance(extensions, str):
+            # Single extension
+            pattern = f"*.{extensions}"
+            search_pattern = os.path.join(folder_path, pattern)
+            files = glob.glob(search_pattern)
+        elif isinstance(extensions, list):
+            # Multiple extensions - iterate and collect files for each extension
+            # Note: Python glob doesn't support bash brace expansion like *.{md,py}
+            pattern = f"*.{{{','.join(extensions)}}}"
+            files = []
+            for ext in extensions:
+                ext_pattern = f"*.{ext}"
+                search_pattern = os.path.join(folder_path, ext_pattern)
+                files.extend(glob.glob(search_pattern))
+        else:
+            raise ValueError("extensions must be None, str, or List[str]")
+
+        # Filter out files (excluding directories) and sort them
+        files = [f for f in files if os.path.isfile(f)]
+        files.sort()
+
+        if not files:
+            return f"No files found in {folder_path} with pattern {pattern}"
+
+        result_parts = []
+
+        for file_path in files:
+            try:
+                size_err = _check_file_size(file_path)
+                if size_err:
+                    file_name = os.path.basename(file_path)
+                    result_parts.append(f"=== FILE: {file_name} ===\n{size_err}")
+                    continue
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                # Handling start and end symbols
+                if start_symbol is not None or end_symbol is not None:
+                    if start_symbol is not None:
+                        start_pos = content.find(start_symbol)
+                        if start_pos != -1:
+                            content = content[start_pos + len(start_symbol) :]
+                        else:
+                            # If the start symbol is not found, skip this file or include a warning message.
+                            content = f"[WARNING: start_symbol '{start_symbol}' not found in {os.path.basename(file_path)}]"
+
+                    if end_symbol is not None and not content.startswith("[WARNING"):
+                        end_pos = content.find(end_symbol)
+                        if end_pos != -1:
+                            content = content[:end_pos]
+                        else:
+                            # If the ending symbol is not found, a warning message is included.
+                            content = f"[WARNING: end_symbol '{end_symbol}' not found in {os.path.basename(file_path)}]\n{content}"
+
+                # Add file identifier and content
+                file_name = os.path.basename(file_path)
+                result_parts.append(f"=== FILE: {file_name} ===\n{content.strip()}")
+
+            except Exception as e:
+                # If reading the file fails, add an error message
+                file_name = os.path.basename(file_path)
+                result_parts.append(
+                    f"=== FILE: {file_name} ===\n[ERROR: Failed to read file - {str(e)}]"
+                )
+
+        return "\n\n".join(result_parts)
+
+    @context_retention(mode="summary", max_length=DEFAULT_SUMMARY_MAX_LENGTH, detail_hint_min_omitted=1200)
+    def _grep(
+        self,
+        target_path: str,
+        pattern: str,
+        before: int = 10,
+        after: int = 10,
+        recursive: bool = True,
+        file_extensions: Union[str, List[str], None] = None,
+        case_sensitive: bool = True,
+        use_regex: bool = True,
+        **kwargs,
+    ) -> str:
+        """Similar to grep functionality, searches for matching content under the specified path and can display context.
+
+        Args:
+            target_path (str): Path to a file or folder.
+            pattern (str): Matching pattern, default is regex matching.
+            before (int, optional): Number of lines to show before matches. Default is 0.
+            after (int, optional): Number of lines to show after matches. Default is 0.
+            recursive (bool, optional): Whether to recursively search folders. Default is True.
+            file_extensions (Union[str, List[str], None], optional): Only match files with specified extensions (do not include the dot).
+            case_sensitive (bool, optional): Whether to distinguish case. Default is True.
+            use_regex (bool, optional): Whether to treat pattern as a regular expression. Default is True.
+
+        Returns:
+            str: Matching results, including file paths, line numbers, and context.
+        """
+        if not target_path:
+            raise ValueError("target_path is required")
+        target_path = _normalize_path(target_path)
+        if pattern is None or pattern == "":
+            raise ValueError("pattern cannot be empty")
+        if before < 0 or after < 0:
+            raise ValueError("before and after must be non-negative integers")
+
+        if not os.path.exists(target_path):
+            return f"Error: Path not found: {target_path}"
+
+        if isinstance(file_extensions, str):
+            file_exts = [file_extensions]
+        else:
+            file_exts = file_extensions
+
+        normalized_exts = None
+        if file_exts:
+            normalized_exts = []
+            for ext in file_exts:
+                if not isinstance(ext, str) or not ext:
+                    raise ValueError("file_extensions must contain non-empty strings")
+                normalized_exts.append(ext if ext.startswith(".") else f".{ext}")
+
+        files: List[str] = []
+        if os.path.isfile(target_path):
+            files = [target_path]
+        elif os.path.isdir(target_path):
+            if recursive:
+                for root, dirs, filenames in os.walk(target_path):
+                    dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+                    for filename in filenames:
+                        file_path = os.path.join(root, filename)
+                        if normalized_exts and not file_path.endswith(
+                            tuple(normalized_exts)
+                        ):
+                            continue
+                        files.append(file_path)
+            else:
+                for filename in os.listdir(target_path):
+                    file_path = os.path.join(target_path, filename)
+                    if not os.path.isfile(file_path):
+                        continue
+                    if normalized_exts and not file_path.endswith(
+                        tuple(normalized_exts)
+                    ):
+                        continue
+                    files.append(file_path)
+        else:
+            raise ValueError(f"Path is neither file nor directory: {target_path}")
+
+        if not files:
+            return f"No files to search in {target_path}"
+
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            regex = re.compile(pattern if use_regex else re.escape(pattern), flags)
+        except re.error as exc:
+            raise ValueError(f"Invalid pattern: {exc}") from exc
+
+        results: List[str] = []
+        match_found = False
+        for file_path in sorted(files):
+            size_err = _check_file_size(file_path)
+            if size_err:
+                results.append(f"=== {file_path} ===\n{size_err}")
+                continue
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = f.readlines()
+            except (OSError, UnicodeDecodeError) as exc:
+                results.append(
+                    f"=== {file_path} ===\n[ERROR: Failed to read file - {str(exc)}]"
+                )
+                continue
+
+            match_indexes: List[int] = []
+            for idx, line in enumerate(lines):
+                if regex.search(line):
+                    match_indexes.append(idx)
+
+            if not match_indexes:
+                continue
+
+            match_found = True
+            match_index_set = set(match_indexes)
+            context_indexes: List[int] = []
+            for idx in match_indexes:
+                start = max(0, idx - before)
+                end = min(len(lines) - 1, idx + after)
+                context_indexes.extend(range(start, end + 1))
+
+            unique_indexes = sorted(set(context_indexes))
+
+            groups: List[List[int]] = []
+            current_group: List[int] = []
+            prev_index = None
+            for index in unique_indexes:
+                if prev_index is not None and index - prev_index > 1:
+                    if current_group:
+                        groups.append(current_group)
+                    current_group = []
+                current_group.append(index)
+                prev_index = index
+            if current_group:
+                groups.append(current_group)
+
+            file_results: List[str] = []
+            file_results.append(f"=== FILE: {os.path.basename(file_path)} ===")
+            for group_idx, group in enumerate(groups):
+                if group_idx > 0:
+                    file_results.append("--")
+                for index in group:
+                    line_number = index + 1
+                    marker = ">" if index in match_index_set else " "
+                    line_content = lines[index].rstrip("\r\n")
+                    file_results.append(
+                        f"{file_path}:{line_number}:{marker} {line_content}"
+                    )
+
+            results.append("\n".join(file_results))
+
+        if not match_found:
+            if results:
+                # Some files were skipped or had errors; surface those messages.
+                return "\n".join(results)
+            return f"No matches found for '{pattern}' in {target_path}"
+
+        return "\n".join(results)
+
+    def _sleep(self, seconds: float, **kwargs) -> str:
+        """Pause execution for a specified number of seconds.
+
+        This is useful for:
+        - Waiting for page loads or animations in browser automation
+        - Rate limiting API calls
+        - Waiting for long-running operations to complete
+
+        Args:
+            seconds (float): Number of seconds to sleep. Can be a decimal for sub-second waits.
+                            Maximum allowed is 300 seconds (5 minutes).
+
+        Returns:
+            str: Confirmation message with actual sleep duration.
+        """
+        # Validate and cap the sleep duration
+        if seconds < 0:
+            raise ValueError("seconds must be non-negative")
+        if seconds > 300:
+            seconds = 300  # Cap at 5 minutes for safety
+
+        start_time = time.time()
+        time.sleep(seconds)
+        actual_duration = time.time() - start_time
+
+        return f"Slept for {actual_duration:.2f} seconds"
+
+    async def _get_cached_result_detail(
+        self,
+        reference_id: str,
+        scope: str = "auto",
+        offset: int = 0,
+        limit: int = _DEFAULT_CACHED_RESULT_LIMIT,
+        format: str = "text",
+        include_meta: bool = False,
+        **kwargs,
+    ) -> str:
+        """Get the full details of a cached result (task or skill).
+
+        Use this tool when the output of another tool has been truncated and you are
+        explicitly prompted to call this tool with a specific reference_id.
+
+        Args:
+            reference_id: The result reference ID (task_id or skill reference_id)
+            scope: "task" | "skill" | "auto" (default: "auto", tries task -> skill)
+            offset: Start position (character offset), default 0
+            limit: Maximum number of characters to return, default 2000
+            format: Output format, V1 supports "text" only
+            include_meta: Whether to append a metadata footer
+
+        Returns:
+            The detailed content within the specified range.
+        """
+        if format != "text":
+            return "Error: INVALID_ARGUMENT (format must be 'text' in V1)."
+
+        if offset < 0 or limit <= 0:
+            return "Error: INVALID_ARGUMENT (offset must be >= 0, limit must be > 0)."
+
+        max_limit = self._MAX_CACHED_RESULT_LIMIT
+        clamped = False
+        if limit > max_limit:
+            limit = max_limit
+            clamped = True
+
+        # Get context from props (injected by skill execution flow)
+        props = kwargs.get("props", {})
+        context = props.get("gvp", None)  # Note: context is passed as 'gvp' in skill_run()
+        if context is None:
+            return "Error: context not available. This tool must be called within a running session."
+
+        resolved_scope = scope or "auto"
+        content: str | None = None
+        error_text: str | None = None
+
+        async def _try_task() -> tuple[str | None, str | None]:
+            if not hasattr(context, "is_plan_enabled") or not context.is_plan_enabled():
+                return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
+            registry = getattr(context, "task_registry", None)
+            if registry is None:
+                return None, "Error: scope 'task' requires plan mode. Please call _get_task_output or ensure plan is enabled."
+
+            task = await registry.get_task(reference_id)
+            if not task:
+                return None, f"Error: task_id '{reference_id}' not found."
+
+            status = getattr(task, "status", None)
+            status_value = getattr(status, "value", str(status)) if status is not None else "unknown"
+            if status_value != "completed":
+                if status_value == "failed":
+                    err = getattr(task, "error", None) or "Unknown error"
+                    return None, f"Error: task '{reference_id}' failed: {err}"
+                return None, f"Error: task '{reference_id}' is not completed (status: {status_value})."
+
+            output = getattr(task, "answer", None)
+            if output is None:
+                # Backward compatibility: historical Task objects may expose "output".
+                output = getattr(task, "output", None)
+            return str(output or "(no output)"), None
+
+        def _extract_text_content(content: Any) -> str:
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                text_parts: list[str] = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(str(block.get("text", "")))
+                return "".join(text_parts)
+            return str(content)
+
+        def _collect_skill_reference_allowlist() -> Set[str]:
+            allowlist: Set[str] = set()
+            messages = None
+
+            context_manager = getattr(context, "context_manager", None)
+            if context_manager is not None and hasattr(context_manager, "to_dph_messages"):
+                try:
+                    messages = context_manager.to_dph_messages()
+                except Exception:
+                    messages = None
+
+            if messages is None and hasattr(context, "get_messages"):
+                try:
+                    messages = context.get_messages()
+                except Exception:
+                    messages = None
+
+            if messages is None or not hasattr(messages, "get_messages"):
+                return allowlist
+
+            for message in messages.get_messages():
+                text_content = _extract_text_content(getattr(message, "content", ""))
+                if not text_content:
+                    continue
+                for match in self._SKILL_REFERENCE_HINT_PATTERN.finditer(text_content):
+                    allowlist.add(match.group("id"))
+
+            return allowlist
+
+        def _validate_skill_reference_id() -> str | None:
+            allowlist = _collect_skill_reference_allowlist()
+            if reference_id in allowlist:
+                return None
+
+            candidates = sorted(allowlist)
+            candidate_text = (
+                ", ".join(candidates[: self._MAX_REFERENCE_ID_CANDIDATES])
+                if candidates
+                else "none"
+            )
+            return (
+                "Error: INVALID_REFERENCE_ID "
+                f"(reference_id '{reference_id}' is not a valid skill reference for this session. "
+                f"Available reference_ids: {candidate_text})"
+            )
+
+        def _try_skill() -> tuple[str | None, str | None]:
+            hook = getattr(context, "skillkit_hook", None)
+            if hook is None:
+                return None, "Error: skillkit_hook not available in context."
+
+            validation_error = _validate_skill_reference_id()
+            if validation_error:
+                return None, validation_error
+
+            raw = hook.get_raw_result(reference_id)
+            if raw is None:
+                return (
+                    None,
+                    f"Error: reference_id '{reference_id}' not found or expired. The result may have been cleaned up or the reference ID is incorrect.",
+                )
+            return str(raw), None
+
+        if resolved_scope == "task":
+            content, error_text = await _try_task()
+        elif resolved_scope == "skill":
+            content, error_text = _try_skill()
+        elif resolved_scope == "auto":
+            # Deterministic: if a task with the same id exists, use task scope and do not fall back.
+            registry = getattr(context, "task_registry", None)
+            if getattr(context, "is_plan_enabled", lambda: False)() and registry and await registry.get_task(reference_id):
+                resolved_scope = "task"
+                content, error_text = await _try_task()
+            else:
+                resolved_scope = "skill"
+                content, error_text = _try_skill()
+        else:
+            return "Error: INVALID_ARGUMENT (scope must be 'task', 'skill', or 'auto')."
+
+        if content is None:
+            return error_text or "Error: NOT_FOUND"
+
+        total_length = len(content)
+
+        # Get specified range
+        result = content[offset : offset + limit]
+        returned = len(result)
+
+        # Append meta info to help LLM understand position
+        if offset + returned < total_length:
+            remaining = total_length - offset - returned
+            result += f"\n... ({remaining} chars remaining, total {total_length})"
+
+        if clamped:
+            result += f"\n... (limit clamped to {max_limit})"
+
+        if include_meta:
+            next_offset = offset + returned
+            next_offset_str = str(next_offset) if next_offset < total_length else "null"
+            result += "\n\n=== Cached Result Meta ==="
+            result += f"\nscope={resolved_scope}"
+            result += f"\nreference_id={reference_id}"
+            result += f"\noffset={offset}"
+            result += f"\nreturned={returned}"
+            result += f"\nnext_offset={next_offset_str}"
+            result += f"\ntotal={total_length}"
+
+        return result
+
+    def _createSkills(self) -> List[SkillFunction]:
+        all_skills = [
+            SkillFunction(self._date),
+            SkillFunction(self._write_file),
+            SkillFunction(self._write_jsonl),
+            SkillFunction(self._read_file),
+            SkillFunction(self._read_folder),
+            SkillFunction(self._extract_code),
+            SkillFunction(self._grep),
+            SkillFunction(self._sleep),
+            SkillFunction(self._get_cached_result_detail),
+        ]
+
+        # If no enable function is specified, return all skills (backward compatibility)
+        if self.enabled_functions is None:
+            return all_skills
+
+        # If wildcard "*" is in enabled_functions, return all skills
+        if "*" in self.enabled_functions:
+            return all_skills
+
+        # Filter enabled skills
+        enabled_skills = []
+        for skill in all_skills:
+            # Get the function name and convert it to a skill name (e.g., _date -> system_date)
+            function_name = skill.get_function_name()
+            if function_name in self.enabled_functions:
+                enabled_skills.append(skill)
+
+        return enabled_skills
+
+
+
+SystemFunctions = SystemFunctionsSkillKit()

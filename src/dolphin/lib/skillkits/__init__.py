@@ -1,48 +1,44 @@
 # -*- coding: utf-8 -*-
-"""Deprecated: dolphin.lib.skillkits has been renamed to dolphin.lib.toolkits.
+"""Skillkits 模块 - 内置 Skillkits"""
 
-This package is a backward-compatibility shim. All names are re-exported from
-:mod:`dolphin.lib.toolkits`. Importing from ``dolphin.lib.skillkits`` will emit
-a :class:`DeprecationWarning`.
-"""
-import warnings as _warnings
+from typing import TYPE_CHECKING
 
-_warnings.warn(
-    "The 'dolphin.lib.skillkits' package is deprecated and will be removed in a "
-    "future release. Use 'dolphin.lib.toolkits' instead.",
-    DeprecationWarning,
-    stacklevel=2,
-)
+if TYPE_CHECKING:
+    from dolphin.lib.skillkits.search_skillkit import SearchSkillkit
+    from dolphin.lib.skillkits.sql_skillkit import SQLSkillkit
+    from dolphin.lib.skillkits.memory_skillkit import MemorySkillkit
+    from dolphin.lib.skillkits.mcp_skillkit import MCPSkillkit
+    from dolphin.lib.skillkits.ontology_skillkit import OntologySkillkit
+    from dolphin.lib.skillkits.plan_skillkit import PlanSkillkit
+    from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
+    from dolphin.lib.skillkits.vm_skillkit import VMSkillkit
+    from dolphin.lib.skillkits.noop_skillkit import NoopSkillkit
+    from dolphin.lib.skillkits.resource_skillkit import ResourceSkillkit
+    from dolphin.lib.skillkits.system_skillkit import SystemFunctionsSkillKit
+    from dolphin.lib.skillkits.agent_skillkit import AgentSkillKit
+    from dolphin.lib.skillkits.env_skillkit import EnvSkillkit
 
-from dolphin.lib.toolkits.search_toolkit import SearchToolkit as SearchSkillkit  # noqa: E402
-from dolphin.lib.toolkits.sql_toolkit import SQLToolkit as SQLSkillkit  # noqa: E402
-from dolphin.lib.toolkits.memory_toolkit import MemoryToolkit as MemorySkillkit  # noqa: E402
-try:
-    from dolphin.lib.toolkits.mcp_toolkit import MCPToolkit as MCPSkillkit  # noqa: E402
-except ImportError:
-    MCPSkillkit = None  # mcp optional dependency not installed
-from dolphin.lib.toolkits.ontology_toolkit import OntologyToolkit as OntologySkillkit  # noqa: E402
-from dolphin.lib.toolkits.plan_toolkit import PlanToolkit as PlanSkillkit  # noqa: E402
-from dolphin.lib.toolkits.cognitive_toolkit import CognitiveToolkit as CognitiveSkillkit  # noqa: E402
-from dolphin.lib.toolkits.vm_toolkit import VMToolkit as VMSkillkit  # noqa: E402
-from dolphin.lib.toolkits.noop_toolkit import NoopToolkit as NoopSkillkit  # noqa: E402
-from dolphin.lib.toolkits.resource_toolkit import ResourceToolkit as ResourceSkillkit  # noqa: E402
-from dolphin.lib.toolkits.system_toolkit import SystemFunctionsToolkit as SystemFunctionsSkillKit  # noqa: E402
-from dolphin.lib.toolkits.agent_toolkit import AgentToolkit as AgentSkillKit  # noqa: E402
-from dolphin.lib.toolkits.env_toolkit import EnvToolkit as EnvSkillkit  # noqa: E402
+_module_lookup = {
+    "SearchSkillkit": "dolphin.lib.skillkits.search_skillkit",
+    "SQLSkillkit": "dolphin.lib.skillkits.sql_skillkit",
+    "MemorySkillkit": "dolphin.lib.skillkits.memory_skillkit",
+    "MCPSkillkit": "dolphin.lib.skillkits.mcp_skillkit",
+    "OntologySkillkit": "dolphin.lib.skillkits.ontology_skillkit",
+    "PlanSkillkit": "dolphin.lib.skillkits.plan_skillkit",
+    "CognitiveSkillkit": "dolphin.lib.skillkits.cognitive_skillkit",
+    "VMSkillkit": "dolphin.lib.skillkits.vm_skillkit",
+    "NoopSkillkit": "dolphin.lib.skillkits.noop_skillkit",
+    "ResourceSkillkit": "dolphin.lib.skillkits.resource_skillkit",
+    "SystemFunctionsSkillKit": "dolphin.lib.skillkits.system_skillkit",
+    "AgentSkillKit": "dolphin.lib.skillkits.agent_skillkit",
+    "EnvSkillkit": "dolphin.lib.skillkits.env_skillkit",
+}
 
-__all__ = [
-    "SearchSkillkit",
-    "SQLSkillkit",
-    "MemorySkillkit",
-    "MCPSkillkit",
-    "OntologySkillkit",
-    "PlanSkillkit",
-    "CognitiveSkillkit",
-    "VMSkillkit",
-    "NoopSkillkit",
-    "ResourceSkillkit",
-    "SystemFunctionsSkillKit",
-    "AgentSkillKit",
-    "EnvSkillkit",
-]
+def __getattr__(name):
+    if name in _module_lookup:
+        import importlib
+        module = importlib.import_module(_module_lookup[name])
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+__all__ = list(_module_lookup.keys())

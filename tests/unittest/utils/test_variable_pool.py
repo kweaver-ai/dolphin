@@ -85,7 +85,7 @@ class TestVariablePool(unittest.TestCase):
         self.assertIsInstance(var, VarOutput)
         self.assertEqual(var.value, "output_value")
         self.assertEqual(var.source_type, SourceType.SKILL)
-        self.assertEqual(var.tool_info, {"tool": "test_tool"})
+        self.assertEqual(var.skill_info, {"tool": "test_tool"})
 
     def test_delete_var(self):
         """测试删除变量功能"""

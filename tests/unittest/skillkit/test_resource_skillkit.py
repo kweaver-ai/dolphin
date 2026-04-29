@@ -1,0 +1,1526 @@
+"""Unit tests for Claude Skill format support.
+
+This module tests:
+1. Claude Skills fixtures validity and structure
+2. SkillLoader parsing compatibility
+3. ResourceSkillkit three-level progressive loading
+4. Integration with Dolphin's skillkit system
+
+Test fixtures are downloaded from:
+- Anthropic official: https://github.com/anthropics/skills
+- Superpowers community: https://github.com/obra/superpowers
+"""
+
+import os
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+import yaml
+from unittest.mock import patch
+
+
+# Get the fixtures directory path
+FIXTURES_BASE = Path(__file__).parent.parent.parent / "fixtures" / "skills"
+ANTHROPIC_SKILLS_DIR = FIXTURES_BASE / "anthropic"
+SUPERPOWERS_SKILLS_DIR = FIXTURES_BASE / "superpowers"
+
+# Project skills directory (for ResourceSkillkit integration tests)
+PROJECT_SKILLS_DIR = Path(__file__).parent.parent.parent.parent / "skills"
+
+
+def get_all_skill_files() -> List[Path]:
+    """Get all skill markdown files from fixtures."""
+    skills = []
+    for skills_dir in [ANTHROPIC_SKILLS_DIR, SUPERPOWERS_SKILLS_DIR]:
+        if skills_dir.exists():
+            skills.extend(skills_dir.glob("*.md"))
+    return sorted(skills)
+
+
+def parse_frontmatter(content: str) -> tuple[Dict[str, Any] | None, str]:
+    """Parse YAML frontmatter from skill content.
+
+    Args:
+        content: The full file content
+
+    Returns:
+        Tuple of (frontmatter_dict, body). frontmatter_dict is None if not found.
+    """
+    import re
+    pattern = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.DOTALL)
+    match = pattern.match(content)
+
+    if not match:
+        return None, content
+
+    yaml_content = match.group(1)
+    body = match.group(2)
+
+    try:
+        frontmatter = yaml.safe_load(yaml_content)
+        if not isinstance(frontmatter, dict):
+            return None, content
+        return frontmatter, body
+    except yaml.YAMLError:
+        return None, content
+
+
+class TestSkillFixturesExist(unittest.TestCase):
+    """Test that skill fixtures exist."""
+
+    def test_fixtures_directory_exists(self):
+        """Test that fixtures base directory exists."""
+        self.assertTrue(FIXTURES_BASE.exists(), f"Fixtures directory not found: {FIXTURES_BASE}")
+
+    def test_anthropic_skills_exist(self):
+        """Test that Anthropic official skills exist."""
+        self.assertTrue(
+            ANTHROPIC_SKILLS_DIR.exists(),
+            f"Anthropic skills directory not found: {ANTHROPIC_SKILLS_DIR}"
+        )
+        skills = list(ANTHROPIC_SKILLS_DIR.glob("*.md"))
+        self.assertGreater(len(skills), 0, "No Anthropic skills found")
+
+    def test_superpowers_skills_exist(self):
+        """Test that Superpowers community skills exist."""
+        self.assertTrue(
+            SUPERPOWERS_SKILLS_DIR.exists(),
+            f"Superpowers skills directory not found: {SUPERPOWERS_SKILLS_DIR}"
+        )
+        skills = list(SUPERPOWERS_SKILLS_DIR.glob("*.md"))
+        self.assertGreater(len(skills), 0, "No Superpowers skills found")
+
+
+
+class TestSkillFrontmatter(unittest.TestCase):
+    """Test YAML frontmatter parsing for all skill fixtures."""
+
+    def test_all_skills_have_valid_frontmatter(self):
+        """Test that all skill files have valid YAML frontmatter."""
+        skills = get_all_skill_files()
+        self.assertGreater(len(skills), 0, "No skill files found")
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                frontmatter, _ = parse_frontmatter(content)
+
+                self.assertIsNotNone(
+                    frontmatter,
+                    f"Skill {skill_path.name} has no valid YAML frontmatter"
+                )
+
+    def test_all_skills_have_name_field(self):
+        """Test that all skills have a 'name' field in frontmatter."""
+        skills = get_all_skill_files()
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                frontmatter, _ = parse_frontmatter(content)
+
+                self.assertIsNotNone(frontmatter)
+                self.assertIn(
+                    "name", frontmatter,
+                    f"Skill {skill_path.name} missing 'name' field"
+                )
+                self.assertTrue(
+                    frontmatter["name"],
+                    f"Skill {skill_path.name} has empty 'name' field"
+                )
+
+    def test_all_skills_have_description_field(self):
+        """Test that all skills have a 'description' field in frontmatter."""
+        skills = get_all_skill_files()
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                frontmatter, _ = parse_frontmatter(content)
+
+                self.assertIsNotNone(frontmatter)
+                self.assertIn(
+                    "description", frontmatter,
+                    f"Skill {skill_path.name} missing 'description' field"
+                )
+                self.assertTrue(
+                    frontmatter["description"],
+                    f"Skill {skill_path.name} has empty 'description' field"
+                )
+
+    def test_name_is_valid_identifier(self):
+        """Test that skill names are valid identifiers (lowercase, hyphens)."""
+        skills = get_all_skill_files()
+        import re
+
+        # Pattern for valid skill names: lowercase letters, numbers, hyphens
+        valid_name_pattern = re.compile(r"^[a-z][a-z0-9-]*$")
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                frontmatter, _ = parse_frontmatter(content)
+
+                self.assertIsNotNone(frontmatter)
+                name = frontmatter.get("name", "")
+
+                self.assertTrue(
+                    valid_name_pattern.match(name),
+                    f"Skill name '{name}' in {skill_path.name} is not a valid identifier "
+                    "(should be lowercase with hyphens)"
+                )
+
+
+class TestSkillContent(unittest.TestCase):
+    """Test skill content structure and quality."""
+
+    def test_all_skills_have_body_content(self):
+        """Test that all skills have non-empty body content."""
+        skills = get_all_skill_files()
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                _, body = parse_frontmatter(content)
+
+                body = body.strip()
+                self.assertTrue(
+                    len(body) > 100,
+                    f"Skill {skill_path.name} has insufficient body content (< 100 chars)"
+                )
+
+    def test_all_skills_have_markdown_headers(self):
+        """Test that all skills have at least one markdown header."""
+        skills = get_all_skill_files()
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                _, body = parse_frontmatter(content)
+
+                # Check for markdown headers (# or ##)
+                has_header = any(
+                    line.strip().startswith("#")
+                    for line in body.split("\n")
+                )
+
+                self.assertTrue(
+                    has_header,
+                    f"Skill {skill_path.name} has no markdown headers"
+                )
+
+    def test_skill_file_sizes_reasonable(self):
+        """Test that skill files are within reasonable size limits."""
+        skills = get_all_skill_files()
+
+        MIN_SIZE = 500  # Minimum 500 bytes
+        MAX_SIZE = 100 * 1024  # Maximum 100KB
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                size = skill_path.stat().st_size
+
+                self.assertGreaterEqual(
+                    size, MIN_SIZE,
+                    f"Skill {skill_path.name} is too small ({size} bytes < {MIN_SIZE})"
+                )
+                self.assertLessEqual(
+                    size, MAX_SIZE,
+                    f"Skill {skill_path.name} is too large ({size} bytes > {MAX_SIZE})"
+                )
+
+
+class TestAnthropicSkills(unittest.TestCase):
+    """Test Anthropic official skills specifically."""
+
+    def test_expected_anthropic_skills_present(self):
+        """Test that expected Anthropic skills are present."""
+        expected_skills = [
+            "mcp-builder.md",
+            "skill-creator.md",
+            "webapp-testing.md",
+            "algorithmic-art.md",
+        ]
+
+        if not ANTHROPIC_SKILLS_DIR.exists():
+            self.skipTest("Anthropic skills directory not found")
+
+        actual_skills = [f.name for f in ANTHROPIC_SKILLS_DIR.glob("*.md")]
+
+        for expected in expected_skills:
+            self.assertIn(
+                expected, actual_skills,
+                f"Expected Anthropic skill '{expected}' not found"
+            )
+
+    def test_anthropic_skills_have_license_field(self):
+        """Test that Anthropic skills include license information."""
+        if not ANTHROPIC_SKILLS_DIR.exists():
+            self.skipTest("Anthropic skills directory not found")
+
+        for skill_path in ANTHROPIC_SKILLS_DIR.glob("*.md"):
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                frontmatter, _ = parse_frontmatter(content)
+
+                self.assertIsNotNone(frontmatter)
+                self.assertIn(
+                    "license", frontmatter,
+                    f"Anthropic skill {skill_path.name} missing 'license' field"
+                )
+
+
+class TestSuperpowersSkills(unittest.TestCase):
+    """Test Superpowers community skills specifically."""
+
+    def test_expected_superpowers_skills_present(self):
+        """Test that expected Superpowers skills are present."""
+        expected_skills = [
+            "test-driven-development.md",
+            "systematic-debugging.md",
+            "brainstorming.md",
+        ]
+
+        if not SUPERPOWERS_SKILLS_DIR.exists():
+            self.skipTest("Superpowers skills directory not found")
+
+        actual_skills = [f.name for f in SUPERPOWERS_SKILLS_DIR.glob("*.md")]
+
+        for expected in expected_skills:
+            self.assertIn(
+                expected, actual_skills,
+                f"Expected Superpowers skill '{expected}' not found"
+            )
+
+    def test_tdd_skill_has_key_concepts(self):
+        """Test that TDD skill contains key TDD concepts."""
+        skill_path = SUPERPOWERS_SKILLS_DIR / "test-driven-development.md"
+
+        if not skill_path.exists():
+            self.skipTest("TDD skill not found")
+
+        content = skill_path.read_text(encoding="utf-8").lower()
+
+        key_concepts = ["red", "green", "refactor", "test"]
+        for concept in key_concepts:
+            self.assertIn(
+                concept, content,
+                f"TDD skill missing key concept: {concept}"
+            )
+
+
+class TestSkillLoaderCompatibility(unittest.TestCase):
+    """Test compatibility with the actual SkillLoader class."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Try to import SkillLoader."""
+        try:
+            from dolphin.lib.skillkits.resource.skill_loader import SkillLoader
+            cls.SkillLoader = SkillLoader
+            cls.loader_available = True
+        except ImportError:
+            cls.loader_available = False
+
+    def test_skills_parseable_by_skill_loader(self):
+        """Test that skills can be parsed by SkillLoader._parse_frontmatter."""
+        if not self.loader_available:
+            self.skipTest("SkillLoader not available")
+
+        loader = self.SkillLoader()
+        skills = get_all_skill_files()
+
+        for skill_path in skills:
+            with self.subTest(skill=skill_path.name):
+                content = skill_path.read_text(encoding="utf-8")
+                frontmatter, body = loader._parse_frontmatter(content)
+
+                self.assertIsNotNone(
+                    frontmatter,
+                    f"SkillLoader failed to parse {skill_path.name}"
+                )
+                self.assertIn("name", frontmatter)
+                self.assertIn("description", frontmatter)
+                self.assertTrue(len(body.strip()) > 0)
+
+
+class TestSkillStatistics(unittest.TestCase):
+    """Test and report statistics about skill fixtures."""
+
+    def test_total_skill_count(self):
+        """Test and report total number of skill fixtures."""
+        skills = get_all_skill_files()
+
+        anthropic_count = len(list(ANTHROPIC_SKILLS_DIR.glob("*.md"))) if ANTHROPIC_SKILLS_DIR.exists() else 0
+        superpowers_count = len(list(SUPERPOWERS_SKILLS_DIR.glob("*.md"))) if SUPERPOWERS_SKILLS_DIR.exists() else 0
+
+        total = anthropic_count + superpowers_count
+
+        # Expect at least 7 skills total (4 Anthropic + 3 Superpowers)
+        self.assertGreaterEqual(
+            total, 7,
+            f"Expected at least 7 skill fixtures, found {total}"
+        )
+
+        # Log statistics (will be visible in verbose test output)
+        print(f"\n=== Skill Fixtures Statistics ===")
+        print(f"Anthropic Official: {anthropic_count}")
+        print(f"Superpowers:        {superpowers_count}")
+        print(f"Total:              {total}")
+
+    def test_skill_categories_diverse(self):
+        """Test that skills cover diverse categories/tags."""
+        skills = get_all_skill_files()
+
+        all_tags = set()
+        skills_with_tags = 0
+
+        for skill_path in skills:
+            content = skill_path.read_text(encoding="utf-8")
+            frontmatter, _ = parse_frontmatter(content)
+
+            if frontmatter and "tags" in frontmatter:
+                tags = frontmatter["tags"]
+                if isinstance(tags, list):
+                    all_tags.update(tags)
+                    skills_with_tags += 1
+
+        # Print tag statistics
+        print(f"\n=== Skill Tags ===")
+        print(f"Skills with tags: {skills_with_tags}/{len(skills)}")
+        if all_tags:
+            print(f"Unique tags: {sorted(all_tags)}")
+
+
+class TestResourceSkillkitEntryPointLoading(unittest.TestCase):
+    """验证 ResourceSkillkit 通过 entry-points 可被 GlobalSkills 发现并加载。
+
+    这用于防止：entry-point 加载成功后 fallback 不触发，从而导致未注册 entry-point 的 skillkit 永远加载不到。
+    """
+
+    def test_entrypoint_registered_in_pyproject(self):
+        """确保 resource_skillkit 已注册到 dolphin.skillkits entry-points。"""
+        pyproject = Path(__file__).parent.parent.parent.parent / "pyproject.toml"
+        text = pyproject.read_text(encoding="utf-8")
+        self.assertIn(
+            'resource = "dolphin.lib.skillkits.resource_skillkit:ResourceSkillkit"',
+            text,
+        )
+
+    def test_resource_skillkit_loads_via_entry_points(self):
+        """通过模拟 entry_points() 返回值，验证 GlobalSkills 的 entry-point 加载路径可加载 resource_skillkit。"""
+        from importlib.metadata import EntryPoint
+
+        from dolphin.core.config.global_config import (
+            GlobalConfig,
+            SkillConfig,
+            MCPConfig,
+        )
+        from dolphin.sdk.skill.global_skills import GlobalSkills
+
+        def fake_entry_points(*, group: str):
+            if group != "dolphin.skillkits":
+                return []
+            return [
+                EntryPoint(
+                    name="resource_skillkit",
+                    value="dolphin.lib.skillkits.resource_skillkit:ResourceSkillkit",
+                    group="dolphin.skillkits",
+                )
+            ]
+
+        config = GlobalConfig(
+            skill_config=SkillConfig(enabled_skills=["resource_skillkit"]),
+            mcp_config=MCPConfig(enabled=False),
+        )
+
+        with patch(
+            "dolphin.sdk.skill.global_skills.importlib.metadata.entry_points",
+            new=fake_entry_points,
+        ):
+            global_skills = GlobalSkills(config)
+
+        skill_names = set(global_skills.installedSkillset.getSkillNames())
+        # Note: _list_resource_skills is removed; Level 1 metadata is auto-injected
+        self.assertIn("_load_resource_skill", skill_names)
+        self.assertIn("_read_skill_asset", skill_names)
+
+    def test_resource_skillkit_reads_global_resource_skills_config(self):
+        """验证 ResourceSkillkit 可从 GlobalConfig.resource_skills 读取扫描目录等配置。"""
+        from importlib.metadata import EntryPoint
+
+        from dolphin.core.config.global_config import (
+            GlobalConfig,
+            SkillConfig,
+            MCPConfig,
+        )
+        from dolphin.sdk.skill.global_skills import GlobalSkills
+
+        with tempfile.TemporaryDirectory(prefix="test_resource_skills_") as temp_dir:
+            # Create a minimal skill package
+            skill_dir = Path(temp_dir) / "test-skill"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: test-skill\ndescription: a test skill\n---\n\n# Test\n\nBody\n",
+                encoding="utf-8",
+            )
+
+            def fake_entry_points(*, group: str):
+                if group != "dolphin.skillkits":
+                    return []
+                return [
+                    EntryPoint(
+                        name="resource_skillkit",
+                        value="dolphin.lib.skillkits.resource_skillkit:ResourceSkillkit",
+                        group="dolphin.skillkits",
+                    )
+                ]
+
+            config = GlobalConfig(
+                skill_config=SkillConfig(enabled_skills=["resource_skillkit"]),
+                mcp_config=MCPConfig(enabled=False),
+                resource_skills={
+                    "enabled": True,
+                    "directories": [temp_dir],
+                    "limits": {"max_skill_size_mb": 8, "max_content_tokens": 8000},
+                },
+            )
+
+            with patch(
+                "dolphin.sdk.skill.global_skills.importlib.metadata.entry_points",
+                new=fake_entry_points,
+            ):
+                global_skills = GlobalSkills(config)
+
+            # Metadata is now collected via skill.owner_skillkit, not Skillset.get_metadata_prompt()
+            # Find skills from ResourceSkillkit and check their owner has metadata
+            resource_skills = [
+                s for s in global_skills.installedSkillset.getSkills()
+                if hasattr(s, 'owner_skillkit') and s.owner_skillkit is not None
+                and hasattr(s.owner_skillkit, 'get_metadata_prompt')
+            ]
+            self.assertTrue(len(resource_skills) > 0, "No ResourceSkillkit skills found")
+            
+            # Get metadata from owner skillkit
+            metadata_prompt = resource_skills[0].owner_skillkit.get_metadata_prompt()
+            self.assertTrue(len(metadata_prompt) > 0, "No metadata prompt generated")
+            self.assertIn("test-skill", metadata_prompt)
+
+
+class TestResourceSkillkitIntegration(unittest.TestCase):
+    """Test ResourceSkillkit integration with skill fixtures.
+
+    These tests verify the three-level progressive loading:
+    - Level 1: Metadata (~100 tokens) - system prompt injection
+    - Level 2: Full SKILL.md content (~1500 tokens) - tool response
+    - Level 3: Resource files (scripts/references) - on-demand
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up test fixtures for ResourceSkillkit tests."""
+        try:
+            from dolphin.lib.skillkits.resource import (
+                ResourceSkillkit,
+            )
+            from dolphin.lib.skillkits.resource.models.skill_config import (
+                ResourceSkillConfig,
+            )
+            from dolphin.lib.skillkits.resource.skill_loader import (
+                SkillLoader,
+            )
+            from dolphin.lib.skillkits.resource.models.skill_meta import (
+                SkillMeta,
+                SkillContent,
+            )
+
+            cls.ResourceSkillkit = ResourceSkillkit
+            cls.ResourceSkillConfig = ResourceSkillConfig
+            cls.SkillLoader = SkillLoader
+            cls.SkillMeta = SkillMeta
+            cls.SkillContent = SkillContent
+            cls.skillkit_available = True
+        except ImportError as e:
+            cls.skillkit_available = False
+            cls.import_error = str(e)
+
+        # Create a temporary directory with proper skill structure
+        cls.temp_dir = tempfile.mkdtemp(prefix="test_skills_")
+        cls._setup_test_skills()
+
+    @classmethod
+    def _setup_test_skills(cls):
+        """Set up test skills in temp directory with proper structure."""
+        if not cls.skillkit_available:
+            return
+
+        # Create skill directories from fixtures
+        for fixture_dir, source_name in [
+            (SUPERPOWERS_SKILLS_DIR, "test-driven-development"),
+            (ANTHROPIC_SKILLS_DIR, "mcp-builder"),
+        ]:
+            source_file = fixture_dir / f"{source_name}.md"
+            if source_file.exists():
+                skill_dir = Path(cls.temp_dir) / source_name
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy(source_file, skill_dir / "SKILL.md")
+
+        # Create a synthetic skill with scripts/ directory for Level 3 testing
+        # since we removed the project-level data-pipeline skill
+        synthetic_skill_dir = Path(cls.temp_dir) / "synthetic-skill"
+        synthetic_skill_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create SKILL.md
+        (synthetic_skill_dir / "SKILL.md").write_text(
+            "---\nname: synthetic-skill\ndescription: A test skill with resources\n---\n# Test Skill\nDescription", 
+            encoding="utf-8"
+        )
+        
+        # Create scripts directory and a test script
+        scripts_dir = synthetic_skill_dir / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        (scripts_dir / "test.py").write_text("print('hello')", encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up temporary directory."""
+        if hasattr(cls, 'temp_dir') and os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir)
+
+    def test_resourceskillkit_initialization(self):
+        """Test ResourceSkillkit can be initialized with fixture skills."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        # Should have found skills
+        available = skillkit.get_available_skills()
+        self.assertGreater(len(available), 0, "No skills found after initialization")
+
+    def test_level1_metadata_loading(self):
+        """Test Level 1 metadata loading (~100 tokens per skill)."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        # Get metadata prompt for system injection (using renamed method)
+        metadata_prompt = skillkit.get_metadata_prompt()
+
+        # Should contain skill information
+        self.assertIn("Available Resource Skills", metadata_prompt)
+        # Verify at least one skill is listed in the metadata
+        available_skills = skillkit.get_available_skills()
+        self.assertTrue(
+            any(skill in metadata_prompt for skill in available_skills),
+            "No skill names found in metadata prompt"
+        )
+
+        # Should be reasonably sized for system prompt
+        # Rough estimate: ~100 tokens ≈ 400 chars per skill
+        max_expected_length = len(skillkit.get_available_skills()) * 500 + 200
+        self.assertLess(
+            len(metadata_prompt), max_expected_length,
+            "Metadata prompt too large for system injection"
+        )
+
+    def test_metadata_prompt_when_no_skills(self):
+        """Test that metadata prompt always includes section header, even with no skills."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        # Create skillkit with non-existent directory (no skills will be found)
+        import tempfile
+        empty_dir = tempfile.mkdtemp()
+
+        config = self.ResourceSkillConfig(
+            directories=[empty_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        # Get metadata prompt
+        metadata_prompt = skillkit.get_metadata_prompt()
+
+        # Should always include the section header to prevent LLM hallucination
+        self.assertIn("## Available Resource Skills", metadata_prompt)
+        # Should indicate no skills are available
+        self.assertIn("No resource skills", metadata_prompt)
+        # Should not be empty
+        self.assertTrue(len(metadata_prompt) > 0)
+
+    def test_level2_full_content_loading(self):
+        """Test Level 2 full SKILL.md content loading."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        available = skillkit.get_available_skills()
+        if not available:
+            self.skipTest("No skills available for testing")
+
+        # Load first available skill
+        skill_name = available[0]
+        content = skillkit.load_skill(skill_name)
+
+        # Should return actual content, not error
+        self.assertFalse(
+            content.startswith("Error:"),
+            f"Failed to load skill: {content}"
+        )
+
+        # Content should be substantial
+        self.assertGreater(len(content), 100, "Skill content too short")
+
+    def test_level2_skill_not_found_error(self):
+        """Test Level 2 loading returns helpful error for unknown skill."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        # Try to load non-existent skill
+        content = skillkit.load_skill("nonexistent-skill")
+
+        # Should return error with available skills
+        self.assertTrue(content.startswith("Error:"))
+        self.assertIn("not found", content.lower())
+
+    def test_load_resource_skill_defaults_to_short_mode(self):
+        """_load_resource_skill should return short summary by default."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        available = skillkit.get_available_skills()
+        if not available:
+            self.skipTest("No skills available for testing")
+
+        skill_name = available[0]
+        result = skillkit._load_resource_skill(skill_name)
+
+        self.assertIn(f"### {skill_name}", result)
+        self.assertIn('mode="full"', result)
+        self.assertFalse(result.startswith("[PIN]"))
+
+    def test_load_resource_skill_supports_explicit_full_mode(self):
+        """_load_resource_skill should return pinned full content in full mode."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        from dolphin.core.common.constants import PIN_MARKER
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        available = skillkit.get_available_skills()
+        if not available:
+            self.skipTest("No skills available for testing")
+
+        skill_name = available[0]
+        result = skillkit._load_resource_skill(skill_name, mode="full")
+
+        self.assertTrue(result.startswith(PIN_MARKER))
+
+    def test_level3_resource_loading(self):
+        """Test Level 3 resource file loading (scripts/references)."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        # Check if synthetic skill with scripts exists
+        synthetic_skill_dir = Path(self.temp_dir) / "synthetic-skill"
+        scripts_dir = synthetic_skill_dir / "scripts"
+
+        if not scripts_dir.exists():
+            self.skipTest("Synthetic skill with scripts not available")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        # Load resource file
+        content = skillkit.load_resource("synthetic-skill", "scripts/test.py")
+
+        # Should return file content, not error
+        self.assertFalse(
+            content.startswith("Error:"),
+            f"Failed to load resource: {content}"
+        )
+
+    def test_level3_tool_schema_uses_new_name_and_parameter(self):
+        """Level 3 tool schema should expose only the new public API."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        skill_by_name = {
+            skill.get_function_name(): skill
+            for skill in skillkit.getSkills()
+        }
+
+        new_schema = skill_by_name["_read_skill_asset"].get_openai_tool_schema()
+        new_properties = new_schema["function"]["parameters"]["properties"]
+        assert "asset_path" in new_properties
+        assert "resource_path" not in new_properties
+        assert "asset_path" in new_schema["function"]["parameters"]["required"]
+
+    def test_skill_meta_data_class(self):
+        """Test SkillMeta data class functionality."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        meta = self.SkillMeta(
+            name="test-skill",
+            description="A test skill for unit testing",
+            base_path="/tmp/test",
+            version="1.0.0",
+            tags=["test", "unittest"],
+        )
+
+        # Test to_prompt_entry
+        prompt_entry = meta.to_prompt_entry()
+        self.assertIn("test-skill", prompt_entry)
+        self.assertIn("test skill", prompt_entry.lower())
+
+        # Test to_dict
+        meta_dict = meta.to_dict()
+        self.assertEqual(meta_dict["name"], "test-skill")
+        self.assertEqual(meta_dict["version"], "1.0.0")
+        self.assertEqual(meta_dict["tags"], ["test", "unittest"])
+
+    def test_skill_content_data_class(self):
+        """Test SkillContent data class functionality."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        content = self.SkillContent(
+            frontmatter={"name": "test", "description": "Test skill"},
+            body="# Test Skill\n\nThis is a test.",
+            available_scripts=["scripts/test.py"],
+            available_references=["references/guide.md"],
+        )
+
+        # Test get_name and get_description
+        self.assertEqual(content.get_name(), "test")
+        self.assertEqual(content.get_description(), "Test skill")
+
+        # Test get_full_content
+        full = content.get_full_content()
+        self.assertIn("Test Skill", full)
+        self.assertIn("Available Resources", full)
+        self.assertIn("scripts/test.py", full)
+        self.assertIn("references/guide.md", full)
+
+    def test_skillkit_interface_compliance(self):
+        """Test ResourceSkillkit implements Skillkit interface."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        # Test getName
+        self.assertEqual(skillkit.getName(), "resource_skillkit")
+
+        # Test getSkills returns SkillFunction list.
+        # 2 legacy entries + 3 unified builtin contract handlers = 5 total.
+        # Note: _list_resource_skills is not exposed (Level 1 metadata is
+        # auto-injected into the system prompt via get_metadata_prompt()).
+        skills = skillkit.getSkills()
+        self.assertEqual(len(skills), 5)
+
+        skill_names = [s.func.__name__ for s in skills]
+        # Legacy interface (backwards compatibility)
+        self.assertIn("_load_resource_skill", skill_names)
+        self.assertIn("_read_skill_asset", skill_names)
+        # Unified builtin contract handlers (local testing mode)
+        self.assertIn("_builtin_skill_load_handler", skill_names)
+        self.assertIn("_builtin_skill_read_file_handler", skill_names)
+        self.assertIn("_builtin_skill_execute_script_handler", skill_names)
+
+    def test_cache_functionality(self):
+        """Test that caching works correctly."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        available = skillkit.get_available_skills()
+        if not available:
+            self.skipTest("No skills available for testing")
+
+        skill_name = available[0]
+
+        # Load skill twice
+        content1 = skillkit.load_skill(skill_name)
+        content2 = skillkit.load_skill(skill_name)
+
+        # Should return same content
+        self.assertEqual(content1, content2)
+
+        # Check cache stats
+        stats = skillkit.get_stats()
+        self.assertIn("content_cache", stats)
+
+    def test_clear_caches(self):
+        """Test cache clearing functionality."""
+        if not self.skillkit_available:
+            self.skipTest(f"ResourceSkillkit not available: {self.import_error}")
+
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+        )
+        skillkit = self.ResourceSkillkit(config)
+        skillkit.initialize()
+
+        available = skillkit.get_available_skills()
+        if not available:
+            self.skipTest("No skills available for testing")
+
+        # Load a skill to populate cache
+        skillkit.load_skill(available[0])
+
+        # Clear caches
+        skillkit.clear_caches()
+
+        # Stats should show empty caches
+        stats = skillkit.get_stats()
+        self.assertEqual(stats["content_cache"]["size"], 0)
+
+
+
+
+class TestResourceSkillConfigIncludeExclude(unittest.TestCase):
+    """Test include/exclude fields on ResourceSkillConfig."""
+
+    def test_default_include_exclude_are_none(self):
+        """Default config has no include/exclude filter."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig()
+        self.assertIsNone(config.include)
+        self.assertIsNone(config.exclude)
+
+    def test_from_dict_parses_include(self):
+        """from_dict should parse include list."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig.from_dict({
+            "resource_skills": {
+                "include": ["skill-a", "skill-b"],
+            }
+        })
+        self.assertEqual(config.include, ["skill-a", "skill-b"])
+        self.assertIsNone(config.exclude)
+
+    def test_from_dict_parses_exclude(self):
+        """from_dict should parse exclude list."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig.from_dict({
+            "resource_skills": {
+                "exclude": ["skill-c"],
+            }
+        })
+        self.assertIsNone(config.include)
+        self.assertEqual(config.exclude, ["skill-c"])
+
+    def test_from_dict_no_filter_by_default(self):
+        """from_dict without include/exclude yields None for both."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig.from_dict({
+            "resource_skills": {"enabled": True}
+        })
+        self.assertIsNone(config.include)
+        self.assertIsNone(config.exclude)
+
+    def test_to_dict_includes_filter_fields(self):
+        """to_dict should round-trip include/exclude."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig(include=["a"], exclude=["b"])
+        d = config.to_dict()
+        self.assertEqual(d["include"], ["a"])
+        self.assertEqual(d["exclude"], ["b"])
+
+    def test_to_dict_none_filter_fields(self):
+        """to_dict should include None for unset filters."""
+        from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+        config = ResourceSkillConfig()
+        d = config.to_dict()
+        self.assertIsNone(d["include"])
+        self.assertIsNone(d["exclude"])
+
+
+class TestResourceSkillkitIncludeExcludeFilter(unittest.TestCase):
+    """Test that ResourceSkillkit.initialize() applies include/exclude filtering."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from dolphin.lib.skillkits.resource import ResourceSkillkit
+            from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+            cls.ResourceSkillkit = ResourceSkillkit
+            cls.ResourceSkillConfig = ResourceSkillConfig
+            cls.available = True
+        except ImportError as e:
+            cls.available = False
+            cls.import_error = str(e)
+
+        cls.temp_dir = tempfile.mkdtemp(prefix="test_filter_")
+        # Create 3 skills: alpha, beta, gamma
+        for name in ["alpha", "beta", "gamma"]:
+            skill_dir = Path(cls.temp_dir) / name
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {name}\ndescription: Skill {name}\n---\n\n# {name}\n\nBody of {name}.\n",
+                encoding="utf-8",
+            )
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, "temp_dir") and os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir)
+
+    def _make_skillkit(self, include=None, exclude=None):
+        config = self.ResourceSkillConfig(
+            directories=[self.temp_dir],
+            enabled=True,
+            include=include,
+            exclude=exclude,
+        )
+        sk = self.ResourceSkillkit(config)
+        sk.initialize()
+        return sk
+
+    def test_no_filter_returns_all(self):
+        """Without include/exclude, all 3 skills are available."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit()
+        self.assertEqual(sk.get_available_skills(), ["alpha", "beta", "gamma"])
+
+    def test_include_filters_to_subset(self):
+        """include=['alpha', 'gamma'] should keep only those two."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha", "gamma"])
+        self.assertEqual(sk.get_available_skills(), ["alpha", "gamma"])
+
+    def test_include_single(self):
+        """include=['beta'] should keep only beta."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["beta"])
+        self.assertEqual(sk.get_available_skills(), ["beta"])
+
+    def test_exclude_removes_skills(self):
+        """exclude=['beta'] should remove beta, keep alpha and gamma."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(exclude=["beta"])
+        self.assertEqual(sk.get_available_skills(), ["alpha", "gamma"])
+
+    def test_exclude_multiple(self):
+        """exclude=['alpha', 'gamma'] should keep only beta."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(exclude=["alpha", "gamma"])
+        self.assertEqual(sk.get_available_skills(), ["beta"])
+
+    def test_include_takes_precedence_over_exclude(self):
+        """When both include and exclude are set, include takes precedence."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha"], exclude=["alpha"])
+        # include wins: only alpha
+        self.assertEqual(sk.get_available_skills(), ["alpha"])
+
+    def test_include_unknown_skill_is_harmless(self):
+        """include with a non-existent skill name doesn't crash."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha", "nonexistent"])
+        self.assertEqual(sk.get_available_skills(), ["alpha"])
+
+    def test_exclude_unknown_skill_is_harmless(self):
+        """exclude with a non-existent skill name doesn't crash."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(exclude=["nonexistent"])
+        self.assertEqual(sk.get_available_skills(), ["alpha", "beta", "gamma"])
+
+    def test_metadata_prompt_reflects_filter(self):
+        """get_metadata_prompt() should only show included skills."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha"])
+        prompt = sk.get_metadata_prompt()
+        self.assertIn("alpha", prompt)
+        self.assertNotIn("beta", prompt)
+        self.assertNotIn("gamma", prompt)
+
+    def test_load_skill_blocked_by_filter(self):
+        """load_skill() for a filtered-out skill should return 'not found'."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=["alpha"])
+        result = sk.load_skill("beta")
+        self.assertIn("not found", result.lower())
+
+    def test_empty_include_means_no_skills(self):
+        """include=[] should result in zero skills."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        sk = self._make_skillkit(include=[])
+        self.assertEqual(sk.get_available_skills(), [])
+
+    def test_filter_applied_via_setGlobalConfig(self):
+        """Filter should work when config comes through setGlobalConfig()."""
+        if not self.available:
+            self.skipTest(self.import_error)
+        from dolphin.core.config.global_config import GlobalConfig, SkillConfig, MCPConfig
+
+        sk = self.ResourceSkillkit()
+        config = GlobalConfig(
+            skill_config=SkillConfig(enabled_skills=["resource_skillkit"]),
+            mcp_config=MCPConfig(enabled=False),
+            resource_skills={
+                "enabled": True,
+                "directories": [self.temp_dir],
+                "include": ["beta"],
+            },
+        )
+        sk.setGlobalConfig(config)
+        sk.initialize()
+        self.assertEqual(sk.get_available_skills(), ["beta"])
+
+
+class TestBuiltinSkillContractHandlers(unittest.TestCase):
+    """Tests for the three unified contract handlers added to ResourceSkillkit.
+
+    Each handler (_builtin_skill_load_handler, _builtin_skill_read_file_handler,
+    _builtin_skill_execute_script_handler) wraps the same logic used in the local
+    testing path and must return a consistent unified contract response dict.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from dolphin.lib.skillkits.resource import ResourceSkillkit
+            from dolphin.lib.skillkits.resource.models.skill_config import ResourceSkillConfig
+            cls.ResourceSkillkit = ResourceSkillkit
+            cls.ResourceSkillConfig = ResourceSkillConfig
+            cls.available = True
+        except ImportError as e:
+            cls.available = False
+            cls.import_error = str(e)
+
+        # Build a temp skill directory with one complete skill
+        cls.temp_dir = tempfile.mkdtemp(prefix="test_contract_handlers_")
+        skill_dir = Path(cls.temp_dir) / "demo-skill"
+        skill_dir.mkdir()
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir()
+        refs_dir = skill_dir / "references"
+        refs_dir.mkdir()
+
+        # SKILL.md with frontmatter
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: demo-skill\ndescription: Demo skill for handler tests\n---\n\n"
+            "# Demo Skill\n\nThis skill is for testing contract handlers.\n",
+            encoding="utf-8",
+        )
+        # Python script that prints a known line
+        (scripts_dir / "run.py").write_text(
+            "print('contract handler test ok')\n", encoding="utf-8"
+        )
+        # Reference doc
+        (refs_dir / "guide.md").write_text("# Guide\n\nReference content.\n", encoding="utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        if hasattr(cls, "temp_dir") and os.path.exists(cls.temp_dir):
+            shutil.rmtree(cls.temp_dir)
+
+    def _make_skillkit(self):
+        config = self.ResourceSkillConfig(directories=[self.temp_dir], enabled=True)
+        sk = self.ResourceSkillkit(config)
+        sk.initialize()
+        return sk
+
+    def _skip_if_unavailable(self):
+        if not self.available:
+            self.skipTest(getattr(self, "import_error", "ResourceSkillkit not available"))
+
+    # ------------------------------------------------------------------
+    # _builtin_skill_load_handler
+    # ------------------------------------------------------------------
+
+    def test_load_handler_success_structure(self):
+        """load handler must return answer/block_answer with required contract fields."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="demo-skill")
+        self.assertIn("answer", result)
+        self.assertIn("block_answer", result)
+        payload = result["answer"]
+        for key in ("skill_id", "skill_md_content", "available_scripts",
+                    "available_references", "source"):
+            self.assertIn(key, payload, f"load result missing field: {key}")
+
+    def test_load_handler_skill_id_echoed(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        self.assertEqual(payload["skill_id"], "demo-skill")
+
+    def test_load_handler_source_is_local(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        self.assertEqual(payload["source"], "local")
+
+    def test_load_handler_skill_md_content_non_empty(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        self.assertTrue(payload["skill_md_content"].strip())
+
+    def test_load_handler_skill_md_content_includes_frontmatter(self):
+        """skill_md_content must be the full raw SKILL.md (frontmatter + body), not just body."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        content = payload["skill_md_content"]
+        # The raw SKILL.md starts with the YAML frontmatter delimiter
+        self.assertTrue(
+            content.strip().startswith("---"),
+            f"skill_md_content must start with frontmatter '---', got: {content[:80]!r}",
+        )
+        # Frontmatter fields must be present in the returned text
+        self.assertIn("name: demo-skill", content)
+        self.assertIn("description:", content)
+
+    def test_load_handler_available_scripts_lists_script(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        scripts = payload["available_scripts"]
+        self.assertIsInstance(scripts, list)
+        self.assertTrue(
+            any("run.py" in s for s in scripts),
+            f"scripts/run.py should appear in available_scripts: {scripts}",
+        )
+
+    def test_load_handler_available_references_lists_guide(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_load_handler(skill_id="demo-skill")["answer"]
+        refs = payload["available_references"]
+        self.assertIsInstance(refs, list)
+        self.assertTrue(
+            any("guide.md" in r for r in refs),
+            f"references/guide.md should appear in available_references: {refs}",
+        )
+
+    def test_load_handler_unknown_skill_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="no-such-skill")
+        payload = result["answer"]
+        self.assertIn("error", payload)
+        self.assertEqual(payload["source"], "local")
+
+    def test_load_handler_empty_skill_id_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="")
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_load_handler_answer_and_block_answer_are_equal(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_load_handler(skill_id="demo-skill")
+        self.assertEqual(result["answer"], result["block_answer"])
+
+    # ------------------------------------------------------------------
+    # _builtin_skill_read_file_handler
+    # ------------------------------------------------------------------
+
+    def test_read_file_handler_skill_md_success(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="SKILL.md"
+        )
+        payload = result["answer"]
+        for key in ("skill_id", "file_path", "content", "source"):
+            self.assertIn(key, payload)
+        self.assertEqual(payload["source"], "local")
+        self.assertTrue(payload["content"].strip())
+
+    def test_read_file_handler_reference_file_success(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="references/guide.md"
+        )
+        payload = result["answer"]
+        self.assertNotIn("error", payload)
+        self.assertIn("Reference content", payload["content"])
+
+    def test_read_file_handler_script_file_success(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="scripts/run.py"
+        )
+        payload = result["answer"]
+        self.assertNotIn("error", payload)
+        self.assertTrue(payload["content"].strip())
+
+    def test_read_file_handler_invalid_path_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="references/../etc/passwd"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_path_outside_allowed_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="README.md"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_unknown_skill_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="ghost-skill", file_path="SKILL.md"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_nonexistent_file_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="references/nosuchfile.md"
+        )
+        payload = result["answer"]
+        self.assertIn("error", payload)
+
+    def test_read_file_handler_answer_and_block_answer_are_equal(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_read_file_handler(
+            skill_id="demo-skill", file_path="SKILL.md"
+        )
+        self.assertEqual(result["answer"], result["block_answer"])
+
+    # ------------------------------------------------------------------
+    # _builtin_skill_execute_script_handler
+    # ------------------------------------------------------------------
+
+    def test_execute_script_handler_success_structure(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
+        )
+        payload = result["answer"]
+        for key in ("skill_id", "entry_shell", "stdout", "stderr",
+                    "exit_code", "duration_ms", "artifacts", "source"):
+            self.assertIn(key, payload)
+
+    def test_execute_script_handler_exit_code_zero(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
+        )["answer"]
+        self.assertEqual(payload["exit_code"], 0)
+
+    def test_execute_script_handler_stdout_contains_output(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
+        )["answer"]
+        self.assertIn("contract handler test ok", payload["stdout"])
+
+    def test_execute_script_handler_source_is_local(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        payload = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
+        )["answer"]
+        self.assertEqual(payload["source"], "local")
+
+    def test_execute_script_handler_invalid_path_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python scripts/../etc/passwd"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+        self.assertTrue(payload["stderr"])
+
+    def test_execute_script_handler_path_not_under_scripts_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python references/guide.md"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+
+    def test_execute_script_handler_unknown_skill_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="ghost-skill", entry_shell="python scripts/run.py"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+        self.assertIn("not found", payload["stderr"].lower())
+
+    def test_execute_script_handler_nonexistent_script_returns_error(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python scripts/nosuch.py"
+        )
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+
+    def test_execute_script_handler_answer_and_block_answer_are_equal(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._builtin_skill_execute_script_handler(
+            skill_id="demo-skill", entry_shell="python scripts/run.py"
+        )
+        self.assertEqual(result["answer"], result["block_answer"])
+
+    # ------------------------------------------------------------------
+    # Helper methods (_contract_error, _exec_error_result)
+    # ------------------------------------------------------------------
+
+    def test_contract_error_structure(self):
+        """_contract_error must produce answer/block_answer with error and source."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._contract_error("some-skill", "something went wrong")
+        for key in ("answer", "block_answer"):
+            self.assertIn(key, result)
+        payload = result["answer"]
+        self.assertEqual(payload["skill_id"], "some-skill")
+        self.assertIn("something went wrong", payload["error"])
+        self.assertEqual(payload["source"], "local")
+
+    def test_exec_error_result_structure(self):
+        """_exec_error_result must produce answer/block_answer with all script result fields."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        result = sk._exec_error_result("some-skill", "scripts/x.py", "boom")
+        payload = result["answer"]
+        self.assertEqual(payload["exit_code"], -1)
+        self.assertIn("boom", payload["stderr"])
+        self.assertEqual(payload["stdout"], "")
+        self.assertEqual(payload["artifacts"], [])
+        self.assertEqual(payload["source"], "local")
+
+    # ------------------------------------------------------------------
+    # OpenAI schema wiring on the three new SkillFunction entries
+    # ------------------------------------------------------------------
+
+    def test_builtin_skill_load_has_openai_schema(self):
+        """The SkillFunction for _builtin_skill_load_handler must carry the OpenAI schema."""
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        sf = skill_by_name.get("_builtin_skill_load_handler")
+        self.assertIsNotNone(sf, "_builtin_skill_load_handler not found in skills")
+        schema = sf.get_openai_tool_schema()
+        self.assertEqual(schema["function"]["name"], "builtin_skill_load")
+
+    def test_builtin_skill_read_file_has_openai_schema(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        sf = skill_by_name.get("_builtin_skill_read_file_handler")
+        self.assertIsNotNone(sf)
+        schema = sf.get_openai_tool_schema()
+        self.assertEqual(schema["function"]["name"], "builtin_skill_read_file")
+
+    def test_builtin_skill_execute_script_has_openai_schema(self):
+        self._skip_if_unavailable()
+        sk = self._make_skillkit()
+        skill_by_name = {s.func.__name__: s for s in sk.getSkills()}
+        sf = skill_by_name.get("_builtin_skill_execute_script_handler")
+        self.assertIsNotNone(sf)
+        schema = sf.get_openai_tool_schema()
+        self.assertEqual(schema["function"]["name"], "builtin_skill_execute_script")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -55,16 +55,15 @@ context_engineer:
 # ----------------------------------------------------------------------------
 skill:
   enabled_skills:
-    - "resource_toolkit"    # Enable ResourceToolkit for Claude Skill support
-    - "vm_toolkit"          # Enable Python execution
-    - "cognitive_toolkit"   # Enable thinking tools
+    - "resource_skillkit"   # Enable ResourceSkillkit for Claude Skill support
+    - "vm_skillkit"         # Enable Python execution
+    - "cognitive_skillkit"  # Enable thinking tools
 
 # ----------------------------------------------------------------------------
-# Resource Tools Configuration
+# Resource Skills Configuration
 # ----------------------------------------------------------------------------
-# The ResourceToolkit will automatically scan these directories for skills/tools
-# NOTE: 'resource_skills' key is deprecated; use 'resource_tools' going forward.
-resource_tools:
+# The ResourceSkillkit will automatically scan these directories for skills
+resource_skills:
   enabled: true
   directories:
     - "./skills"              # Project-level skills

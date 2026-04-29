@@ -19,8 +19,8 @@ from dolphin.core.code_block.judge_block import JudgeBlock
 from dolphin.core.code_block.explore_block import ExploreBlock
 from dolphin.core.code_block.explore_block_v2 import ExploreBlockV2
 from dolphin.core.utils.tools import ToolInterrupt
-from dolphin.core.tool.toolkit import Toolkit
-from dolphin.core.tool.tool_function import ToolFunction
+from dolphin.core.skill.skillkit import Skillkit
+from dolphin.core.skill.skill_function import SkillFunction
 from dolphin.core import flags
 
 
@@ -60,14 +60,14 @@ class MockTool:
         }
 
 
-class TestToolkit(Toolkit):
+class TestSkillkit(Skillkit):
     """Test skillkit that provides mock tools"""
     
-    def __init__(self, skills_dict: Dict[str, ToolFunction]):
+    def __init__(self, skills_dict: Dict[str, SkillFunction]):
         super().__init__()
         self._skills_dict = skills_dict
     
-    def _createTools(self):
+    def _createSkills(self):
         """Return list of test skills"""
         return list(self._skills_dict.values())
 
@@ -78,7 +78,7 @@ def mock_context():
     config = GlobalConfig()
     context = Context(config=config)
     
-    # Convert MockTools to async functions for ToolFunction
+    # Convert MockTools to async functions for SkillFunction
     async def high_risk_tool(param: str = "", **kwargs):
         """High risk tool that requires confirmation
         
@@ -95,15 +95,15 @@ def mock_context():
         """
         return {"result": f"Safe operation completed with param: {param}"}
     
-    # Create ToolFunction instances
-    high_risk_skill = ToolFunction(high_risk_tool)
-    # Add interrupt_config to the ToolFunction
+    # Create SkillFunction instances
+    high_risk_skill = SkillFunction(high_risk_tool)
+    # Add interrupt_config to the SkillFunction
     high_risk_skill.interrupt_config = {
         "requires_confirmation": True,
         "confirmation_message": "Confirm high_risk_tool with param={param}?"
     }
     
-    safe_skill = ToolFunction(safe_tool)
+    safe_skill = SkillFunction(safe_tool)
     # No interrupt_config for safe tool
     
     # Create test skillkit with these skills
@@ -111,10 +111,10 @@ def mock_context():
         "high_risk_tool": high_risk_skill,
         "safe_tool": safe_skill
     }
-    skillkit = TestToolkit(skills_dict)
+    skillkit = TestSkillkit(skills_dict)
     
-    # Use set_tools to properly initialize all_tools
-    context.set_tools(skillkit)
+    # Use set_skills to properly initialize all_skills
+    context.set_skills(skillkit)
     
     return context
 
@@ -195,12 +195,12 @@ class TestJudgeBlockInterrupt:
     @pytest.mark.asyncio
     async def test_judge_block_triggers_interrupt(self, mock_context):
         """Test that judge block triggers interrupt when selecting tool with interrupt_config"""
-        # Note: Judge block validation happens during parse, so we need to patch _validate_tools
+        # Note: Judge block validation happens during parse, so we need to patch _validate_skills
         # or provide tools parameter without validation
         block = JudgeBlock(context=mock_context)
         
-        # Skip validation by patching _validate_tools
-        with patch.object(block, '_validate_tools'):
+        # Skip validation by patching _validate_skills
+        with patch.object(block, '_validate_skills'):
             # Mock LLM response to select high_risk_tool
             with patch.object(block, 'judge_tool_call', new_callable=AsyncMock) as mock_judge:
                 mock_judge.return_value = ("high_risk_tool", {"param": "test_value"})
@@ -221,8 +221,8 @@ class TestJudgeBlockInterrupt:
         """Test that judge block doesn't interrupt when selecting safe tool"""
         block = JudgeBlock(context=mock_context)
         
-        # Skip validation by patching _validate_tools
-        with patch.object(block, '_validate_tools'):
+        # Skip validation by patching _validate_skills
+        with patch.object(block, '_validate_skills'):
             # Mock LLM response to select safe_tool
             with patch.object(block, 'judge_tool_call', new_callable=AsyncMock) as mock_judge:
                 mock_judge.return_value = ("safe_tool", {"param": "test_value"})
@@ -282,8 +282,8 @@ class TestExploreBlockV2Interrupt:
         try:
             block = ExploreBlockV2(context=mock_context)
             
-            # Skip validation by patching _validate_tools
-            with patch.object(block, '_validate_tools'):
+            # Skip validation by patching _validate_skills
+            with patch.object(block, '_validate_skills'):
                 # Mock LLM to return tool call
                 with patch.object(block, 'llm_chat_stream') as mock_llm:
                     from dolphin.core.common.enums import StreamItem
@@ -362,8 +362,8 @@ class TestExploreBlockV1Interrupt:
         try:
             block = ExploreBlock(context=mock_context)
             
-            # Skip validation by patching _validate_tools
-            with patch.object(block, '_validate_tools'):
+            # Skip validation by patching _validate_skills
+            with patch.object(block, '_validate_skills'):
                 # Mock llm_chat_stream (not llm_chat) - explore v1 uses llm_chat_stream
                 with patch.object(block, 'llm_chat_stream') as mock_llm:
                     from dolphin.core.common.enums import StreamItem
@@ -402,8 +402,8 @@ class TestExploreBlockV1Interrupt:
         try:
             block = ExploreBlock(context=mock_context)
             
-            # Skip validation by patching _validate_tools
-            with patch.object(block, '_validate_tools'):
+            # Skip validation by patching _validate_skills
+            with patch.object(block, '_validate_skills'):
                 # Mock llm_chat_stream (explore v1 uses llm_chat_stream)
                 with patch.object(block, 'llm_chat_stream') as mock_llm:
                     from dolphin.core.common.enums import StreamItem

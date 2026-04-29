@@ -506,26 +506,6 @@ for_state = {
 ```
 
 ### parallel 支持
-
-**限制：`/parallel/` 内部仅支持 `@tool` 调用（含 agent 类型的 tool）。**
-
-不支持在 `/parallel/` 分支中使用 `/if/`、`/for/`、`/judge/`、`/explore/`、`/prompt/`、赋值等其他 block 类型。
-如需在并行分支中使用控制流，应将逻辑封装为独立的 tool/agent 进行调用。
-
-```dph
-# ✅ 正确用法：并行调用多个 tool
-/parallel/
-@ToolA(input=$q) -> result_a
-@ToolB(input=$q) -> result_b
-/end/
-
-# ❌ 错误用法：parallel 内使用 if/for
-/parallel/
-/if/ $cond: @ToolA(input=$q) -> result_a /end/
-@ToolB(input=$q) -> result_b
-/end/
-```
-
 parallel block 创建多个子帧：
 
 ```python

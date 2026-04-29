@@ -50,13 +50,13 @@ tests/
 │   │   ├── test_output_format.py
 │   │   ├── test_verbose_integration.py
 │   │   └── test_verbose_simple.py
-│   ├── toolkit/            # Toolkit 相关测试
-│   │   ├── test_local_retrieval_toolkit.py
-│   │   ├── test_memory_toolkit.py
-│   │   ├── test_toolkit_compression.py
-│   │   └── test_sql_toolkit.py
+│   ├── skillkit/            # Skillkit 相关测试
+│   │   ├── test_local_retrieval_skillkit.py
+│   │   ├── test_memory_skillkit.py
+│   │   ├── test_skillkit_compression.py
+│   │   └── test_sql_skillkit.py
 │   ├── system/              # 系统级测试
-│   │   ├── test_continue_exploration_tools.py
+│   │   ├── test_continue_exploration_skills.py
 │   │   ├── test_mcp_integration.py
 │   │   ├── test_system_functions.py
 │   │   └── test_trajectory.py
@@ -199,7 +199,7 @@ Agent调用测试是集成测试的一个特殊类别，测试DPH文件中的age
 #### 特性
 
 - **Agent环境自动设置**: 自动扫描 `dolphins/` 目录，加载所有DPH文件作为agent
-- **统一管理**: Agent通过tool系统管理，支持 `@agent_name(param=value)` 语法调用
+- **统一管理**: Agent通过skill系统管理，支持 `@agent_name(param=value)` 语法调用
 - **链式调用**: 支持agent之间的链式调用和参数传递
 - **结果验证**: 支持与常规集成测试相同的验证规则
 
@@ -250,7 +250,7 @@ python -m integration_test.test_runner --verbose
 | `mem/` | 沙箱环境测试 | 1 |
 | `memory/` | 内存管理、存储、工具函数 | 3 |
 | `output/` | 输出格式、Verbose 模式 | 3 |
-| `toolkit/` | Toolkit 压缩、SQL、本地检索 | 4 |
+| `skillkit/` | Skillkit 压缩、SQL、本地检索 | 4 |
 | `system/` | 系统函数、MCP 集成、轨迹 | 4 |
 | `utils/` | 工具函数、变量池、JSON 解析 | 5 |
 
@@ -364,7 +364,7 @@ class TestYourClass(unittest.TestCase):
 ### v1.4.0
 - 重构单元测试目录结构，按功能模块组织测试文件
 - 新增 `blocks/`、`memory/`、`output/`、`system/` 等子目录
-- 扩展 `toolkit/` 和 `utils/` 目录，整合相关测试
+- 扩展 `skillkit/` 和 `utils/` 目录，整合相关测试
 - 删除空目录 `context_engineer/`
 - 更新文档，添加测试模块说明表格
 

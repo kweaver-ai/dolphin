@@ -91,10 +91,10 @@ async def runConversationLoop(agent, args: Args, initialVariables: Dict[str, Any
         layout.start_session(mode, args.agent)
         console_session_start(mode, args.agent)
 
-        # Display available toolkits and command hints
-        from dolphin.cli.runner.modules.agent_lifecycle import _get_toolkit_info
-        toolkit_info = _get_toolkit_info(agent)
-        console_display_session_info(toolkit_info, show_commands=True)
+        # Display available skillkits and command hints
+        from dolphin.cli.runner.modules.agent_lifecycle import _get_skillkit_info
+        skillkit_info = _get_skillkit_info(agent)
+        console_display_session_info(skillkit_info, show_commands=True)
 
         if flags.is_enabled(flags.DEBUG_MODE):
             console("💡 输入 /debug 进入实时调试，/trace /snapshot /vars 快速查看", verbose=args.saveHistory)
@@ -103,10 +103,10 @@ async def runConversationLoop(agent, args: Args, initialVariables: Dict[str, Any
         # No layout for non-interactive mode, just print banner
         console_session_start(mode, args.agent)
 
-        # Display available toolkits (no command hints in non-interactive mode)
-        from dolphin.cli.runner.modules.agent_lifecycle import _get_toolkit_info
-        toolkit_info = _get_toolkit_info(agent)
-        console_display_session_info(toolkit_info, show_commands=False)
+        # Display available skillkits (no command hints in non-interactive mode)
+        from dolphin.cli.runner.modules.agent_lifecycle import _get_skillkit_info
+        skillkit_info = _get_skillkit_info(agent)
+        console_display_session_info(skillkit_info, show_commands=False)
 
     isFirstExecution = True
     enterPostmortemAfterInteractive = False

@@ -44,7 +44,7 @@ class MemoryManager:
             return []
 
         try:
-            memory_skill_result = context.get_toolkit().exec(
+            memory_skill_result = context.get_skillkit().exec(
                 "_read_memory",
                 agent_name=context.get_cur_agent().get_name(),
                 user_id=user_id,

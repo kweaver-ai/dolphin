@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 from unittest.mock import Mock, AsyncMock, patch
 
 from dolphin.core.executor.dolphin_executor import DolphinExecutor
-from dolphin.sdk.tool.traditional_toolkit import TriditionalToolkit
+from dolphin.sdk.skill.traditional_toolkit import TriditionalToolkit
 from dolphin.core.utils.tools import Tool
 
 

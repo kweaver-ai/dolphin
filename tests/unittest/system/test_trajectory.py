@@ -25,10 +25,10 @@ from dolphin.core.trajectory.trajectory import Trajectory
 # =============================================================================
 
 
-class MockToolkit:
-    """测试用的 Mock Toolkit，满足 Explore/Judge 所需接口，避免依赖真实 ToolFunction"""
+class MockSkillkit:
+    """测试用的 Mock Skillkit，满足 Explore/Judge 所需接口，避免依赖真实 SkillFunction"""
 
-    # 存储 skill schemas 以便 _DummyToolFunction 可以引用
+    # 存储 skill schemas 以便 _DummySkillFunction 可以引用
     _SKILL_SCHEMAS = {
         "mock_search": {
             "type": "function",
@@ -75,27 +75,27 @@ class MockToolkit:
     def isEmpty(self) -> bool:
         return len(self._skills) == 0
 
-    def getTools(self) -> List[Any]:
-        """提供给技能校验/ToolSet 的技能列表（需完整实现 ToolFunction 接口）"""
+    def getSkills(self) -> List[Any]:
+        """提供给技能校验/Skillset 的技能列表（需完整实现 SkillFunction 接口）"""
         # 将 schemas 引用传递给内部类
-        skill_schemas = MockToolkit._SKILL_SCHEMAS
+        skill_schemas = MockSkillkit._SKILL_SCHEMAS
 
-        class _DummyToolFunction:
+        class _DummySkillFunction:
             def __init__(self, name: str):
                 self._name = name
-                self.owner_toolkit = None
+                self.owner_skillkit = None
 
             def get_function_name(self) -> str:
                 return self._name
 
-            def get_owner_toolkit(self) -> Optional[str]:
-                return self.owner_toolkit
+            def get_owner_skillkit(self) -> Optional[str]:
+                return self.owner_skillkit
 
-            def set_owner_toolkit(self, owner) -> None:
-                self.owner_toolkit = owner
+            def set_owner_skillkit(self, owner) -> None:
+                self.owner_skillkit = owner
 
             def get_openai_tool_schema(self) -> Dict[str, Any]:
-                """返回 OpenAI 格式的工具 schema，供 ToolSet.getToolsSchema() 使用"""
+                """返回 OpenAI 格式的工具 schema，供 Skillset.getSkillsSchema() 使用"""
                 return skill_schemas.get(self._name, {
                     "type": "function",
                     "function": {
@@ -105,12 +105,12 @@ class MockToolkit:
                     },
                 })
 
-        return [_DummyToolFunction(name) for name in self._skills.keys()]
+        return [_DummySkillFunction(name) for name in self._skills.keys()]
 
-    def getToolNames(self) -> List[str]:
+    def getSkillNames(self) -> List[str]:
         return list(self._skills.keys())
 
-    def getTool(self, name: str) -> Any:
+    def getSkill(self, name: str) -> Any:
         """在本测试中不直接通过 skillkit 调用工具，返回 None"""
         return None
 
@@ -122,9 +122,9 @@ class MockToolkit:
         """用于 tool_call 模式 system 提示中的工具说明"""
         return f"[{format_type}] mock_search: 搜索工具\nmock_calculator: 计算器工具"
 
-    def getToolsSchema(self) -> List[Dict[str, Any]]:
+    def getSkillsSchema(self) -> List[Dict[str, Any]]:
         """用于 ToolCallStrategy 生成 tools 参数"""
-        return list(MockToolkit._SKILL_SCHEMAS.values())
+        return list(MockSkillkit._SKILL_SCHEMAS.values())
 
 
 # =============================================================================
@@ -158,19 +158,19 @@ def _build_tool_call_chunk(
     return chunk
 
 
-def create_tool_run_mock(responses: List[Any]):
+def create_skill_run_mock(responses: List[Any]):
     """
-    创建 tool_run mock 工厂函数，使用闭包隔离状态。
+    创建 skill_run mock 工厂函数，使用闭包隔离状态。
 
     Args:
         responses: 按调用顺序返回的结果列表
 
     Returns:
-        可作为 BasicCodeBlock.tool_run 替代的异步生成器函数
+        可作为 BasicCodeBlock.skill_run 替代的异步生成器函数
     """
     call_count = [0]
 
-    async def fake_tool_run(self, *args, **kwargs):
+    async def fake_skill_run(self, *args, **kwargs):
         idx = call_count[0]
         call_count[0] += 1
         if idx < len(responses):
@@ -178,24 +178,24 @@ def create_tool_run_mock(responses: List[Any]):
         else:
             resp = responses[-1] if responses else {"result": "default"}
 
-        # Mimic BasicCodeBlock.tool_run side-effects minimally:
+        # Mimic BasicCodeBlock.skill_run side-effects minimally:
         # record the tool output into recorder so ExploreBlock can build tool_response messages correctly.
         try:
             if getattr(self, "recorder", None) is not None:
-                tool_name = kwargs.get("tool_name")
-                tool_args = kwargs.get("skill_params_json") or {}
-                if tool_name:
+                skill_name = kwargs.get("skill_name")
+                skill_args = kwargs.get("skill_params_json") or {}
+                if skill_name:
                     self.recorder.update(
                         item=resp,
-                        tool_name=tool_name,
-                        tool_args=tool_args,
+                        skill_name=skill_name,
+                        skill_args=skill_args,
                     )
         except Exception:
             pass
 
         yield resp
 
-    return fake_tool_run
+    return fake_skill_run
 
 
 # =============================================================================
@@ -210,9 +210,9 @@ def global_config():
 
 
 @pytest.fixture
-def mock_toolkit():
-    """提供 MockToolkit 实例"""
-    return MockToolkit()
+def mock_skillkit():
+    """提供 MockSkillkit 实例"""
+    return MockSkillkit()
 
 
 # =============================================================================
@@ -221,7 +221,7 @@ def mock_toolkit():
 
 
 @pytest.mark.asyncio
-async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_toolkit):
+async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_skillkit):
     """
     Case 1: assign -> prompt -> explore(mode=prompt)
 
@@ -268,7 +268,7 @@ async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_toolki
         response = explore_responses[min(idx, len(explore_responses) - 1)]
         yield _build_prompt_block_chunk(response)
 
-    fake_tool_run = create_tool_run_mock([
+    fake_skill_run = create_skill_run_mock([
         {"result": "搜索结果: test value 的相关内容"}
     ])
 
@@ -276,16 +276,16 @@ async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_toolki
         "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
         new=mock_mf_chat_stream,
     ), patch(
-        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
-        new=fake_tool_run,
+        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
+        new=fake_skill_run,
     ), patch(
-        "dolphin.core.context.context.Context.get_toolkit"
-    ) as mock_get_toolkit:
-        mock_get_toolkit.return_value = mock_toolkit
+        "dolphin.core.context.context.Context.get_skillkit"
+    ) as mock_get_skillkit:
+        mock_get_skillkit.return_value = mock_skillkit
 
         executor = DolphinExecutor(global_config=global_config)
         executor.context.init_trajectory(str(trajectory_path))
-        executor.context.set_tools(mock_toolkit)
+        executor.context.set_skills(mock_skillkit)
 
         async for _ in executor.run(dph_content):
             pass
@@ -329,7 +329,7 @@ async def test_trajectory_case1_prompt_mode(tmp_path, global_config, mock_toolki
 
 
 @pytest.mark.asyncio
-async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_toolkit):
+async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_skillkit):
     """
     Case 2: assign -> judge -> explore(mode=tool_call)
 
@@ -386,7 +386,7 @@ async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_too
 
         yield _build_prompt_block_chunk("默认回答")
 
-    fake_tool_run = create_tool_run_mock([
+    fake_skill_run = create_skill_run_mock([
         {"result": "搜索结果: important topic 的相关内容"},
         {"result": "计算结果: 2"},
     ])
@@ -395,16 +395,16 @@ async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_too
         "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
         new=mock_mf_chat_stream,
     ), patch(
-        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
-        new=fake_tool_run,
+        "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
+        new=fake_skill_run,
     ), patch(
-        "dolphin.core.context.context.Context.get_toolkit"
-    ) as mock_get_toolkit:
-        mock_get_toolkit.return_value = mock_toolkit
+        "dolphin.core.context.context.Context.get_skillkit"
+    ) as mock_get_skillkit:
+        mock_get_skillkit.return_value = mock_skillkit
 
         executor = DolphinExecutor(global_config=global_config)
         executor.context.init_trajectory(str(trajectory_path))
-        executor.context.set_tools(mock_toolkit)
+        executor.context.set_skills(mock_skillkit)
 
         async for _ in executor.run(dph_content):
             pass
@@ -478,7 +478,7 @@ async def test_trajectory_case2_tool_call_mode(tmp_path, global_config, mock_too
 
 
 @pytest.mark.asyncio
-async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_config, mock_toolkit):
+async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_config, mock_skillkit):
     """
     测试禁用 EXPLORE_BLOCK_V2 时，ExploreBlock 能正确解析 mode=tool_call 参数
 
@@ -532,7 +532,7 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
                 # prompt 模式：返回 =># 格式
                 yield _build_prompt_block_chunk('=>#mock_search: {"query": "test"}')
 
-        fake_tool_run = create_tool_run_mock([
+        fake_skill_run = create_skill_run_mock([
             {"result": "搜索结果: test query 的相关内容"}
         ])
 
@@ -540,16 +540,16 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
             "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
             new=mock_mf_chat_stream,
         ), patch(
-            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
-            new=fake_tool_run,
+            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
+            new=fake_skill_run,
         ), patch(
-            "dolphin.core.context.context.Context.get_toolkit"
-        ) as mock_get_toolkit:
-            mock_get_toolkit.return_value = mock_toolkit
+            "dolphin.core.context.context.Context.get_skillkit"
+        ) as mock_get_skillkit:
+            mock_get_skillkit.return_value = mock_skillkit
 
             executor = DolphinExecutor(global_config=global_config)
             executor.context.init_trajectory(str(trajectory_path))
-            executor.context.set_tools(mock_toolkit)
+            executor.context.set_skills(mock_skillkit)
 
             async for _ in executor.run(dph_content):
                 pass
@@ -584,7 +584,7 @@ async def test_trajectory_tool_call_mode_with_explore_block_v1(tmp_path, global_
 
 @pytest.mark.asyncio
 async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins(
-    tmp_path, global_config, mock_toolkit
+    tmp_path, global_config, mock_skillkit
 ):
     """
     验证交互式 continue_exploration 行为与本次改动一致：
@@ -635,7 +635,7 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
         yield _build_prompt_block_chunk("继续对话的回答。")
 
     # 工具返回：包含 PIN_MARKER，要求进入 history（被去标记后持久化）
-    fake_tool_run = create_tool_run_mock(
+    fake_skill_run = create_skill_run_mock(
         [f"{PIN_MARKER}\n这是需要被持久化到 history 的资源结论"]
     )
 
@@ -646,16 +646,16 @@ async def test_trajectory_continue_exploration_rebuilds_system_and_persists_pins
             "dolphin.core.llm.llm_client.LLMClient.mf_chat_stream",
             new=mock_mf_chat_stream,
         ), patch(
-            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.tool_run",
-            new=fake_tool_run,
+            "dolphin.core.code_block.basic_code_block.BasicCodeBlock.skill_run",
+            new=fake_skill_run,
         ), patch(
-            "dolphin.core.context.context.Context.get_toolkit"
-        ) as mock_get_toolkit:
-            mock_get_toolkit.return_value = mock_toolkit
+            "dolphin.core.context.context.Context.get_skillkit"
+        ) as mock_get_skillkit:
+            mock_get_skillkit.return_value = mock_skillkit
 
             executor = DolphinExecutor(global_config=global_config)
             executor.context.init_trajectory(str(trajectory_path))
-            executor.context.set_tools(mock_toolkit)
+            executor.context.set_skills(mock_skillkit)
 
             async for _ in executor.run(dph_content):
                 pass

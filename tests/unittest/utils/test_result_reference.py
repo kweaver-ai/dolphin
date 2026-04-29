@@ -11,7 +11,7 @@ from dolphin.lib.skill_results.result_reference import ResultReference
 from dolphin.lib.skill_results.cache_backend import CacheBackend
 from dolphin.lib.skill_results.strategy_registry import StrategyRegistry
 from dolphin.lib.skill_results.strategies import BaseStrategy
-from dolphin.lib.skill_results.toolkit_hook import ToolkitHook
+from dolphin.lib.skill_results.skillkit_hook import SkillkitHook
 
 
 class TestResultReference(unittest.TestCase):
@@ -25,7 +25,7 @@ class TestResultReference(unittest.TestCase):
         strategy_registry.register(
             "test_category", test_strategy, category="test_category_strategy"
         )
-        self.toolkit_hook = ToolkitHook(strategy_registry=strategy_registry)
+        self.skillkit_hook = SkillkitHook(strategy_registry=strategy_registry)
 
         print("Registered strategies:", strategy_registry.list_strategies())
 
@@ -40,11 +40,11 @@ class TestResultReference(unittest.TestCase):
         self.assertEqual(rt, None)
 
     def test_custom_category(self):
-        result_ref = self.toolkit_hook.process_result(
+        result_ref = self.skillkit_hook.process_result(
             tool_name="test_tool", result="test_data", metadata={}
         )
         print("ref:", result_ref.reference_id)
-        processed = self.toolkit_hook.get_for_category(
+        processed = self.skillkit_hook.get_for_category(
             reference_id=result_ref.reference_id,
             category="test_category_strategy",
             strategy_name="test_category",

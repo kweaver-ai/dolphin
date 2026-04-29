@@ -1,5 +1,11 @@
-"""Deprecated: use dolphin.lib.toolkits.resource_toolkit instead."""
-import warnings
-warnings.warn("dolphin.lib.skillkits.resource_skillkit is deprecated. Use dolphin.lib.toolkits.resource_toolkit instead.", DeprecationWarning, stacklevel=2)
-from dolphin.lib.toolkits.resource_toolkit import ResourceToolkit as ResourceSkillkit
+"""Compatibility wrapper for ResourceSkillkit.
+
+GlobalSkills' file-based loader scans only top-level `skill/installed/*.py`.
+This module re-exports the package implementation so ResourceSkillkit can be
+discovered in both entry-point and fallback modes.
+"""
+
+from dolphin.lib.skillkits.resource import ResourceSkillkit
+
 __all__ = ["ResourceSkillkit"]
+

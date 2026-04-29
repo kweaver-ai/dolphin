@@ -30,7 +30,7 @@ from dolphin.core.config.global_config import GlobalConfig
 
 def _make_context() -> Context:
     ctx = Context(config=GlobalConfig(), context_manager=ContextManager())
-    ctx._calc_all_tools()
+    ctx._calc_all_skills()
     return ctx
 
 

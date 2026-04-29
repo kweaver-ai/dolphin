@@ -295,31 +295,31 @@ def _stdout(value: str, info: bool = False, **kwargs):
             _write_to_extra_log(value, ensure_newline=False)
 
 
-def console_tool_call(tool_name, params, max_length=200, verbose=None, skill=None, duration_ms=0, is_cli=None):
-    """Display tool call with modern styling.
-
+def console_skill_call(skill_name, params, max_length=200, verbose=None, skill=None, duration_ms=0, is_cli=None):
+    """Display skill/tool call with modern styling.
+    
     This function uses the new console_ui module for enhanced visual display
     inspired by Codex CLI and Claude Code's terminal interfaces.
-
-    Supports custom UI rendering via Toolkit.has_custom_ui() protocol.
-
+    
+    Supports custom UI rendering via Skillkit.has_custom_ui() protocol.
+    
     Args:
-        tool_name: Name of the tool being called
-        params: Parameters passed to the tool
+        skill_name: Name of the skill being called
+        params: Parameters passed to the skill
         max_length: Maximum length for parameter display
         verbose: Whether to display (None uses default, False suppresses)
-        skill: Optional ToolFunction object (for custom UI lookup)
+        skill: Optional SkillFunction object (for custom UI lookup)
     """
     if verbose is False:
         return
 
-    # Check if tool has custom UI rendering
-    if skill and hasattr(skill, 'owner_toolkit') and skill.owner_toolkit:
-        toolkit = skill.owner_toolkit
-        if hasattr(toolkit, 'has_custom_ui') and toolkit.has_custom_ui(tool_name):
+    # Check if skill has custom UI rendering
+    if skill and hasattr(skill, 'owner_skillkit') and skill.owner_skillkit:
+        skillkit = skill.owner_skillkit
+        if hasattr(skillkit, 'has_custom_ui') and skillkit.has_custom_ui(skill_name):
             # Use custom rendering (start phase)
-            if hasattr(toolkit, 'render_tool_start'):
-                toolkit.render_tool_start(tool_name, params, verbose=verbose if verbose is not None else True)
+            if hasattr(skillkit, 'render_skill_start'):
+                skillkit.render_skill_start(skill_name, params, verbose=verbose if verbose is not None else True)
             return  # Skip default rendering
 
     effective_verbose = True if verbose is None else bool(verbose)
@@ -328,7 +328,7 @@ def console_tool_call(tool_name, params, max_length=200, verbose=None, skill=Non
         try:
             from dolphin.cli.ui.console import get_console_ui
             ui = get_console_ui()
-            ui.tool_call_start(tool_name, params, max_length, verbose=effective_verbose)
+            ui.skill_call_start(skill_name, params, max_length, verbose=effective_verbose)
             return
         except Exception:
             # Fall back to legacy display.
@@ -336,7 +336,7 @@ def console_tool_call(tool_name, params, max_length=200, verbose=None, skill=Non
 
     # Fallback to legacy display if console_ui is unavailable or unsuitable.
     try:
-        header = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}🔧 CALL TOOL{Colors.RESET} {Colors.BOLD}{Colors.BRIGHT_YELLOW}<{tool_name}>{Colors.RESET}"
+        header = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}🔧 CALL SKILL{Colors.RESET} {Colors.BOLD}{Colors.BRIGHT_YELLOW}<{skill_name}>{Colors.RESET}"
         # Use ASCII-compatible separator to avoid junk characters (M-^TM-^@)
         separator = f"{Colors.DIM}{Colors.BRIGHT_BLACK}{'-' * 60}{Colors.RESET}"
         formatted_params = _format_json_compact(params, max_width=100)
@@ -350,40 +350,40 @@ def console_tool_call(tool_name, params, max_length=200, verbose=None, skill=Non
         return
 
 
-def console_tool_response(tool_name, response, max_length=200, verbose=None, skill=None, params=None, duration_ms=0, is_cli=None):
-    """Display tool response with modern styling.
-
+def console_skill_response(skill_name, response, max_length=200, verbose=None, skill=None, params=None, duration_ms=0, is_cli=None):
+    """Display skill/tool response with modern styling.
+    
     This function uses the new console_ui module for enhanced visual display
     inspired by Codex CLI and Claude Code's terminal interfaces.
-
-    Supports custom UI rendering via Toolkit.has_custom_ui() protocol.
-
+    
+    Supports custom UI rendering via Skillkit.has_custom_ui() protocol.
+    
     Args:
-        tool_name: Name of the tool that completed
-        response: Response from the tool
+        skill_name: Name of the skill that completed
+        response: Response from the skill
         max_length: Maximum length for response display
         verbose: Whether to display (None uses default, False suppresses)
-        skill: Optional ToolFunction object (for custom UI lookup)
-        params: Optional parameters that were passed to the tool
+        skill: Optional SkillFunction object (for custom UI lookup)
+        params: Optional parameters that were passed to the skill
         duration_ms: Execution duration in milliseconds
         is_cli: Whether to use CLI UI (overrides default TTY detection)
     """
-    from dolphin.lib.toolkits.cognitive_toolkit import CognitiveToolkit
+    from dolphin.lib.skillkits.cognitive_skillkit import CognitiveSkillkit
 
-    if CognitiveToolkit.is_cognitive_tool(tool_name):
+    if CognitiveSkillkit.is_cognitive_skill(skill_name):
         return
 
     if verbose is False:
         return
 
-    # Check if tool has custom UI rendering
-    if skill and hasattr(skill, 'owner_toolkit') and skill.owner_toolkit:
-        toolkit = skill.owner_toolkit
-        if hasattr(toolkit, 'has_custom_ui') and toolkit.has_custom_ui(tool_name):
+    # Check if skill has custom UI rendering
+    if skill and hasattr(skill, 'owner_skillkit') and skill.owner_skillkit:
+        skillkit = skill.owner_skillkit
+        if hasattr(skillkit, 'has_custom_ui') and skillkit.has_custom_ui(skill_name):
             # Use custom rendering (end phase)
-            if hasattr(toolkit, 'render_tool_end'):
-                toolkit.render_tool_end(
-                    tool_name,
+            if hasattr(skillkit, 'render_skill_end'):
+                skillkit.render_skill_end(
+                    skill_name,
                     params or {},
                     response,
                     success=True,
@@ -398,8 +398,8 @@ def console_tool_response(tool_name, response, max_length=200, verbose=None, ski
         try:
             from dolphin.cli.ui.console import get_console_ui
             ui = get_console_ui()
-            ui.tool_call_end(
-                tool_name,
+            ui.skill_call_end(
+                skill_name,
                 response,
                 max_length,
                 success=True,
@@ -431,8 +431,8 @@ def console_tool_response(tool_name, response, max_length=200, verbose=None, ski
         return
 
 
-def console_agent_tool_exit(tool_name: str, message: str = None, verbose=None, is_cli=None):
-    """Display a delimiter indicating an agent-as-tool has exited.
+def console_agent_skill_exit(skill_name: str, message: str = None, verbose=None, is_cli=None):
+    """Display a delimiter indicating an agent-as-skill has exited.
 
     This keeps terminal formatting concerns in the UI layer.
     """
@@ -446,22 +446,22 @@ def console_agent_tool_exit(tool_name: str, message: str = None, verbose=None, i
             from dolphin.cli.ui.console import get_console_ui
 
             ui = get_console_ui()
-            ui.agent_skill_exit(tool_name, message=message, verbose=effective_verbose)
+            ui.agent_skill_exit(skill_name, message=message, verbose=effective_verbose)
             return
         except Exception:
             pass
 
     try:
         # Fallback: plain separator
-        label = message or f" AGENT EXITED: {tool_name}"
+        label = message or f" AGENT EXITED: {skill_name}"
         print("\n" + ("-" * 10) + label + ("-" * 10) + "\n")
     except Exception:
         return
 
 
-def console_agent_tool_enter(tool_name: str, message: str = None, verbose=None, is_cli=None):
-    """Display a delimiter indicating an agent-as-tool has started.
-
+def console_agent_skill_enter(skill_name: str, message: str = None, verbose=None, is_cli=None):
+    """Display a delimiter indicating an agent-as-skill has started.
+    
     This keeps terminal formatting concerns in the UI layer.
     """
     if verbose is False:
@@ -473,13 +473,13 @@ def console_agent_tool_enter(tool_name: str, message: str = None, verbose=None, 
         try:
             from dolphin.cli.ui.console import get_console_ui
             ui = get_console_ui()
-            ui.agent_skill_enter(tool_name, message=message, verbose=effective_verbose)
+            ui.agent_skill_enter(skill_name, message=message, verbose=effective_verbose)
             return
         except Exception:
             pass
 
     try:
-        label = message or f"🚀 AGENT ACTIVATE: {tool_name}"
+        label = message or f"🚀 AGENT ACTIVATE: {skill_name}"
         print(f"\n===== {label} =====\n")
     except Exception:
         return

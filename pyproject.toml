@@ -80,20 +80,20 @@ dev = [
 [project.scripts]
 dolphin = "dolphin.cli:main"
 
-# Entry points for toolkits discovery
-[project.entry-points."dolphin.toolkits"]
-# Core toolkits from lib
-search = "dolphin.lib.toolkits.search_toolkit:SearchToolkit"
-sql = "dolphin.lib.toolkits.sql_toolkit:SQLToolkit"
-memory = "dolphin.lib.toolkits.memory_toolkit:MemoryToolkit"
-ontology = "dolphin.lib.toolkits.ontology_toolkit:OntologyToolkit"
-plan = "dolphin.lib.toolkits.plan_toolkit:PlanToolkit"
-cognitive = "dolphin.lib.toolkits.cognitive_toolkit:CognitiveToolkit"
-vm = "dolphin.lib.toolkits.vm_toolkit:VMToolkit"
-noop = "dolphin.lib.toolkits.noop_toolkit:NoopToolkit"
-mcp = "dolphin.lib.toolkits.mcp_toolkit:MCPToolkit"
-resource = "dolphin.lib.toolkits.resource_toolkit:ResourceToolkit"
-env = "dolphin.lib.toolkits.env_toolkit:EnvToolkit"
+# Entry points for skillkits discovery
+[project.entry-points."dolphin.skillkits"]
+# Core skillkits from lib
+search = "dolphin.lib.skillkits.search_skillkit:SearchSkillkit"
+sql = "dolphin.lib.skillkits.sql_skillkit:SQLSkillkit"
+memory = "dolphin.lib.skillkits.memory_skillkit:MemorySkillkit"
+ontology = "dolphin.lib.skillkits.ontology_skillkit:OntologySkillkit"
+plan = "dolphin.lib.skillkits.plan_skillkit:PlanSkillkit"
+cognitive = "dolphin.lib.skillkits.cognitive_skillkit:CognitiveSkillkit"
+vm = "dolphin.lib.skillkits.vm_skillkit:VMSkillkit"
+noop = "dolphin.lib.skillkits.noop_skillkit:NoopSkillkit"
+mcp = "dolphin.lib.skillkits.mcp_skillkit:MCPSkillkit"
+resource = "dolphin.lib.skillkits.resource_skillkit:ResourceSkillkit"
+env = "dolphin.lib.skillkits.env_skillkit:EnvSkillkit"
 
 [tool.setuptools.packages.find]
 where = ["src"]

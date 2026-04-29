@@ -2,7 +2,7 @@
 Console UI Module - Modern Terminal Display for Dolphin SDK
 
 This module provides a modern, visually appealing terminal UI for displaying
-tool calls, tool invocations, and agent interactions. Inspired by Codex CLI
+tool calls, skill invocations, and agent interactions. Inspired by Codex CLI
 and Claude Code's elegant terminal interfaces.
 
 Features:
@@ -47,8 +47,8 @@ class ConsoleUI:
         self.style = style or BoxStyle()
         self.verbose = verbose
         self._current_spinner: Optional[Spinner] = None
-        self._active_tool_spinner: Optional[Spinner] = None  # For tool call animations
-        self._paused_status_bar_for_tool: Optional['StatusBar'] = None # Track paused status bar for tool calls
+        self._active_skill_spinner: Optional[Spinner] = None  # For skill call animations
+        self._paused_status_bar_for_skill: Optional['StatusBar'] = None # Track paused status bar for skill calls
         self._status_bar: Optional[StatusBar] = None  # For status bar animation
     
     def show_status_bar(
@@ -416,7 +416,7 @@ class ConsoleUI:
             elif v is None:
                 val_display = f"{Theme.NULL_VALUE}null{Theme.RESET}"
                 lines.append(f"  {Theme.PARAM_KEY}{display_key}{Theme.RESET}:{padding} {val_display}")
-            # Special case for tasks list in PlanToolkit
+            # Special case for tasks list in PlanSkillkit
             elif key_lower == "tasks" and isinstance(v, list) and v and isinstance(v[0], dict):
                 lines.append(f"  {Theme.PARAM_KEY}{display_key}{Theme.RESET}:{padding}")
                 for i, task in enumerate(v[:10]):
@@ -436,72 +436,72 @@ class ConsoleUI:
         return "\n".join(lines)
 
     # ─────────────────────────────────────────────────────────────
-    # Public API - Tool Call Display
+    # Public API - Skill/Tool Call Display
     # ─────────────────────────────────────────────────────────────
-    def tool_call_start(
-        self,
-        tool_name: str,
+    def skill_call_start(
+        self, 
+        skill_name: str, 
         params: Dict[str, Any],
         max_param_length: int = 300,
         verbose: Optional[bool] = None
     ) -> None:
         """
-        Display the start of a tool call with modern styling.
-
-        Inspired by Codex CLI's bordered tool call display and
+        Display the start of a skill/tool call with modern styling.
+        
+        Inspired by Codex CLI's bordered tool call display and 
         Claude Code's clean parameter formatting.
-
-        Now includes an animated spinner while the tool is running.
-
+        
+        Now includes an animated spinner while the skill is running.
+        
         Args:
-            tool_name: Name of the tool being called
-            params: Parameters passed to the tool
+            skill_name: Name of the skill being called
+            params: Parameters passed to the skill
             max_param_length: Maximum length for parameter display
             verbose: Override verbose setting
         """
         if verbose is False or (verbose is None and not self.verbose):
             return
-
+        
         # Stop any existing spinner first
-        if self._active_tool_spinner:
-            self._active_tool_spinner.stop()
-            self._active_tool_spinner = None
-
+        if self._active_skill_spinner:
+            self._active_skill_spinner.stop()
+            self._active_skill_spinner = None
+        
         # Format the parameters using the clean style
         if params:
             formatted_params = self._format_params_clean(params, max_val_len=max_param_length)
         else:
             formatted_params = f"{Theme.MUTED}(no parameters){Theme.RESET}"
-
+        
         # Build the output
         output_lines = [
-            self._draw_box_top(tool_name, "⚡ ", StatusType.RUNNING),
+            self._draw_box_top(skill_name, "⚡ ", StatusType.RUNNING),
             # Input label: Bold, no colon
             self._draw_box_line(f"{Theme.BOLD}{Theme.LABEL}Input{Theme.RESET}"),
         ]
-
+        
         # Add formatted parameters with proper indentation
         for line in formatted_params.split("\n"):
             output_lines.append(self._draw_box_line(f"  {line}"))
-
+        
         # Print all lines
         for line in output_lines:
             safe_print(line)
-
-        # Start the spinner animation for tool execution
+        
+        # Start the spinner animation for skill execution
         # Also animate the icon in the Box Header (top-left)
         # Header is at index 1 of output_lines
         # Cursor is currently below the last line
         # Distance to Header = len(output_lines) - 1
         header_up_dist = len(output_lines) - 1
-
-        self._active_tool_spinner = Spinner(
-            f"Running {tool_name}...",
+        
+        self._active_skill_spinner = Spinner(
+            f"Running {skill_name}...", 
             position_updates=[{'up': header_up_dist, 'col': 4}]
         )
         # Note: Fixed-position StatusBar uses cursor save/restore, so it won't conflict
-        # with the tool spinner. No need to pause StatusBar here.
-        self._active_tool_spinner.start()
+        # with the skill spinner. No need to pause StatusBar here.
+        self._active_skill_spinner.start()
     
     def _try_parse_json(self, text: str) -> Optional[Any]:
         """Try to parse a string as JSON or Python literal, return None if it fails."""
@@ -681,9 +681,9 @@ class ConsoleUI:
         # NOTE: No max_length truncation here - let _format_collapsed_content handle folding
         return '\n'.join(result_lines)
 
-    def tool_call_end(
+    def skill_call_end(
         self,
-        tool_name: str,
+        skill_name: str,
         response: Any,
         max_response_length: int = 300,
         success: bool = True,
@@ -692,14 +692,14 @@ class ConsoleUI:
         collapsed: bool = True
     ) -> None:
         """
-        Display the completion of a tool call.
-
+        Display the completion of a skill/tool call.
+        
         Stops the running spinner animation before showing results.
         Supports automatic collapsing of long outputs.
-
+        
         Args:
-            tool_name: Name of the tool that completed
-            response: Response from the tool
+            skill_name: Name of the skill that completed
+            response: Response from the skill
             max_response_length: Maximum length for response display
             success: Whether the call was successful
             duration_ms: Execution duration in milliseconds
@@ -707,9 +707,9 @@ class ConsoleUI:
             collapsed: Whether to collapse long outputs (default: True)
         """
         # Stop spinner first (before any output) and update header icon
-        if self._active_tool_spinner:
-            self._active_tool_spinner.stop(success=success)
-            self._active_tool_spinner = None
+        if self._active_skill_spinner:
+            self._active_skill_spinner.stop(success=success)
+            self._active_skill_spinner = None
         
         if verbose is False or (verbose is None and not self.verbose):
             return
@@ -765,9 +765,9 @@ class ConsoleUI:
         for line in output_lines:
             safe_print(line)
     
-    def tool_call_compact(
+    def skill_call_compact(
         self,
-        tool_name: str,
+        skill_name: str,
         params: Dict[str, Any],
         response: Any,
         success: bool = True,
@@ -775,10 +775,10 @@ class ConsoleUI:
         verbose: Optional[bool] = None
     ) -> None:
         """
-        Display a complete tool call in compact format (single box).
-
+        Display a complete skill call in compact format (single box).
+        
         Args:
-            tool_name: Name of the tool
+            skill_name: Name of the skill
             params: Input parameters
             response: Output response
             success: Whether successful
@@ -814,7 +814,7 @@ class ConsoleUI:
         # Single line format for very short calls
         safe_print(
             f"\n{status_color}{status_icon}{Theme.RESET} "
-            f"{Theme.BOLD}⚡ {Theme.TOOL_NAME}{tool_name}{Theme.RESET}"
+            f"{Theme.BOLD}⚡ {Theme.TOOL_NAME}{skill_name}{Theme.RESET}"
             f"{Theme.MUTED}({Theme.RESET}{Theme.PARAM_VALUE}{param_str}{Theme.RESET}{Theme.MUTED}){Theme.RESET}"
             f" {Theme.MUTED}→{Theme.RESET} "
             f"{Theme.STRING_VALUE}{resp_str}{Theme.RESET}"
@@ -1047,23 +1047,23 @@ class ConsoleUI:
 
     def display_session_info(
         self,
-        toolkit_info: dict = None,
+        skillkit_info: dict = None,
         show_commands: bool = True,
         verbose: Optional[bool] = None
     ) -> None:
-        """Display available toolkits and command hints after session start.
+        """Display available skillkits and command hints after session start.
 
         Args:
-            toolkit_info: Dict mapping toolkit name to tool count
+            skillkit_info: Dict mapping skillkit name to tool count
             show_commands: Whether to show available slash commands
             verbose: Override verbose setting
         """
         if verbose is False or (verbose is None and not self.verbose):
             return
 
-        if toolkit_info:
-            safe_print(f"{Theme.SECONDARY}📦 Available Toolkits:{Theme.RESET}")
-            for name, count in sorted(toolkit_info.items()):
+        if skillkit_info:
+            safe_print(f"{Theme.SECONDARY}📦 Available Skillkits:{Theme.RESET}")
+            for name, count in sorted(skillkit_info.items()):
                 safe_print(f"{Theme.MUTED}   • {name} ({count} tools){Theme.RESET}")
 
         if show_commands:
@@ -1396,7 +1396,7 @@ class ConsoleUI:
         """
         Render a complete plan update in a plan-focused visual style.
         
-        This renderer is intended for plan orchestration tools (e.g., plan_toolkit)
+        This renderer is intended for plan orchestration tools (e.g., plan_skillkit)
         and can be used by callers who want a dedicated plan visualization.
         
         Args:
@@ -1722,26 +1722,26 @@ def set_console_ui(ui: ConsoleUI) -> None:
 
 
 # Convenience functions that delegate to global instance
-def ui_tool_call(
-    tool_name: str,
+def ui_skill_call(
+    skill_name: str,
     params: Dict[str, Any],
     max_length: int = 300,
     verbose: Optional[bool] = None
 ) -> None:
-    """Display tool call start (convenience function)"""
-    get_console_ui().tool_call_start(tool_name, params, max_length, verbose)
+    """Display skill call start (convenience function)"""
+    get_console_ui().skill_call_start(skill_name, params, max_length, verbose)
 
 
-def ui_tool_response(
-    tool_name: str,
+def ui_skill_response(
+    skill_name: str,
     response: Any,
     max_length: int = 300,
     success: bool = True,
     duration_ms: Optional[float] = None,
     verbose: Optional[bool] = None
 ) -> None:
-    """Display tool call response (convenience function)"""
-    get_console_ui().tool_call_end(tool_name, response, max_length, success, duration_ms, verbose)
+    """Display skill call response (convenience function)"""
+    get_console_ui().skill_call_end(skill_name, response, max_length, success, duration_ms, verbose)
 
 
 def ui_block_start(
@@ -1769,14 +1769,14 @@ def console_session_end() -> None:
 console_conversation_end = console_session_end
 
 
-def console_display_session_info(toolkit_info: dict = None, show_commands: bool = True) -> None:
-    """Display available toolkits and command hints after session start.
+def console_display_session_info(skillkit_info: dict = None, show_commands: bool = True) -> None:
+    """Display available skillkits and command hints after session start.
 
     Args:
-        toolkit_info: Dict mapping toolkit name to tool count, e.g. {"python_toolkit": 3}
+        skillkit_info: Dict mapping skillkit name to tool count, e.g. {"python_skillkit": 3}
         show_commands: Whether to show available slash commands
     """
-    get_console_ui().display_session_info(toolkit_info, show_commands, verbose=True)
+    get_console_ui().display_session_info(skillkit_info, show_commands, verbose=True)
 
 
 def console_user_input(user_input: str) -> None:
@@ -1859,8 +1859,8 @@ if __name__ == "__main__":
     safe_print("  Original Components")
     safe_print("-" * 60)
     
-    # Demo tool call
-    ui.tool_call_start(
+    # Demo skill call
+    ui.skill_call_start(
         "_plan_tasks",
         {
             "exec_mode": "seq",
@@ -1876,7 +1876,7 @@ if __name__ == "__main__":
     import time
     time.sleep(0.5)
     
-    ui.tool_call_end(
+    ui.skill_call_end(
         "_plan_tasks",
         {
             "status": "success",
@@ -1894,7 +1894,7 @@ if __name__ == "__main__":
     ui.block_start("explore", "analysis_result", "Analyzing the data structure...")
     
     # Demo compact call
-    ui.tool_call_compact(
+    ui.skill_call_compact(
         "_python",
         {"code": "df.describe()"},
         "DataFrame statistics computed",

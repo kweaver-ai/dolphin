@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from dolphin.core import flags
 from dolphin.core.code_block.explore_block_v2 import (
     ExploreBlockV2,
-    DeduplicatorToolCall,
+    DeduplicatorSkillCall,
 )
 from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.core.context_manager import (
@@ -30,7 +30,7 @@ class TestExploreBlockV2(unittest.TestCase):
         context_manager = ContextManager()
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
-        context._calc_all_tools()
+        context._calc_all_skills()
 
         block = ExploreBlockV2(context=context)
         block.history = "true"  # 强制启用 history 分支
@@ -52,16 +52,16 @@ class TestExploreBlockV2(unittest.TestCase):
         context_manager = ContextManager()
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
-        context._calc_all_tools()
+        context._calc_all_skills()
 
         block = ExploreBlockV2(context=context)
         block.times = 0
         block.should_stop_exploration = False
         # 模拟重复调用已达到阈值
-        block.deduplicator_toolcall.toolcalls = {
-            "mock_call": DeduplicatorToolCall.MAX_DUPLICATE_COUNT
+        block.deduplicator_skillcall.skillcalls = {
+            "mock_call": DeduplicatorSkillCall.MAX_DUPLICATE_COUNT
         }
-        block.enable_tool_deduplicator = True
+        block.enable_skill_deduplicator = True
 
         self.assertFalse(block._should_continue_explore())
 
@@ -72,29 +72,29 @@ class TestExploreBlockV2(unittest.TestCase):
         context_manager = ContextManager()
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
-        context._calc_all_tools()
+        context._calc_all_skills()
 
         block = ExploreBlockV2(context=context)
         block.times = 0
         block.should_stop_exploration = False
         # 模拟重复调用已达到阈值
-        block.deduplicator_toolcall.toolcalls = {
-            "mock_call": DeduplicatorToolCall.MAX_DUPLICATE_COUNT
+        block.deduplicator_skillcall.skillcalls = {
+            "mock_call": DeduplicatorSkillCall.MAX_DUPLICATE_COUNT
         }
-        block.enable_tool_deduplicator = False
+        block.enable_skill_deduplicator = False
 
         self.assertTrue(block._should_continue_explore())
 
     def test_execute_tool_call_adds_error_message_on_exception(self):
         """
-        测试当 tool_run 抛出异常时，_execute_tool_call 应该：
+        测试当 skill_run 抛出异常时，_execute_tool_call 应该：
         1. 调用 context.error
         2. 添加包含错误信息的 tool response message
         """
         context_manager = ContextManager()
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
-        context._calc_all_tools()
+        context._calc_all_skills()
         context.error = MagicMock()
         
         # Mock bucket operations
@@ -104,11 +104,11 @@ class TestExploreBlockV2(unittest.TestCase):
         
         block = ExploreBlockV2(context=context)
         
-        # Mock tool_run to raise exception
-        async def mock_tool_run(*args, **kwargs):
+        # Mock skill_run to raise exception
+        async def mock_skill_run(*args, **kwargs):
             raise Exception("Browser timeout")
             yield # make it a generator
-        block.tool_run = mock_tool_run
+        block.skill_run = mock_skill_run
         
         # Mock stream item with tool call
         stream_item = MagicMock(spec=StreamItem)
