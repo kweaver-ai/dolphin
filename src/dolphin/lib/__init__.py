@@ -3,7 +3,7 @@
 Dolphin Lib - 标准库和工具集（用户态）
 
 职责：
-- 内置 Toolkits（search、sql、memory、mcp 等）
+- 内置 Skillkits（search、sql、memory、mcp 等）
 - Ontology 管理系统
 - VM 虚拟机（可选执行后端）
 - Memory 内存管理（知识管理）
@@ -17,19 +17,19 @@ Dolphin Lib - 标准库和工具集（用户态）
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Toolkits
-    from dolphin.lib.toolkits import (
-        SearchToolkit,
-        SQLToolkit,
-        MemoryToolkit,
-        MCPToolkit,
-        OntologyToolkit,
-        CognitiveToolkit,
-        VMToolkit,
-        NoopToolkit,
-        ResourceToolkit,
-        SystemFunctionsToolkit,
-        AgentToolkit,
+    # Skillkits
+    from dolphin.lib.skillkits import (
+        SearchSkillkit,
+        SQLSkillkit,
+        MemorySkillkit,
+        MCPSkillkit,
+        OntologySkillkit,
+        CognitiveSkillkit,
+        VMSkillkit,
+        NoopSkillkit,
+        ResourceSkillkit,
+        SystemFunctionsSkillKit,
+        AgentSkillKit,
     )
     # Ontology
     from dolphin.lib.ontology import (
@@ -54,32 +54,18 @@ if TYPE_CHECKING:
     )
 
 _module_lookup = {
-    # Toolkits
-    "SearchToolkit": "dolphin.lib.toolkits",
-    "SQLToolkit": "dolphin.lib.toolkits",
-    "MemoryToolkit": "dolphin.lib.toolkits",
-    "MCPToolkit": "dolphin.lib.toolkits",
-    "OntologyToolkit": "dolphin.lib.toolkits",
-    "CognitiveToolkit": "dolphin.lib.toolkits",
-    "VMToolkit": "dolphin.lib.toolkits",
-    "NoopToolkit": "dolphin.lib.toolkits",
-    "ResourceToolkit": "dolphin.lib.toolkits",
-    "SystemFunctionsToolkit": "dolphin.lib.toolkits",
-    "AgentToolkit": "dolphin.lib.toolkits",
-    # Deprecated Skillkit aliases (backward-compat shim)
+    # Skillkits
     "SearchSkillkit": "dolphin.lib.skillkits",
     "SQLSkillkit": "dolphin.lib.skillkits",
     "MemorySkillkit": "dolphin.lib.skillkits",
     "MCPSkillkit": "dolphin.lib.skillkits",
     "OntologySkillkit": "dolphin.lib.skillkits",
-    "PlanSkillkit": "dolphin.lib.skillkits",
     "CognitiveSkillkit": "dolphin.lib.skillkits",
     "VMSkillkit": "dolphin.lib.skillkits",
     "NoopSkillkit": "dolphin.lib.skillkits",
     "ResourceSkillkit": "dolphin.lib.skillkits",
     "SystemFunctionsSkillKit": "dolphin.lib.skillkits",
     "AgentSkillKit": "dolphin.lib.skillkits",
-    "EnvSkillkit": "dolphin.lib.skillkits",
     # Ontology
     "Ontology": "dolphin.lib.ontology",
     "OntologyManager": "dolphin.lib.ontology",

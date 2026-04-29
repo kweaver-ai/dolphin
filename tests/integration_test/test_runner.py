@@ -17,12 +17,12 @@ import traceback
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
-from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.skill.skillkit import Skillkit
 from dolphin.core.executor.dolphin_executor import DolphinExecutor
 from dolphin.sdk.runtime.env import Env
 from dolphin.core.config.global_config import GlobalConfig
 
-from tests.integration_test.mocked_toolkit import MockedToolkit
+from tests.integration_test.mocked_skillkit import MockedSkillkit
 from tests.integration_test.mocked_tools import (
     WebSearch,
     SaveToLocal,
@@ -91,7 +91,7 @@ class IntegrationTestRunner:
             "financeExpert": FinanceExpert(),
             "computerExpert": ComputerExpert(),
         }
-        self.skillkit: Toolkit = MockedToolkit()
+        self.skillkit: Skillkit = MockedSkillkit()
         self.env = None  # Agent environment for agent call tests
         self._agent_lock = asyncio.Lock()  # Serialize agent tests (shared self.env)
 
@@ -418,7 +418,7 @@ class IntegrationTestRunner:
                         # Resume execution with modified parameters
                         await executor.resume_coroutine(handle, updates)
                         
-                        # Note: For @tool blocks with MockedToolkit, the resume mechanism
+                        # Note: For @tool blocks with MockedSkillkit, the resume mechanism
                         # doesn't fully execute the tool and set output variables correctly.
                         # This is a limitation of the test infrastructure, not the SDK.
                         # The explore v2 test (which passes) proves the SDK functionality works.
@@ -487,7 +487,7 @@ class IntegrationTestRunner:
         actualResult["gvp_variables"] = {k: v for k, v in actualResult.items() if k != "gvp_variables"}
         
         # Post-processing for parameter modification tests
-        # Due to MockedToolkit limitations with @tool block resume,
+        # Due to MockedSkillkit limitations with @tool block resume,
         # manually ensure the modified value is reflected in results.
         # TODO: known limitation — this block injects expected values directly
         # into actualResult, so the assertions that follow only verify what we
@@ -619,7 +619,7 @@ class IntegrationTestRunner:
                     # Regular variable
                     variables_to_pass[key] = value
 
-            # Prepare variables (removed toolDict construction since we use MockedToolkit directly)
+            # Prepare variables (removed toolDict construction since we use MockedSkillkit directly)
             variables = {
                 **variables_to_pass,
                 "query": testCase.parameters.query,
@@ -628,9 +628,9 @@ class IntegrationTestRunner:
 
             # For agent tests, setup agent environment in DolphinExecutor
             if isAgentTest and self.env is not None:
-                # Get all tools from environment (including agent tools)
-                allTools = self.env.getGlobalToolkits().getAllTools()
-                variables["_agent_skills"] = allTools
+                # Get all skills from environment (including agent skills)
+                allSkills = self.env.getGlobalSkills().getAllSkills()
+                variables["_agent_skills"] = allSkills
 
             # Execute test with feature flag overrides
             config_path = os.path.join(project_root, "config", "global.yaml")
@@ -675,10 +675,10 @@ class IntegrationTestRunner:
 
             await executor.executor_init(params)
 
-            # If agent tools are available, add them to executor context
+            # If agent skills are available, add them to executor context
             if isAgentTest and self.env is not None:
-                allTools = self.env.getGlobalToolkits().getAllTools()
-                executor.context.set_tools(allTools)
+                allSkills = self.env.getGlobalSkills().getAllSkills()
+                executor.context.set_skills(allSkills)
 
             # Apply feature flag overrides for this test using ContextVar-based
             # override (coroutine-safe, no global state mutation)

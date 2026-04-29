@@ -23,7 +23,7 @@ CUSTOM_THEME = Theme({
     "dim": "dim white",
     "highlight": "bold yellow",
     "llm_stage": "bold magenta",
-    "tool_stage": "bold green",
+    "skill_stage": "bold green",
     "block_type": "bold blue",
     "agent_name": "bold yellow",
 })
@@ -47,7 +47,7 @@ class TraceVisualizer:
                             trace_data["context_information"].get("user_id", "N/A"))
         self._render_call_chain(trace_data["call_chain"])
         self._render_llm_details(trace_data["llm_interactions"], trace_data["llm_summary"])
-        self._render_tool_details(trace_data["tool_interactions"], trace_data["tool_summary"])
+        self._render_skill_details(trace_data["skill_interactions"], trace_data["skill_summary"])
         self._render_execution_summary(trace_data["execution_summary"])
         self._render_context_information(trace_data["context_information"])
         self.console.print(Text("\n✨ End of Debug Session.", justify="center", style="dim"))
@@ -100,13 +100,13 @@ class TraceVisualizer:
                     label.append(f" ({stage_count} stages)", style="dim")
             elif node_type == "stage":
                 stage_type = node.get("stage_type", "unknown")
-                tool_name = node.get("tool_name")
+                skill_name = node.get("skill_name")
                 is_llm = bool(node.get("is_llm_stage", False))
 
-                # Stage type and tool name
+                # Stage type and skill name
                 label.append(f"/{stage_type}", style="dim")
-                if tool_name:
-                    label.append(f"/{tool_name}", style="tool_stage")
+                if skill_name:
+                    label.append(f"/{skill_name}", style="skill_stage")
 
                 # Show token estimates for LLM stage, consistent with legacy
                 if is_llm:
@@ -257,36 +257,36 @@ class TraceVisualizer:
                 self.console.print(Panel(think_text, border_style="cyan", title="Reasoning", title_align="left"))
 
 
-    def _render_tool_details(self, interactions: List[Dict[str, Any]], summary: Dict[str, Any]):
-        """Render tool interaction details section."""
+    def _render_skill_details(self, interactions: List[Dict[str, Any]], summary: Dict[str, Any]):
+        """Render skill interaction details section."""
         if not interactions and not summary:
             return
 
-        self.console.print(Text("\n 🛠️  Tool Interaction Summary", style="bold underline"))
+        self.console.print(Text("\n 🛠️  Skill Interaction Summary", style="bold underline"))
 
-        # Summary by tool name
-        details_by_tool = (summary or {}).get("details_by_tool", {}) if summary else {}
-        if details_by_tool:
+        # Summary by skill name
+        details_by_skill = (summary or {}).get("details_by_skill", {}) if summary else {}
+        if details_by_skill:
             table = Table(show_header=True, header_style="bold green")
-            table.add_column("Tool Name")
+            table.add_column("Skill Name")
             table.add_column("Calls", justify="right")
             table.add_column("Total Time (s)", justify="right")
 
-            for tool_name, stats in details_by_tool.items():
+            for skill_name, stats in details_by_skill.items():
                 table.add_row(
-                    str(tool_name),
+                    str(skill_name),
                     str(stats.get("count", 0)),
                     f"{stats.get('total_time', 0.0):.2f}",
                 )
 
-            self.console.print(Panel(table, border_style="dim", title="By Tool", title_align="left"))
+            self.console.print(Panel(table, border_style="dim", title="By Skill", title_align="left"))
             self.console.print()
 
         # Optional: list individual interactions if needed
         if interactions:
             table = Table(show_header=True, header_style="bold green")
             table.add_column("ID", style="dim", width=8)
-            table.add_column("Tool", justify="left")
+            table.add_column("Skill", justify="left")
             table.add_column("Duration", justify="right")
             table.add_column("Status", justify="center")
 
@@ -301,7 +301,7 @@ class TraceVisualizer:
                     status_text,
                 )
 
-            self.console.print(Panel(table, border_style="dim", title="Tool Stages", title_align="left"))
+            self.console.print(Panel(table, border_style="dim", title="Skill Stages", title_align="left"))
             self.console.print()
 
     def _render_execution_summary(self, execution_summary: Dict[str, Any]):

@@ -13,7 +13,7 @@ import shutil
 
 from dolphin.core.context.context import Context
 from dolphin.core.executor.dolphin_executor import DolphinExecutor
-from dolphin.core.logging.logger import console, console_tool_call, console_block_start
+from dolphin.core.logging.logger import console, console_skill_call, console_block_start
 
 
 def test_context_verbose():
@@ -73,10 +73,10 @@ def test_console_functions_verbose():
     print("测试 console 函数（不应该显示）:")
     console("这是 verbose=False 的消息", verbose=False)
 
-    # 测试 console_tool_call 函数
-    print("\n测试 console_tool_call 函数:")
-    console_tool_call("test_skill", {"param": "value"}, verbose=True)
-    console_tool_call("test_skill", {"param": "value"}, verbose=False)
+    # 测试 console_skill_call 函数
+    print("\n测试 console_skill_call 函数:")
+    console_skill_call("test_skill", {"param": "value"}, verbose=True)
+    console_skill_call("test_skill", {"param": "value"}, verbose=False)
 
     # 测试 console_block_start 函数
     print("\n测试 console_block_start 函数:")
@@ -102,7 +102,7 @@ def test_verbose_integration_chain():
     # 4. 传递给 console 函数
     print("以下是集成链测试输出（verbose=True 时应该显示）：")
     console("集成链测试消息", verbose=is_verbose)
-    console_tool_call("chain_test_skill", {"integration": "test"}, verbose=is_verbose)
+    console_skill_call("chain_test_skill", {"integration": "test"}, verbose=is_verbose)
     console_block_start("chain_test", "output", "集成测试", verbose=is_verbose)
 
     print("✓ verbose 参数完整集成链测试通过")

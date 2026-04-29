@@ -29,15 +29,15 @@ class IMemoryManager(Protocol):
         ...
 
 
-class IToolkit(Protocol):
-    """Toolkit 接口 - 用于类型提示"""
-
-    def exec(self, tool_name: str, *args, **kwargs) -> Any:
-        """执行 tool"""
+class ISkillkit(Protocol):
+    """Skillkit 接口 - 用于类型提示"""
+    
+    def exec(self, skill_name: str, *args, **kwargs) -> Any:
+        """执行 skill"""
         ...
-
-    def get_tool_list(self) -> List[str]:
-        """获取 tool 列表"""
+    
+    def get_skill_list(self) -> List[str]:
+        """获取 skill 列表"""
         ...
 
 

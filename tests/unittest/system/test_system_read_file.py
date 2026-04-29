@@ -1,10 +1,10 @@
 import pytest
 
-from dolphin.lib.toolkits.system_toolkit import SystemFunctionsToolkit
+from dolphin.lib.skillkits.system_skillkit import SystemFunctionsSkillKit
 
 
 def test_read_file_replaces_invalid_utf8(tmp_path):
-    skillkit = SystemFunctionsToolkit()
+    skillkit = SystemFunctionsSkillKit()
 
     file_path = tmp_path / "invalid_utf8.txt"
     file_path.write_bytes(b"ok\xff\xfeend")
@@ -17,7 +17,7 @@ def test_read_file_replaces_invalid_utf8(tmp_path):
 
 
 def test_read_file_valid_utf8_no_warning(tmp_path):
-    skillkit = SystemFunctionsToolkit()
+    skillkit = SystemFunctionsSkillKit()
 
     file_path = tmp_path / "utf8.txt"
     file_path.write_text("hello世界", encoding="utf-8")
@@ -28,7 +28,7 @@ def test_read_file_valid_utf8_no_warning(tmp_path):
 
 
 def test_read_file_missing_path_returns_error_message(tmp_path):
-    skillkit = SystemFunctionsToolkit()
+    skillkit = SystemFunctionsSkillKit()
 
     missing_path = tmp_path / "missing.txt"
     result = skillkit._read_file(str(missing_path))
@@ -36,13 +36,13 @@ def test_read_file_missing_path_returns_error_message(tmp_path):
 
 
 def test_read_file_directory_returns_error_message(tmp_path):
-    skillkit = SystemFunctionsToolkit()
+    skillkit = SystemFunctionsSkillKit()
 
     result = skillkit._read_file(str(tmp_path))
     assert result.startswith("[ERROR] Path is a directory")
 
 def test_read_file_normalizes_path_formats(tmp_path, monkeypatch):
-    skillkit = SystemFunctionsToolkit()
+    skillkit = SystemFunctionsSkillKit()
 
     # Set both HOME and USERPROFILE for cross-platform compatibility
     # Windows uses USERPROFILE, Unix uses HOME

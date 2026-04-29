@@ -110,7 +110,7 @@ executor = DolphinExecutor(global_configpath=globalConfigPath, verbose=args.verb
 env = Env(
     globalConfig=globalConfig,
     agentFolderPath=args.folder,
-    toolkitFolderPath=args.tool_folder,
+    skillkitFolderPath=args.skill_folder,
     verbose=args.verbose,
 )
 ```

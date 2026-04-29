@@ -49,7 +49,7 @@ class TestHookRetryMechanism(unittest.TestCase):
             config=self.global_config,
             context_manager=self.context_manager
         )
-        self.context._calc_all_tools()
+        self.context._calc_all_skills()
 
     def _create_mock_exploration(self, answers: List[str]):
         """Create a mock _stream_exploration_with_assignment that yields given answers.
@@ -345,7 +345,7 @@ class TestNoHookExecution(unittest.TestCase):
             config=self.global_config,
             context_manager=self.context_manager
         )
-        self.context._calc_all_tools()
+        self.context._calc_all_skills()
 
     def test_no_hook_direct_pass_through(self):
         """Test that without on_stop, results pass through directly."""
@@ -390,7 +390,7 @@ class TestFeedbackInjection(unittest.TestCase):
             config=self.global_config,
             context_manager=self.context_manager
         )
-        self.context._calc_all_tools()
+        self.context._calc_all_skills()
 
     def test_feedback_injected_between_retries(self):
         """Test that feedback is injected between retry attempts."""
@@ -472,7 +472,7 @@ class TestHookTimeoutProtection(unittest.TestCase):
         context_manager = ContextManager()
         global_config = GlobalConfig()
         ctx = Context(config=global_config, context_manager=context_manager)
-        ctx._calc_all_tools()
+        ctx._calc_all_skills()
 
         block = ExploreBlock(context=ctx)
         block.on_stop = config

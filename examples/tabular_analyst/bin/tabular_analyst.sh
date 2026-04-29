@@ -81,7 +81,7 @@ uv run --extra cli --extra lib ./bin/dolphin run --folder examples/tabular_analy
     --config examples/tabular_analyst/config/global.yaml \
     --user_id tabular_analyst_user \
     --session_id tabular_analyst_session_6 \
-    --tool_folder examples/tabular_analyst/skillkits/ \
+    --skill_folder examples/tabular_analyst/skillkits/ \
     --no-explore_block_v2 \
     --interactive \
     --vv \

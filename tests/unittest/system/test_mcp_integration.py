@@ -10,7 +10,7 @@ from dolphin.core.config.global_config import (
     MCPConfig,
     MCPServerConfig,
 )
-from dolphin.sdk.tool.global_toolkits import GlobalToolkits
+from dolphin.sdk.skill.global_skills import GlobalSkills
 
 
 class TestMCPIntegration(unittest.TestCase):
@@ -149,18 +149,18 @@ class TestMCPIntegration(unittest.TestCase):
         self.assertEqual(config_dict["servers"][0]["connection_mode"], "stdio")
         self.assertEqual(config_dict["servers"][0]["command"], "npx")
 
-    @patch("dolphin.sdk.tool.global_toolkits.GlobalToolkits._loadMCPToolkits")
-    def test_global_toolkits_skip_mcp_when_disabled(self, mock_load_mcp):
-        """测试当MCP禁用时GlobalToolkits不加载MCP工具"""
+    @patch("dolphin.sdk.skill.global_skills.GlobalSkills._loadMCPSkills")
+    def test_global_skills_skip_mcp_when_disabled(self, mock_load_mcp):
+        """测试当MCP禁用时GlobalSkills不加载MCP技能"""
         config_with_disabled_mcp = self.test_config.copy()
         config_with_disabled_mcp["mcp"]["enabled"] = False
 
         global_config = GlobalConfig.from_dict(config_with_disabled_mcp)
 
-        # 创建GlobalToolkits实例
-        global_toolkits = GlobalToolkits(global_config)
+        # 创建GlobalSkills实例
+        global_skills = GlobalSkills(global_config)
 
-        # 验证_loadMCPToolkits方法未被调用
+        # 验证_loadMCPSkills方法未被调用
         mock_load_mcp.assert_not_called()
 
     def test_yaml_config_loading(self):

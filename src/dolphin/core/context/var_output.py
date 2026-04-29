@@ -1,20 +1,14 @@
 from dolphin.core.common.types import SourceType, Var
-from dolphin.core.common.enums import ToolInfo
+from dolphin.core.common.enums import SkillInfo
 
 
 class VarOutput(Var):
-    def __init__(self, name, value, source_type=SourceType.OTHER, tool_info=None, skill_info=None):
+    def __init__(self, name, value, source_type=SourceType.OTHER, skill_info=None):
         super().__init__(value)
 
         self.name = name
         self.source_type = source_type
-        # skill_info is a deprecated alias for tool_info
-        self.tool_info = tool_info if tool_info is not None else skill_info
-
-    @property
-    def skill_info(self):
-        """Deprecated: use tool_info instead."""
-        return self.tool_info
+        self.skill_info = skill_info
 
     def add(self, var: Var):
         if self.source_type == SourceType.LIST:
@@ -39,15 +33,12 @@ class VarOutput(Var):
         else:
             value = self.val
 
-        tool_info_dict = self.tool_info.to_dict() if self.tool_info else {}
         return {
             "__type__": "VarOutput",  # Type identifier for deserialization
             "name": self.name,
             "value": value,
             "source_type": self.source_type.value,
-            "tool_info": tool_info_dict,
-            # Deprecated alias kept for consumers still reading the old key
-            "skill_info": tool_info_dict,
+            "skill_info": self.skill_info.to_dict() if self.skill_info else {},
         }
 
     @staticmethod
@@ -71,9 +62,9 @@ class VarOutput(Var):
             name=dict_data["name"],
             value=value,
             source_type=source_type,
-            tool_info=(
-                ToolInfo.from_dict(dict_data.get("tool_info", dict_data.get("skill_info")))
-                if dict_data.get("tool_info") or dict_data.get("skill_info")
+            skill_info=(
+                SkillInfo.from_dict(dict_data["skill_info"])
+                if dict_data["skill_info"]
                 else None
             ),
         )

@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Any, Dict, Optional
 import asyncio
 
 from dolphin.core.context.context import Context
-from dolphin.core.tool.toolkit import Toolkit
+from dolphin.core.skill.skillkit import Skillkit
 from dolphin.core.common.object_type import ObjectTypeFactory
 from dolphin.core.parser.parser import Parser
 
@@ -33,9 +33,9 @@ class DolphinAgent(BaseAgent):
         self,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        skillkit: Optional[Toolkit] = None,
+        skillkit: Optional[Skillkit] = None,
         variables: Optional[Dict[str, Any]] = None,
-        global_toolkits=None,
+        global_skills=None,
         file_path: Optional[str] = None,
         content: Optional[str] = None,
         global_config: Optional[GlobalConfig] = None,
@@ -46,20 +46,19 @@ class DolphinAgent(BaseAgent):
         log_level: int = logging.INFO,
         output_variables: Optional[list] = None,
         trace_listener: Optional[Any] = None,
-        global_skills=None,
     ):
         """Initialize Dolphin Agent
 
         Args:
             name: Agent name, automatically generated if not provided
             description: Agent description
-            skillkit: Toolkit instance
+            skillkit: Skillkit instance
             variables: Initial variables
             file_path: DPH file path (optional, mutually exclusive with content)
             content: DPH content as a string (optional, mutually exclusive with file_path)
             global_config: Global configuration
             global_config_path: Path to the global configuration file
-            global_toolkits: Global toolkits
+            global_skills: Global skills
             global_types: Global type definitions
             verbose: Whether to enable verbose output mode (detailed logging)
             is_cli: Whether running in CLI mode (controls Rich/terminal beautification)
@@ -68,16 +67,6 @@ class DolphinAgent(BaseAgent):
                             If specified, only these variables are returned; if empty list or None, all variables are returned
             trace_listener: Optional ITraceListener implementation for observability tracking
         """
-        # Backward-compatibility: global_skills was renamed to global_toolkits
-        if global_skills is not None:
-            import warnings
-            warnings.warn(
-                "DolphinAgent parameter 'global_skills' is deprecated, use 'global_toolkits' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if global_toolkits is None:
-                global_toolkits = global_skills
         # Parameter Validation
         if file_path is None and content is None:
             raise DolphinAgentException(
@@ -109,7 +98,7 @@ class DolphinAgent(BaseAgent):
         )
 
         self.content = content
-        self.toolkit = skillkit
+        self.skillkit = skillkit
         self.variables = variables
         self.file_path = file_path
         
@@ -118,7 +107,7 @@ class DolphinAgent(BaseAgent):
         self._enable_dynamic_tool_auto_interrupt = True
         self.global_config = global_config
         self.global_config_path = global_config_path
-        self.global_toolkits = global_toolkits
+        self.global_skills = global_skills
         self.global_types = global_types
         self.verbose = verbose  # Store the verbose parameter
         self.is_cli = is_cli    # Store CLI mode flag
@@ -444,7 +433,7 @@ class DolphinAgent(BaseAgent):
             self.executor = dolphin_language.DolphinExecutor(
                 global_configpath=self.global_config_path,
                 global_config=self.global_config,
-                global_toolkits=self.global_toolkits,
+                global_skills=self.global_skills,
                 global_types=self.global_types,
                 verbose=self.verbose,
                 is_cli=self.is_cli,
@@ -452,7 +441,7 @@ class DolphinAgent(BaseAgent):
 
             await self.executor.executor_init(
                 {
-                    "skillkit": self.toolkit,
+                    "skillkit": self.skillkit,
                     "variables": self.variables,
                 }
             )
@@ -1044,21 +1033,11 @@ class DolphinAgent(BaseAgent):
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
         return self.executor.context.get_messages()
 
-    def get_toolkit(self, toolNames: Optional[list] = None):
-        """Get Toolkit"""
+    def get_skillkit(self, skillNames: Optional[list] = None):
+        """Get Skill Package"""
         if self.executor is None:
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
-        return self.executor.context.get_toolkit(toolNames)
-
-    def get_skillkit(self, skillNames=None):
-        """Deprecated: use :meth:`get_toolkit` instead."""
-        import warnings
-        warnings.warn(
-            "DolphinAgent.get_skillkit() is deprecated, use get_toolkit() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.get_toolkit(skillNames)
+        return self.executor.context.get_skillkit(skillNames)
 
     def get_config(self):
         """Get configuration"""
@@ -1124,37 +1103,17 @@ class DolphinAgent(BaseAgent):
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
         self.executor.context.set_cur_agent(agent)
 
-    def set_tools(self, skillkit):
-        """Set Tools"""
-        if self.executor is None:
-            raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
-        self.executor.context.set_tools(skillkit)
-
     def set_skills(self, skillkit):
-        """Deprecated: use :meth:`set_tools` instead."""
-        import warnings
-        warnings.warn(
-            "DolphinAgent.set_skills() is deprecated, use set_tools() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.set_tools(skillkit)
-
-    def get_toolkit_raw(self):
-        """Get the original toolkit object (for scenarios where direct access to toolkit is required)"""
+        """Set Skill Pack"""
         if self.executor is None:
             raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
-        return self.executor.context.toolkit
+        self.executor.context.set_skills(skillkit)
 
     def get_skillkit_raw(self):
-        """Deprecated: use :meth:`get_toolkit_raw` instead."""
-        import warnings
-        warnings.warn(
-            "DolphinAgent.get_skillkit_raw() is deprecated, use get_toolkit_raw() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.get_toolkit_raw()
+        """Get the original skillkit object (for scenarios where direct access to skillkit is required)"""
+        if self.executor is None:
+            raise DolphinAgentException("NOT_INITIALIZED", "Agent not initialized")
+        return self.executor.context.skillkit
 
     def get_context_messages_dict(self):
         """Get the messages dictionary of context (for debugging)"""

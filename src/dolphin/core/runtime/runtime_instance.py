@@ -4,7 +4,7 @@ import time
 from typing import List, Optional, TYPE_CHECKING
 import uuid
 
-from dolphin.core.common.enums import Messages, ToolInfo, Status, TypeStage
+from dolphin.core.common.enums import Messages, SkillInfo, Status, TypeStage
 from dolphin.core.common.constants import estimate_tokens_from_chars
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class StageInstance(RuntimeInstance):
         think: Optional[str] = None,
         raw_output: Optional[str] = None,
         status: Status = Status.PROCESSING,
-        tool_info: Optional[ToolInfo] = None,
+        skill_info: Optional[SkillInfo] = None,
         block_answer: Optional[str] = None,
         input_content: Optional[str] = None,
         input_messages: Optional[Messages] = None,
@@ -113,7 +113,7 @@ class StageInstance(RuntimeInstance):
             answer=answer, think=think, raw_output=raw_output, block_answer=block_answer
         )
         self.status = status
-        self.tool_info = tool_info
+        self.skill_info = skill_info
         self.interrupted = interrupted
         self.flags = flags
 
@@ -179,7 +179,7 @@ class StageInstance(RuntimeInstance):
         think: Optional[str] = None,
         raw_output: Optional[str] = None,
         status: Optional[str] = None,
-        tool_info: Optional[ToolInfo] = None,
+        skill_info: Optional[SkillInfo] = None,
         block_answer: Optional[str] = None,
         input_messages: Optional[Messages] = None,
         **kwargs,
@@ -194,8 +194,8 @@ class StageInstance(RuntimeInstance):
             self.output.raw_output = raw_output
         if status is not None:
             self.status = status
-        if tool_info is not None:
-            self.tool_info = tool_info
+        if skill_info is not None:
+            self.skill_info = skill_info
         if block_answer is not None:
             self.output.block_answer = block_answer
         if input_messages is not None:
@@ -209,7 +209,7 @@ class StageInstance(RuntimeInstance):
                     "think",
                     "raw_output",
                     "status",
-                    "tool_info",
+                    "skill_info",
                     "block_answer",
                     "input_messages",
                 ]:
@@ -240,7 +240,7 @@ class StageInstance(RuntimeInstance):
             "answer": answer_value,  # Unified streaming text output
             "think": self.output.think,
             "status": status_value,
-            "tool_info": self.tool_info.to_dict() if self.tool_info else None,
+            "skill_info": self.skill_info.to_dict() if self.skill_info else None,
             "block_answer": self.output.block_answer,  # Kept for backward compatibility (deprecated)
             "input_message": self.input.content,
             "interrupted": self.interrupted,
@@ -305,7 +305,7 @@ class ProgressInstance(RuntimeInstance):
         think: str = "",
         raw_output: str = "",
         status: Status = Status.PROCESSING,
-        tool_info: Optional[ToolInfo] = None,
+        skill_info: Optional[SkillInfo] = None,
         block_answer: str = "",
         input_content: str = "",
         input_messages: Optional[Messages] = None,
@@ -323,7 +323,7 @@ class ProgressInstance(RuntimeInstance):
             think=think,
             raw_output=raw_output,
             status=status,
-            tool_info=tool_info,
+            skill_info=skill_info,
             block_answer=block_answer,
             input_content=input_content,
             input_messages=input_messages,
@@ -367,7 +367,7 @@ class ProgressInstance(RuntimeInstance):
         think: Optional[str] = None,
         raw_output: Optional[str] = None,
         status: Status = Status.PROCESSING,
-        tool_info: Optional[ToolInfo] = None,
+        skill_info: Optional[SkillInfo] = None,
         block_answer: Optional[str] = None,
         input_messages: Optional[Messages] = None,
         **kwargs,
@@ -382,7 +382,7 @@ class ProgressInstance(RuntimeInstance):
                 think=think,
                 raw_output=raw_output,
                 status=status,
-                tool_info=tool_info,
+                skill_info=skill_info,
                 block_answer=block_answer,
                 input_messages=input_messages,
             )
@@ -401,7 +401,7 @@ class ProgressInstance(RuntimeInstance):
                 think=think,
                 raw_output=raw_output,
                 status=status,
-                tool_info=tool_info,
+                skill_info=skill_info,
                 block_answer=block_answer,
                 input_messages=input_messages,
             )
@@ -415,7 +415,7 @@ class ProgressInstance(RuntimeInstance):
                 think=think,
                 raw_output=raw_output,
                 status=status,
-                tool_info=tool_info,
+                skill_info=skill_info,
                 block_answer=block_answer,
                 input_messages=input_messages,
             )
@@ -427,7 +427,7 @@ class ProgressInstance(RuntimeInstance):
             think=think,
             raw_output=raw_output,
             status=status,
-            tool_info=tool_info,
+            skill_info=skill_info,
             block_answer=block_answer,
             input_messages=input_messages,
             **kwargs,

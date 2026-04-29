@@ -32,7 +32,7 @@ class JudgeBlock(BasicCodeBlock):
         # Save original attributes
         original_content = self.content
         original_system_prompt = getattr(self, "system_prompt", None)
-        original_tools = getattr(self, "tools", None)
+        original_skills = getattr(self, "skills", None)
         original_model = getattr(self, "model", None)
         original_history = getattr(self, "history", None)
         original_ttc_mode = getattr(self, "ttc_mode", None)
@@ -41,20 +41,20 @@ class JudgeBlock(BasicCodeBlock):
             # Temporarily set attributes to adapt to llm_chat
             self.content = judge_str
             self.system_prompt = system_prompt or ""
-            self.tools = tools_list
+            self.skills = tools_list
             self.model = model
             self.history = history
             self.ttc_mode = ttc_mode
 
             # Get tool list and skillkit information
-            available_tool_names = [
-                str(name) for name in self.get_toolkit().getToolNames()
+            available_skill_names = [
+                str(name) for name in self.get_skillkit().getSkillNames()
             ]
 
             # To ensure the LLM prioritizes using tools, add an explicit system prompt
             original_system_prompt = self.system_prompt
-            if available_tool_names:
-                tool_instruction = f"You have access to these tools: {', '.join(available_tool_names)}. Please use the appropriate tool if it can help complete the task."
+            if available_skill_names:
+                tool_instruction = f"You have access to these tools: {', '.join(available_skill_names)}. Please use the appropriate tool if it can help complete the task."
                 if self.system_prompt:
                     self.system_prompt = f"{self.system_prompt}\n\n{tool_instruction}"
                 else:
@@ -100,7 +100,7 @@ class JudgeBlock(BasicCodeBlock):
             # Restore original attributes
             self.content = original_content
             self.system_prompt = original_system_prompt  # Here the state will be restored to the previous state before modification.
-            self.tools = original_tools
+            self.skills = original_skills
             self.model = original_model
             self.history = original_history
             self.ttc_mode = original_ttc_mode
@@ -153,7 +153,7 @@ class JudgeBlock(BasicCodeBlock):
                 raw_tool_args = input_dict["tool_args"]
                 new_tool_args = {arg["key"]: arg["value"] for arg in raw_tool_args}
 
-                # *** FIX: Pass saved_stage_id to tool_run ***
+                # *** FIX: Pass saved_stage_id to skill_run ***
                 props = {"intervention": False, "saved_stage_id": saved_stage_id, "gvp": self.context}
                 
                 # *** Handle skip action ***
@@ -183,9 +183,9 @@ class JudgeBlock(BasicCodeBlock):
                         self.recorder.update(
                             stage=TypeStage.SKILL,
                             item={"answer": skip_response},
-                            tool_name=tool_name,
-                            tool_args=new_tool_args,
-                            tool_type=self.context.get_tool_type(tool_name),
+                            skill_name=tool_name,
+                            skill_args=new_tool_args,
+                            skill_type=self.context.get_skill_type(tool_name),
                             source_type=SourceType.SKILL,
                             is_completed=True,
                             is_skipped=True,
@@ -194,9 +194,9 @@ class JudgeBlock(BasicCodeBlock):
                     yield {"answer": skip_response, "status": "skipped"}
                 else:
                     # Normal execution (not skipped)
-                    async for resp_item in self.tool_run(
+                    async for resp_item in self.skill_run(
                         source_type=SourceType.SKILL,
-                        tool_name=tool_name,
+                        skill_name=tool_name,
                         skill_params_json=new_tool_args,
                         props=props,
                     ):
@@ -209,7 +209,7 @@ class JudgeBlock(BasicCodeBlock):
                 tool_name, tool_args = await self.judge_tool_call(
                     judge_str=self.content,
                     system_prompt=self.system_prompt,
-                    tools_list=self.tools,
+                    tools_list=self.skills,
                     model=self.model,
                     history=self.history,
                     ttc_mode=self.ttc_mode,
@@ -222,7 +222,7 @@ class JudgeBlock(BasicCodeBlock):
                     if self.recorder and hasattr(self.recorder, "set_output_var"):
                         self.recorder.set_output_var(self.assign_type, self.output_var)
 
-                    # Save intervention vars (stage_id will be filled by tool_run after creating the stage)
+                    # Save intervention vars (stage_id will be filled by skill_run after creating the stage)
                     intervention_vars = {
                         "tool_name": tool_name,
                         "judge_call_info": {
@@ -231,7 +231,7 @@ class JudgeBlock(BasicCodeBlock):
                             "output_var": self.output_var,
                             "params": self.params,
                         },
-                        "stage_id": None,  # Will be updated by tool_run() after stage creation
+                        "stage_id": None,  # Will be updated by skill_run() after stage creation
                     }
 
                     try:
@@ -241,9 +241,9 @@ class JudgeBlock(BasicCodeBlock):
 
                         props = {"gvp": self.context}
 
-                        async for resp_item in self.tool_run(
+                        async for resp_item in self.skill_run(
                             source_type=SourceType.SKILL,
-                            tool_name=tool_name,
+                            skill_name=tool_name,
                             skill_params_json=tool_args or {},
                             props=props,
                         ):
