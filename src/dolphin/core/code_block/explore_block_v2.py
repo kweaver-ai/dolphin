@@ -848,7 +848,9 @@ class ExploreBlockV2(BasicCodeBlock):
         """Add tool call messages to context uniformly"""
         scrapted_messages = Messages()
         scrapted_messages.add_tool_call_message(
-            content=stream_item.answer, tool_calls=tool_call_openai_format
+            content=stream_item.answer,
+            tool_calls=tool_call_openai_format,
+            reasoning_content=getattr(stream_item, "think", None),
         )
         self.context.add_bucket(
             BuildInBucket.SCRATCHPAD.value,
