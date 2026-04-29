@@ -63,6 +63,7 @@ class SingleMessage:
         tool_call_id: Optional[str] = None,
         compress_level: CompressLevel = CompressLevel.NONE,
         metadata: Dict[str, Any] = {},
+        reasoning_content: Optional[str] = None,
     ):
         self.role = role
         self.content = content
@@ -72,6 +73,7 @@ class SingleMessage:
         self.tool_call_id = tool_call_id
         self.compress_level = compress_level
         self.metadata = metadata
+        self.reasoning_content = reasoning_content or None
 
     def is_multimodal(self) -> bool:
         """Check if this message contains multimodal content."""
@@ -157,6 +159,8 @@ class SingleMessage:
             result["tool_calls"] = self.tool_calls
         if self.tool_call_id:
             result["tool_call_id"] = self.tool_call_id
+        if self.reasoning_content:
+            result["reasoning_content"] = self.reasoning_content
         return result
 
     def length(self) -> int:
@@ -189,6 +193,7 @@ class SingleMessage:
             compress_level=self.compress_level,
             tool_calls=self.tool_calls.copy() if self.tool_calls else None,
             tool_call_id=self.tool_call_id,
+            reasoning_content=self.reasoning_content,
         )
 
     def _compress_normal(self):
@@ -418,9 +423,10 @@ class Messages:
         metadata: Dict[str, Any] = {},
         tool_calls: Optional[List[Dict[str, Any]]] = None,
         tool_call_id: Optional[str] = None,
+        reasoning_content: Optional[str] = None,
     ):
         """Add a message to the conversation.
-        
+
         Args:
             content: Message content - can be:
                 - str: Plain text content
@@ -432,6 +438,9 @@ class Messages:
             metadata: Additional metadata
             tool_calls: Tool call information
             tool_call_id: Tool call ID for tool response messages
+            reasoning_content: Optional reasoning trace from thinking-mode models;
+                must be echoed back on subsequent turns for some providers
+                (e.g. DeepSeek V4) when the assistant message carries tool_calls.
         """
         assert content is not None, "content is required"
 
@@ -444,6 +453,7 @@ class Messages:
                 metadata=metadata,
                 tool_calls=tool_calls,
                 tool_call_id=tool_call_id,
+                reasoning_content=reasoning_content,
             )
         elif isinstance(content, list):
             # Multimodal content (List[Dict])
@@ -455,6 +465,7 @@ class Messages:
                 metadata=metadata,
                 tool_calls=tool_calls,
                 tool_call_id=tool_call_id,
+                reasoning_content=reasoning_content,
             )
         elif isinstance(content, SingleMessage):
             message: SingleMessage = content
@@ -467,6 +478,7 @@ class Messages:
                 metadata=metadata,
                 tool_calls=tool_calls,
                 tool_call_id=tool_call_id,
+                reasoning_content=reasoning_content,
             )
         else:
             raise ValueError(f"Invalid message content type: {type(content)}")
@@ -690,6 +702,7 @@ class Messages:
                 metadata=msg["metadata"] if "metadata" in msg else {},
                 tool_calls=msg.get("tool_calls"),
                 tool_call_id=msg.get("tool_call_id"),
+                reasoning_content=msg.get("reasoning_content"),
             )
             self.messages.append(singleMsg)
 
@@ -789,6 +802,7 @@ class Messages:
         tool_calls: List[Dict[str, Any]],
         user_id: str = "",
         metadata: Dict[str, Any] = {},
+        reasoning_content: Optional[str] = None,
     ):
         """Add a message with tool calls (typically assistant role)"""
         self.add_message(
@@ -797,6 +811,7 @@ class Messages:
             user_id=user_id,
             metadata=metadata,
             tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
         )
 
     def add_tool_response_message(

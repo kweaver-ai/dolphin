@@ -133,7 +133,9 @@ class ExploreStrategy(ABC):
 
         scrapted_messages = Messages()
         scrapted_messages.add_tool_call_message(
-            content=content, tool_calls=tool_call_openai_format
+            content=content,
+            tool_calls=tool_call_openai_format,
+            reasoning_content=getattr(stream_item, "think", None),
         )
         context.add_bucket(
             BuildInBucket.SCRATCHPAD.value,
@@ -221,7 +223,9 @@ class ExploreStrategy(ABC):
         content = stream_item.answer or ""
         scratched_messages = Messages()
         scratched_messages.add_tool_call_message(
-            content=content, tool_calls=tool_calls_openai_format
+            content=content,
+            tool_calls=tool_calls_openai_format,
+            reasoning_content=getattr(stream_item, "think", None),
         )
         context.add_bucket(
             BuildInBucket.SCRATCHPAD.value,
