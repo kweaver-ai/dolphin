@@ -289,6 +289,11 @@ class BasicCodeBlock:
     preserve tool call traces in the trajectory.
     """
 
+    UNKNOWN_SKILL_LOADER_HINTS = (
+        ("_load_resource_skill", "resource skill"),
+        ("builtin_skill_load", "built-in skill package"),
+    )
+
     def __init__(self, context: Context):
         self.context = context
         self._history_persistence_engine = _HistoryPersistenceEngine()
@@ -1301,6 +1306,133 @@ class BasicCodeBlock:
     def get_skillkit(self):
         """获取当前代码块可用的技能集（仅依赖 Context.get_skillkit 主流程逻辑）"""
         return self.context.get_skillkit(self.skills)
+
+    def _resolve_skill_or_system_skill(self, skill_name: str):
+        """Resolve a skill from the current context or built-in system skills."""
+        skill = None
+        try:
+            skill = self.context.get_skill(skill_name)
+        except Exception as exc:
+            logger.debug(
+                f"Failed to resolve skill '{skill_name}' from context: {exc}",
+                exc_info=True,
+            )
+            skill = None
+
+        if not skill:
+            try:
+                from dolphin.lib.skillkits.system_skillkit import SystemFunctions
+
+                skill = SystemFunctions.getSkill(skill_name)
+            except Exception as exc:
+                logger.debug(
+                    f"Failed to resolve skill '{skill_name}' from system skills: {exc}",
+                    exc_info=True,
+                )
+                skill = None
+        return skill
+
+    def _get_available_skill_names_for_error(self) -> list[str]:
+        """Return available skill names for an actionable model-facing error."""
+        names: list[str] = []
+
+        def extend_from_skillkit(skillkit):
+            if skillkit is None or not hasattr(skillkit, "getSkillNames"):
+                return
+            try:
+                names.extend(str(name) for name in skillkit.getSkillNames())
+            except Exception as exc:
+                logger.debug(
+                    f"Failed to collect skill names from skillkit: {exc}",
+                    exc_info=True,
+                )
+                return
+
+        # Include the effective skillkit exposed to the current block.
+        try:
+            extend_from_skillkit(self.get_skillkit())
+        except Exception as exc:
+            logger.debug(
+                f"Failed to collect effective skill names: {exc}",
+                exc_info=True,
+            )
+
+        # Include the raw context skillkit as a fallback when block-level filters
+        # hide useful names from the recovery hint.
+        try:
+            extend_from_skillkit(getattr(self.context, "skillkit", None))
+        except Exception as exc:
+            logger.debug(
+                f"Failed to collect context skill names: {exc}",
+                exc_info=True,
+            )
+
+        try:
+            from dolphin.lib.skillkits.system_skillkit import SystemFunctions
+
+            for skill in SystemFunctions.getSkills():
+                names.append(str(skill.get_function_name()))
+        except Exception as exc:
+            logger.debug(
+                f"Failed to collect system skill names: {exc}",
+                exc_info=True,
+            )
+
+        return sorted(set(name for name in names if name))
+
+    def _build_unknown_skill_error_message(self, skill_name: str) -> str:
+        """Build a deterministic tool response for unknown skill calls."""
+        available_names = self._get_available_skill_names_for_error()
+        if available_names:
+            available = ", ".join(available_names)
+            message = (
+                f"Tool '{skill_name}' not found. Available tools: {available}."
+            )
+        else:
+            message = (
+                f"Tool '{skill_name}' not found. No tools are currently available."
+            )
+
+        for loader_name, label in self.UNKNOWN_SKILL_LOADER_HINTS:
+            if loader_name in available_names:
+                message += (
+                    f" If you meant the {label} '{skill_name}', "
+                    f"call {loader_name}(\"{skill_name}\") first."
+                )
+                break
+
+        return message
+
+    def _get_unknown_skill_error_payload(
+        self, skill_name: str
+    ) -> Optional[tuple[str, dict]]:
+        """Return an error payload when a skill name is not executable."""
+        if self._resolve_skill_or_system_skill(skill_name) is not None:
+            return None
+        return self._build_unknown_skill_error_message(skill_name), {
+            "error": "unknown_tool"
+        }
+
+    def _append_tool_response(
+        self,
+        tool_call_id: str,
+        content: str,
+        metadata: Optional[dict] = None,
+    ):
+        """Append a tool response message to the block-specific context store."""
+        raise NotImplementedError
+
+    def _append_unknown_skill_tool_response(
+        self, skill_name: str, tool_call_id: str
+    ) -> Optional[str]:
+        """Append a deterministic tool response for unknown skill calls."""
+        payload = self._get_unknown_skill_error_payload(skill_name)
+        if payload is None:
+            return None
+
+        content, metadata = payload
+        self._append_tool_response(tool_call_id, content, metadata)
+        return content
 
     async def skill_run(
         self,

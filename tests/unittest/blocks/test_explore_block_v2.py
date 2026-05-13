@@ -15,7 +15,16 @@ from dolphin.core.context_engineer.core.context_manager import (
     ContextManager,
 )
 from dolphin.core.config.global_config import GlobalConfig
-from dolphin.core.common.enums import StreamItem, MessageRole
+from dolphin.core.common.enums import StreamItem, MessageRole, TypeStage
+from dolphin.core.runtime.runtime_instance import ProgressInstance
+from dolphin.core.trajectory.recorder import Recorder
+from dolphin.core.skill.skill_function import SkillFunction
+from dolphin.core.skill.skillset import Skillset
+
+
+def mock_search(query: str):
+    """Return a deterministic mock search result."""
+    return f"Search results for: {query}"
 
 
 class TestExploreBlockV2(unittest.TestCase):
@@ -96,6 +105,9 @@ class TestExploreBlockV2(unittest.TestCase):
         context = Context(config=global_config, context_manager=context_manager)
         context._calc_all_skills()
         context.error = MagicMock()
+        skillset = Skillset()
+        skillset.addSkill(SkillFunction(mock_search))
+        context.set_skills(skillset)
         
         # Mock bucket operations
         bucket_messages = []
@@ -112,11 +124,11 @@ class TestExploreBlockV2(unittest.TestCase):
         
         # Mock stream item with tool call
         stream_item = MagicMock(spec=StreamItem)
-        stream_item.tool_name = "browser_tool"
+        stream_item.tool_name = "mock_search"
         stream_item.tool_args = {}
         stream_item.answer = "Calling browser..."
         stream_item.get_tool_call.return_value = {
-            "name": "browser_tool",
+            "name": "mock_search",
             "arguments": {}
         }
         
@@ -145,6 +157,50 @@ class TestExploreBlockV2(unittest.TestCase):
                     found_error = True
                     break
         self.assertTrue(found_error, "Tool response should contain the error message")
+
+    def test_unknown_skill_uses_previous_llm_answer_as_tool_response(self):
+        """Unknown skills should not reuse the previous LLM stage as tool output."""
+        context_manager = ContextManager()
+        global_config = GlobalConfig()
+        context = Context(config=global_config, context_manager=context_manager)
+        context._calc_all_skills()
+        context.runtime_graph = None
+        skillset = Skillset()
+        skillset.addSkill(SkillFunction(mock_search))
+        context.set_skills(skillset)
+
+        block = ExploreBlockV2(context=context)
+        progress = ProgressInstance(context)
+        leaked_llm_text = (
+            'I need to call the web tool now. '
+            '<seed:tool_call><function name="web">'
+        )
+        progress.add_stage(
+            stage=TypeStage.LLM,
+            answer=leaked_llm_text,
+            raw_output="",
+        )
+        block.recorder = Recorder(context=context, progress=progress)
+        block._append_tool_message = MagicMock()
+
+        stream_item = StreamItem()
+        stream_item.tool_name = "web"
+        stream_item.tool_args = {"action": "fetch_page"}
+        stream_item.answer = leaked_llm_text
+
+        async def run_test():
+            async for _ in block._execute_tool_call(
+                stream_item, "call_unknown_web"
+            ):
+                pass
+
+        asyncio.run(run_test())
+
+        block._append_tool_message.assert_called()
+        call_args = block._append_tool_message.call_args
+        assert call_args[0][0] == "call_unknown_web"
+        assert leaked_llm_text not in call_args[0][1]
+        assert "Tool 'web' not found" in call_args[0][1]
 
 if __name__ == "__main__":
     unittest.main()

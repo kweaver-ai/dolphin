@@ -29,6 +29,9 @@ from dolphin.core.context.context import Context
 from dolphin.core.context_engineer.config.settings import BuildInBucket
 from dolphin.core.context_engineer.core.context_manager import ContextManager
 from dolphin.core.config.global_config import GlobalConfig
+from dolphin.core.runtime.runtime_instance import ProgressInstance
+from dolphin.core.trajectory.recorder import Recorder
+from dolphin.core.common.enums import TypeStage
 from dolphin.core.skill.skill_function import SkillFunction
 from dolphin.core.skill.skillset import Skillset
 
@@ -62,6 +65,26 @@ def mock_execute_sql(sql: str, datasource: str):
         datasource (str): Database datasource name
     """
     return f"Executing: {sql} on {datasource}"
+
+
+def _tool_a():
+    """Mock tool A for tool-call execution tests."""
+    return "tool-a"
+
+
+def _tool_b():
+    """Mock tool B for tool-call execution tests."""
+    return "tool-b"
+
+
+def _good_tool():
+    """Mock valid tool for mixed multi-tool execution tests."""
+    return "good"
+
+
+def _search(q: str):
+    """Mock search tool for duplicate-call tests."""
+    return f"Search results for: {q}"
 
 
 class MockSkillkit:
@@ -163,6 +186,10 @@ class TestExploreBlockShouldContinueExplore(unittest.TestCase):
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
         context._calc_all_skills()
+        skillset = Skillset()
+        for func in (mock_search, _tool_a, _tool_b, _good_tool, _search):
+            skillset.addSkill(SkillFunction(func))
+        context.set_skills(skillset)
 
         block = ExploreBlock(context=context)
         block.times = 0
@@ -762,6 +789,10 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
         context._calc_all_skills()
+        skillset = Skillset()
+        for func in (mock_search, _tool_a, _tool_b, _good_tool, _search):
+            skillset.addSkill(SkillFunction(func))
+        context.set_skills(skillset)
 
         block = ExploreBlock(context=context)
         block.recorder = MagicMock()
@@ -784,7 +815,7 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
 
         stream_item = StreamItem()
         stream_item.answer = "calling tool"
-        tool_call = ToolCall(id="call_err", name="_tool", arguments={})
+        tool_call = ToolCall(id="call_err", name="mock_search", arguments={})
 
         async def run():
             async for _ in block._execute_tool_call(stream_item, tool_call):
@@ -813,7 +844,7 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
 
         stream_item = StreamItem()
         stream_item.answer = "calling tool"
-        tool_call = ToolCall(id="call_ti", name="_tool", arguments={})
+        tool_call = ToolCall(id="call_ti", name="mock_search", arguments={})
 
         async def run():
             async for _ in block._execute_tool_call(stream_item, tool_call):
@@ -826,6 +857,52 @@ class TestExecuteToolCallInterruptGuarantees(unittest.TestCase):
         block.strategy.append_tool_response_message.assert_called()
         call_args = block.strategy.append_tool_response_message.call_args
         self.assertIn("interrupted", call_args[0][2].lower())
+
+    def test_unknown_skill_uses_previous_llm_answer_as_tool_response(self):
+        """Unknown skills should not reuse the previous LLM stage as tool output."""
+        context_manager = ContextManager()
+        global_config = GlobalConfig()
+        context = Context(config=global_config, context_manager=context_manager)
+        context._calc_all_skills()
+        context.runtime_graph = None
+        skillset = Skillset()
+        skillset.addSkill(SkillFunction(mock_search))
+        context.set_skills(skillset)
+
+        block = ExploreBlock(context=context)
+        progress = ProgressInstance(context)
+        leaked_llm_text = (
+            'I need to call the web tool now. '
+            '<seed:tool_call><function name="web">'
+        )
+        progress.add_stage(
+            stage=TypeStage.LLM,
+            answer=leaked_llm_text,
+            raw_output="",
+        )
+        block.recorder = Recorder(context=context, progress=progress)
+        block.strategy.get_deduplicator = MagicMock(return_value=MagicMock())
+        block.strategy.append_tool_response_message = MagicMock()
+
+        stream_item = StreamItem()
+        stream_item.answer = leaked_llm_text
+        tool_call = ToolCall(
+            id="call_unknown_web",
+            name="web",
+            arguments={"action": "fetch_page"},
+        )
+
+        async def run():
+            async for _ in block._execute_tool_call(stream_item, tool_call):
+                pass
+
+        asyncio.run(run())
+
+        block.strategy.append_tool_response_message.assert_called()
+        call_args = block.strategy.append_tool_response_message.call_args
+        assert call_args[0][1] == "call_unknown_web"
+        assert leaked_llm_text not in call_args[0][2]
+        assert "Tool 'web' not found" in call_args[0][2]
 
     def test_user_interrupt_in_check_still_adds_tool_response(self):
         """check_user_interrupt() raising UserInterrupt must still add tool response.
@@ -865,6 +942,10 @@ class TestExecuteToolCallsSequential(unittest.TestCase):
         global_config = GlobalConfig()
         context = Context(config=global_config, context_manager=context_manager)
         context._calc_all_skills()
+        skillset = Skillset()
+        for func in (mock_search, _tool_a, _tool_b, _good_tool, _search):
+            skillset.addSkill(SkillFunction(func))
+        context.set_skills(skillset)
 
         block = ExploreBlock(context=context)
         block.recorder = MagicMock()
