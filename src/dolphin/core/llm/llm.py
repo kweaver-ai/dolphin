@@ -325,6 +325,11 @@ class LLMModelFactory(LLM):
             line_json = ""
             accu_content = ""
             reasoning_content = ""
+            # True once any delta chunk contains a "reasoning_content" key,
+            # even if the value is null/empty.  Distinguishes thinking-mode
+            # models (which must have the field echoed back) from plain models
+            # (where the field must be absent from the next-turn payload).
+            reasoning_seen = False
             finish_reason = None
             # Accumulate token usage from chunks
             accumulated_usage = {}
@@ -391,15 +396,12 @@ class LLMModelFactory(LLM):
                                         line_json["choices"][0]["delta"].get("content")
                                         or ""
                                     )
-                                    delta_reasoning = (
-                                        line_json["choices"][0]["delta"].get(
-                                            "reasoning_content"
-                                        )
-                                        or ""
-                                    )
+                                    delta = line_json["choices"][0]["delta"]
+                                    if "reasoning_content" in delta:
+                                        reasoning_seen = True
+                                        reasoning_content += delta["reasoning_content"] or ""
 
                                     accu_content += delta_content
-                                    reasoning_content += delta_reasoning
 
                                     # Capture finish_reason
                                     chunk_finish_reason = line_json["choices"][0].get("finish_reason")
@@ -417,7 +419,12 @@ class LLMModelFactory(LLM):
 
                                     result = {
                                         "content": accu_content,
-                                        "reasoning_content": reasoning_content,
+                                        # None  → model never emitted reasoning_content
+                                        #         (non-thinking model, field must be absent)
+                                        # ""    → thinking mode active but empty thinking
+                                        #         (must be echoed back per DeepSeek API)
+                                        # str   → non-empty thinking trace
+                                        "reasoning_content": reasoning_content if reasoning_seen else None,
                                     }
 
                                 # Add token usage information and accumulate
@@ -540,6 +547,9 @@ class LLMOpenai(LLM):
 
         accu_answer = ""
         accu_reasoning = ""
+        # True once any chunk delta has a reasoning_content attribute that is
+        # not None, meaning the model is in thinking mode.
+        reasoning_seen = False
         finish_reason = None
         result = None
         # Use ToolCallsParser to handle tool calls parsing
@@ -553,11 +563,12 @@ class LLMOpenai(LLM):
             if hasattr(delta, "content") and delta.content is not None:
                 accu_answer += delta.content
 
-            if (
-                hasattr(delta, "reasoning_content")
-                and delta.reasoning_content is not None
-            ):
-                accu_reasoning += delta.reasoning_content
+            if hasattr(delta, "reasoning_content"):
+                # reasoning_content attribute present on this chunk (even if "")
+                # means the model is in thinking mode.
+                reasoning_seen = True
+                if delta.reasoning_content is not None:
+                    accu_reasoning += delta.reasoning_content
 
             # Capture finish_reason
             chunk_finish_reason = chunk.choices[0].finish_reason
@@ -571,7 +582,10 @@ class LLMOpenai(LLM):
 
             result = {
                 "content": accu_answer,
-                "reasoning_content": accu_reasoning,
+                # None  → model never emitted reasoning_content (non-thinking)
+                # ""    → thinking mode active but empty reasoning
+                # str   → non-empty thinking trace
+                "reasoning_content": accu_reasoning if reasoning_seen else None,
             }
 
             # Add tool call information using ToolCallsParser

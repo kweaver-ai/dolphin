@@ -247,6 +247,7 @@ class LLMClient:
             line_json = {}
             accu_content = ""
             reasoning_content = ""
+            reasoning_seen = False  # True once any delta contains "reasoning_content"
 
             timeout = aiohttp.ClientTimeout(
                 total=1800,  # Disable overall timeout (use with caution)
@@ -303,19 +304,13 @@ class LLMClient:
                             ) from e
                         if line_json.get("choices"):
                             # Accumulate content
-                            delta_content = (
-                                line_json["choices"][0].get("delta", {}).get("content")
-                                or ""
-                            )
-                            delta_reasoning = (
-                                line_json["choices"][0]
-                                .get("delta", {})
-                                .get("reasoning_content")
-                                or ""
-                            )
-
+                            delta = line_json["choices"][0].get("delta", {})
+                            delta_content = delta.get("content") or ""
                             accu_content += delta_content
-                            reasoning_content += delta_reasoning
+
+                            if "reasoning_content" in delta:
+                                reasoning_seen = True
+                                reasoning_content += delta["reasoning_content"] or ""
 
                             if line_json.get("usage") or line_json["choices"][0].get(
                                 "usage"
@@ -324,7 +319,10 @@ class LLMClient:
 
                             yield {
                                 "content": accu_content,
-                                "reasoning_content": reasoning_content,
+                                # None  → non-thinking model (field must be absent)
+                                # ""    → thinking mode active, empty thinking
+                                # str   → non-empty thinking trace
+                                "reasoning_content": reasoning_content if reasoning_seen else None,
                             }
 
                     # Ensure that line_json is of dictionary type before calling the get method

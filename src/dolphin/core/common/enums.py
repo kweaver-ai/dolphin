@@ -73,7 +73,11 @@ class SingleMessage:
         self.tool_call_id = tool_call_id
         self.compress_level = compress_level
         self.metadata = metadata
-        self.reasoning_content = reasoning_content or None
+        # Keep None as-is (model didn't return reasoning_content) and
+        # keep "" as-is (model returned reasoning_content but it was empty).
+        # DeepSeek thinking mode requires the field to be echoed back even
+        # when the value is an empty string, so we must not collapse "" → None.
+        self.reasoning_content = reasoning_content
 
     def is_multimodal(self) -> bool:
         """Check if this message contains multimodal content."""
@@ -159,7 +163,12 @@ class SingleMessage:
             result["tool_calls"] = self.tool_calls
         if self.tool_call_id:
             result["tool_call_id"] = self.tool_call_id
-        if self.reasoning_content:
+        # Emit reasoning_content whenever it is not None:
+        # - None  → model never returned the field (non-thinking model), omit
+        # - ""    → model returned reasoning_content: "" (thinking mode active
+        #           but empty thinking), must echo back to satisfy DeepSeek API
+        # - str   → non-empty thinking trace, include as usual
+        if self.reasoning_content is not None:
             result["reasoning_content"] = self.reasoning_content
         return result
 

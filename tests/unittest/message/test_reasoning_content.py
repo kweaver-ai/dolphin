@@ -1,6 +1,19 @@
 """Tests for issue #63: reasoning_content must be persisted on assistant
 tool-call messages so reasoning models (DeepSeek V4, etc.) accept the next
 turn's payload.
+
+Follow-up fix: empty-string reasoning_content must also be emitted.
+DeepSeek thinking mode can return reasoning_content: "" (empty string) when
+the model decided not to think explicitly but still activated thinking mode.
+The field must be echoed back on subsequent turns even when empty, otherwise
+DeepSeek returns: "The `reasoning_content` in the thinking mode must be
+passed back to the API."
+
+Design contract:
+  - None  → LLM never emitted reasoning_content (non-thinking model), omit from dict
+  - ""    → LLM emitted reasoning_content: "" (thinking mode, empty thinking),
+            INCLUDE in dict so it can be echoed back
+  - str   → non-empty thinking trace, include as usual
 """
 
 import unittest
@@ -14,11 +27,18 @@ class TestSingleMessageReasoningContent(unittest.TestCase):
         msg = SingleMessage(role=MessageRole.ASSISTANT, content="hi")
         self.assertNotIn("reasoning_content", msg.to_dict())
 
-    def test_to_dict_omits_reasoning_when_empty_string(self):
+    def test_to_dict_includes_reasoning_when_empty_string(self):
+        """Empty string means thinking mode was active but produced no output.
+        The field MUST be included in to_dict() so it can be echoed back to
+        the API (DeepSeek requirement), even though the value is empty.
+        Previously this was omitted via `reasoning_content or None`, which was
+        incorrect for thinking-mode models.
+        """
         msg = SingleMessage(
             role=MessageRole.ASSISTANT, content="hi", reasoning_content=""
         )
-        self.assertNotIn("reasoning_content", msg.to_dict())
+        self.assertIn("reasoning_content", msg.to_dict())
+        self.assertEqual(msg.to_dict()["reasoning_content"], "")
 
     def test_to_dict_includes_reasoning_when_present(self):
         msg = SingleMessage(
@@ -101,6 +121,50 @@ def test_extend_plain_messages_preserves_reasoning_content():
     restored = messages.get_messages_as_dict()[0]
     assert restored["tool_calls"] == tool_calls
     assert restored["reasoning_content"] == "reasoning trace"
+
+
+class TestEmptyReasoningContentRoundtrip(unittest.TestCase):
+    """End-to-end guard: empty reasoning_content must survive the full
+    store-and-restore cycle so that subsequent API calls include the field.
+    """
+
+    def _tool_calls(self):
+        return [{"id": "call_1", "type": "function",
+                 "function": {"name": "builtin_skill_load", "arguments": "{}"}}]
+
+    def test_empty_reasoning_content_survives_add_and_serialize(self):
+        """add_tool_call_message with reasoning_content="" must emit the field."""
+        msgs = Messages()
+        msgs.add_tool_call_message(
+            content="", tool_calls=self._tool_calls(), reasoning_content=""
+        )
+        dumped = msgs.get_messages_as_dict()
+        self.assertIn("reasoning_content", dumped[0])
+        self.assertEqual(dumped[0]["reasoning_content"], "")
+
+    def test_empty_reasoning_content_survives_extend_plain_messages(self):
+        """extend_plain_messages with reasoning_content: '' must preserve it."""
+        plain = [{"role": "assistant", "content": "",
+                  "tool_calls": self._tool_calls(), "reasoning_content": ""}]
+        msgs = Messages()
+        msgs.extend_plain_messages(plain)
+        restored = msgs.get_messages_as_dict()[0]
+        self.assertIn("reasoning_content", restored)
+        self.assertEqual(restored["reasoning_content"], "")
+
+    def test_copy_preserves_empty_reasoning_content(self):
+        msg = SingleMessage(role=MessageRole.ASSISTANT, content="",
+                            reasoning_content="")
+        copied = msg.copy()
+        self.assertEqual(copied.reasoning_content, "")
+        self.assertIn("reasoning_content", copied.to_dict())
+        self.assertEqual(copied.to_dict()["reasoning_content"], "")
+
+    def test_none_reasoning_content_is_still_omitted(self):
+        """None (non-thinking model) must remain absent from the dict."""
+        msg = SingleMessage(role=MessageRole.ASSISTANT, content="hi")
+        self.assertIsNone(msg.reasoning_content)
+        self.assertNotIn("reasoning_content", msg.to_dict())
 
 
 class TestSanitizerPreservesReasoningContent(unittest.TestCase):
