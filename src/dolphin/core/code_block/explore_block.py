@@ -750,6 +750,18 @@ Please reconsider your approach and improve your answer based on the feedback ab
         try:
             props = {"intervention": False, "saved_stage_id": saved_stage_id}
             have_answer = False
+            tool_call_id = self._extract_tool_call_id()
+            if not tool_call_id:
+                tool_call_id = f"call_{function_name}_{self.times}"
+            unknown_skill_error = self._append_unknown_skill_tool_response(
+                function_name, tool_call_id
+            )
+            if unknown_skill_error is not None:
+                return_answer["answer"] = unknown_skill_error
+                return_answer["think"] = ""
+                return_answer["status"] = "failed"
+                yield [return_answer]
+                return
 
             async for resp in self.skill_run(
                 skill_name=function_name,
@@ -1040,6 +1052,13 @@ Please reconsider your approach and improve your answer based on the feedback ab
                 "stage_id": None,  # Will be updated by skill_run() after stage creation
             }
 
+            unknown_skill_error = self._append_unknown_skill_tool_response(
+                tool_call.name, tool_call.id
+            )
+            if unknown_skill_error is not None:
+                tool_response_added = True
+                return
+
             self.context.set_variable(intervention_tmp_key, intervention_vars)
 
             async for resp in self.skill_run(
@@ -1244,6 +1263,20 @@ Please reconsider your approach and improve your answer based on the feedback ab
         error_trace = traceback.format_exc()
         self.context.error(
             f"error in call {tool_name} tool, error type: {type(e)}, error info: {str(e)}, error trace: {error_trace}"
+        )
+
+    def _append_tool_response(
+        self,
+        tool_call_id: str,
+        content: str,
+        metadata: Optional[dict] = None,
+    ):
+        """Append a tool response message through the active explore strategy."""
+        self.strategy.append_tool_response_message(
+            self.context,
+            tool_call_id,
+            content,
+            metadata=metadata,
         )
 
     async def _should_continue_explore(self) -> bool:

@@ -111,7 +111,10 @@ class MockSkillkit:
         return list(self._skills.keys())
 
     def getSkill(self, name: str) -> Any:
-        """在本测试中不直接通过 skillkit 调用工具，返回 None"""
+        """Return a declared mock skill by name."""
+        for skill in self.getSkills():
+            if skill.get_function_name() == name:
+                return skill
         return None
 
     def getSchemas(self, skill_names=None) -> str:
