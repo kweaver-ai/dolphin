@@ -602,7 +602,11 @@ class ExploreBlockV2(BasicCodeBlock):
                     logger.debug(
                         f"explore[{self.output_var}] find skill call [{stream_item.tool_name}]"
                     )
-                    break
+                    # Do not break immediately when arguments become parseable.
+                    # Reasoning models may emit reasoning_content after the
+                    # complete tool arguments but before finish_reason=tool_calls.
+                    if stream_item.finish_reason == "tool_calls":
+                        break
         finally:
             if renderer:
                 renderer.stop()

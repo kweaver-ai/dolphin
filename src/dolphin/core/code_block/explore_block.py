@@ -883,7 +883,12 @@ Please reconsider your approach and improve your answer based on the feedback ab
                         logger.debug(
                             f"explore[{self.output_var}] find skill call [{tool_call.name}]"
                         )
-                        break
+                        # Do not break immediately when arguments become
+                        # parseable. Reasoning models may emit
+                        # reasoning_content after complete tool arguments but
+                        # before finish_reason=tool_calls.
+                        if stream_item.finish_reason == "tool_calls":
+                            break
         except Exception as e:
             # Save partial output for all streaming failures before re-raising.
             # This keeps context continuity for both user interrupts and transient

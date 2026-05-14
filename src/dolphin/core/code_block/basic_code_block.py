@@ -1823,8 +1823,20 @@ class BasicCodeBlock:
 
                 yield stream_item
 
-                # If a complete tool call is detected and early-stop is enabled, stop streaming.
-                if early_stop_on_tool_call and tool_call_detected and complete_tool_call:
+                # If a complete tool call is detected and early-stop is enabled,
+                # wait for the provider's tool-call finish chunk before stopping.
+                #
+                # Some reasoning models emit reasoning_content after the tool
+                # arguments have become parseable but before finish_reason is
+                # "tool_calls". Breaking as soon as arguments parse would skip
+                # those later chunks, causing the assistant tool-call message to
+                # miss reasoning_content on the next request.
+                if (
+                    early_stop_on_tool_call
+                    and tool_call_detected
+                    and complete_tool_call
+                    and stream_item.finish_reason == "tool_calls"
+                ):
                     break
             
             # Capture final response for trace (including usage from last chunk)
